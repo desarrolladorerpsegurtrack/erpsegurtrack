@@ -1,0 +1,491 @@
+<?php
+
+namespace App\Support;
+
+
+class ErpPermission
+{
+    private const MODULE_CHILDREN = [
+        'clientes' => [
+            'clientes.cliente',
+            'clientes.credenciales',
+            'clientes.grupo_cliente',
+        ],
+        'configuracion' => [
+            'configuracion.estado',
+            'configuracion.tipo_contacto',
+            'configuracion.ubigeo',
+            'configuracion.cargo',
+            'configuracion.auditoria',
+            'configuracion.moneda',
+            'configuracion.tributo',
+            'configuracion.unidad_medida',
+            'configuracion.marca',
+            'configuracion.tecnologia',
+            'configuracion.tipo_gasto',
+            'configuracion.tipo_cobro',
+            'configuracion.tipo_plataforma',
+            'configuracion.plataforma',
+            'configuracion.tipo_elemento',
+            'configuracion.tipo_documento',
+            'configuracion.forma_pago',
+            'configuracion.entidad_bancaria',
+            'configuracion.operador',
+            'configuracion.tipo_vehiculo',
+            'configuracion.tipo_operacion',
+            'configuracion.lista_precio',
+            'configuracion.tipo_pedido',
+            'configuracion.proveedor',
+            'configuracion.certificadosunat',
+            'configuracion.vigencia_oferta',
+            'configuracion.vista',
+            'configuracion.flujo',
+            'configuracion.flujoregla',
+            'configuracion.historialflujo',
+        ],
+        'lineas_chips' => [
+            'lineas_chips.numero_telefonico',
+            'lineas_chips.simcard',
+            'lineas_chips.detallesimcard',
+            'lineas_chips.numero_dispositivo',
+            'lineas_chips.cargar_numeros',
+            'lineas_chips.bajar_numeros',
+        ],
+    ];
+
+    private const FIXED_ROUTE_MODULES = [
+        'personal' => 'personal',
+        'roles' => 'roles',
+        'usuarios' => 'usuarios',
+        'vehiculo' => 'vehiculos',
+        'vehiculos' => 'vehiculos',
+        'dispositivo-cliente' => 'dispositivo_cliente',
+        'dispositivo_cliente' => 'dispositivo_cliente',
+        'servicio-cliente' => 'servicio_cliente',
+        'servicio_cliente' => 'servicio_cliente',
+        'serviciocliente' => 'servicio_cliente',
+        'tickets' => 'tickets',
+        'ticket' => 'tickets',
+    ];
+
+    private const CLIENTES_ROUTE_RULES = [
+        'grupos' => 'clientes.grupo_cliente',
+        'credenciales' => 'clientes.credenciales',
+        'estados' => 'configuracion.estado',
+    ];
+
+    private const LINEAS_CHIPS_ROUTE_RULES = [
+        'numeros-telefonico' => 'lineas_chips.numero_telefonico',
+        'numeros_telefonico' => 'lineas_chips.numero_telefonico',
+        'numero-telefonico' => 'lineas_chips.numero_telefonico',
+        'numero_telefonico' => 'lineas_chips.numero_telefonico',
+        'simcard' => 'lineas_chips.simcard',
+        'sim-card' => 'lineas_chips.simcard',
+        'detallesimcard' => 'lineas_chips.detallesimcard',
+        'detalle-simcard' => 'lineas_chips.detallesimcard',
+        'detalles-simcard' => 'lineas_chips.detallesimcard',
+        'numeros-dispositivo' => 'lineas_chips.numero_dispositivo',
+        'numeros_dispositivo' => 'lineas_chips.numero_dispositivo',
+        'numero-dispositivo' => 'lineas_chips.numero_dispositivo',
+        'numero_dispositivo' => 'lineas_chips.numero_dispositivo',
+        '' => 'lineas_chips',
+        'index' => 'lineas_chips',
+    ];
+
+    private const CONFIGURACION_ROUTE_RULES = [
+        'estados' => 'configuracion.estado',
+        'tipos-contacto' => 'configuracion.tipo_contacto',
+        'tipos_contacto' => 'configuracion.tipo_contacto',
+        'tipo-contacto' => 'configuracion.tipo_contacto',
+        'tipo_contacto' => 'configuracion.tipo_contacto',
+        'ubigeos' => 'configuracion.ubigeo',
+        'ubigeo' => 'configuracion.ubigeo',
+        'cargos' => 'configuracion.cargo',
+        'cargo' => 'configuracion.cargo',
+        'auditoria' => 'configuracion.auditoria',
+        'monedas' => 'configuracion.moneda',
+        'moneda' => 'configuracion.moneda',
+        'tributos' => 'configuracion.tributo',
+        'tributo' => 'configuracion.tributo',
+        'unidad-medida' => 'configuracion.unidad_medida',
+        'unidad_medida' => 'configuracion.unidad_medida',
+        'unidadmedida' => 'configuracion.unidad_medida',
+        'marcas' => 'configuracion.marca',
+        'marca' => 'configuracion.marca',
+        'tecnologias' => 'configuracion.tecnologia',
+        'tecnologia' => 'configuracion.tecnologia',
+        'tipos-gasto' => 'configuracion.tipo_gasto',
+        'tipos_gasto' => 'configuracion.tipo_gasto',
+        'tipo-gasto' => 'configuracion.tipo_gasto',
+        'tipo_gasto' => 'configuracion.tipo_gasto',
+        'tipos-cobro' => 'configuracion.tipo_cobro',
+        'tipos_cobro' => 'configuracion.tipo_cobro',
+        'tipo-cobro' => 'configuracion.tipo_cobro',
+        'tipo_cobro' => 'configuracion.tipo_cobro',
+        'tipos-plataforma' => 'configuracion.tipo_plataforma',
+        'tipos_plataforma' => 'configuracion.tipo_plataforma',
+        'tipo-plataforma' => 'configuracion.tipo_plataforma',
+        'tipo_plataforma' => 'configuracion.tipo_plataforma',
+        'plataforma' => 'configuracion.plataforma',
+        'plataformas' => 'configuracion.plataforma',
+        'tipo-elemento' => 'configuracion.tipo_elemento',
+        'tipo_elemento' => 'configuracion.tipo_elemento',
+        'tipoelemento' => 'configuracion.tipo_elemento',
+        'tipos-elemento' => 'configuracion.tipo_elemento',
+        'tipos_elemento' => 'configuracion.tipo_elemento',
+        'tipos-documento' => 'configuracion.tipo_documento',
+        'tipos_documento' => 'configuracion.tipo_documento',
+        'tipo-documento' => 'configuracion.tipo_documento',
+        'tipo_documento' => 'configuracion.tipo_documento',
+        'formas-pago' => 'configuracion.forma_pago',
+        'formas_pago' => 'configuracion.forma_pago',
+        'forma-pago' => 'configuracion.forma_pago',
+        'forma_pago' => 'configuracion.forma_pago',
+        'entidades-bancarias' => 'configuracion.entidad_bancaria',
+        'entidades_bancarias' => 'configuracion.entidad_bancaria',
+        'entidad-bancaria' => 'configuracion.entidad_bancaria',
+        'entidad_bancaria' => 'configuracion.entidad_bancaria',
+        'operadores' => 'configuracion.operador',
+        'operador' => 'configuracion.operador',
+        'tipos-vehiculo' => 'configuracion.tipo_vehiculo',
+        'tipos_vehiculo' => 'configuracion.tipo_vehiculo',
+        'tipo-vehiculo' => 'configuracion.tipo_vehiculo',
+        'tipo_vehiculo' => 'configuracion.tipo_vehiculo',
+        'tipos-operacion' => 'configuracion.tipo_operacion',
+        'tipos_operacion' => 'configuracion.tipo_operacion',
+        'tipo-operacion' => 'configuracion.tipo_operacion',
+        'tipo_operacion' => 'configuracion.tipo_operacion',
+        'listas-precio' => 'configuracion.lista_precio',
+        'listas_precio' => 'configuracion.lista_precio',
+        'lista-precio' => 'configuracion.lista_precio',
+        'lista_precio' => 'configuracion.lista_precio',
+        'tipos-pedido' => 'configuracion.tipo_pedido',
+        'tipos_pedido' => 'configuracion.tipo_pedido',
+        'tipo-pedido' => 'configuracion.tipo_pedido',
+        'tipo_pedido' => 'configuracion.tipo_pedido',
+        'proveedores' => 'configuracion.proveedor',
+        'proveedor' => 'configuracion.proveedor',
+        'certificados-sunat' => 'configuracion.certificadosunat',
+        'certificados_sunat' => 'configuracion.certificadosunat',
+        'certificadosunat' => 'configuracion.certificadosunat',
+        'vigencias-oferta' => 'configuracion.vigencia_oferta',
+        'vigencias_oferta' => 'configuracion.vigencia_oferta',
+        'vigencia-oferta' => 'configuracion.vigencia_oferta',
+        'vigencia_oferta' => 'configuracion.vigencia_oferta',
+        'vistas' => 'configuracion.vista',
+        'vista' => 'configuracion.vista',
+        'flujos' => 'configuracion.flujo',
+        'flujo' => 'configuracion.flujo',
+        'flujo-reglas' => 'configuracion.flujoregla',
+        'flujo_reglas' => 'configuracion.flujoregla',
+        'flujoregla' => 'configuracion.flujoregla',
+        'flujoreglas' => 'configuracion.flujoregla',
+        'historial-flujos' => 'configuracion.historialflujo',
+        'historial_flujos' => 'configuracion.historialflujo',
+        'historialflujo' => 'configuracion.historialflujo',
+        'historial-flujo' => 'configuracion.historialflujo',
+        'historial_flujo' => 'configuracion.historialflujo',
+    ];
+
+    private const COMPOUND_PERMISSION_RULES = [
+        ['prefix' => 'clientes.', 'containsAny' => ['grupo'], 'permission' => 'clientes.grupo_cliente'],
+        ['prefix' => 'clientes.', 'containsAny' => ['credencial'], 'permission' => 'clientes.credenciales'],
+        ['prefix' => 'clientes.', 'containsAny' => ['estado'], 'permission' => 'configuracion.estado'],
+        ['prefix' => 'clientes.', 'permission' => 'clientes.cliente'],
+        ['prefix' => 'vehiculo', 'permission' => 'vehiculos'],
+        ['prefix' => 'vehiculos', 'permission' => 'vehiculos'],
+        ['prefix' => 'servicio-cliente', 'permission' => 'servicio_cliente'],
+        ['prefix' => 'servicio_cliente', 'permission' => 'servicio_cliente'],
+        ['prefix' => 'serviciocliente', 'permission' => 'servicio_cliente'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['tipo_gasto', 'tipogasto', 'gasto'], 'permission' => 'configuracion.tipo_gasto'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['tipo_cobro', 'tipocobro', 'cobro'], 'permission' => 'configuracion.tipo_cobro'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['tipo_pedido', 'tipopedido', 'pedido'], 'permission' => 'configuracion.tipo_pedido'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['tipo_operacion', 'tipooperacion', 'operacion'], 'permission' => 'configuracion.tipo_operacion'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['tipo_vehiculo', 'tipovehiculo', 'vehiculo'], 'permission' => 'configuracion.tipo_vehiculo'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['tipo_plataforma', 'tipoplataforma', 'tipo-plataforma', 'tipo plataforma'], 'permission' => 'configuracion.tipo_plataforma'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['tipo_documento', 'tipodocumento', 'documento'], 'permission' => 'configuracion.tipo_documento'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['tipo_elemento', 'tipoelemento', 'tipo-elemento', 'tipos-elemento', 'tipo elemento'], 'permission' => 'configuracion.tipo_elemento'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['tipo_contacto', 'tipocontacto', 'tipo-contacto', 'tipos-contacto', 'contacto'], 'permission' => 'configuracion.tipo_contacto'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['ubigeo'], 'permission' => 'configuracion.ubigeo'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['cargo'], 'permission' => 'configuracion.cargo'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['marca'], 'permission' => 'configuracion.marca'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['tecnologia'], 'permission' => 'configuracion.tecnologia'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['plataforma'], 'containsNone' => ['tipo'], 'permission' => 'configuracion.plataforma'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['flujoregla', 'flujo-regla', 'flujo_regla', 'flujo regla'], 'permission' => 'configuracion.flujoregla'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['historialflujo', 'historial-flujo', 'historial_flujo', 'historial flujo'], 'permission' => 'configuracion.historialflujo'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['vista'], 'permission' => 'configuracion.vista'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['flujo'], 'containsNone' => ['flujoregla', 'historial'], 'permission' => 'configuracion.flujo'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['forma_pago', 'formapago', 'pago'], 'permission' => 'configuracion.forma_pago'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['entidad_bancaria', 'entidadbancaria', 'bancaria'], 'permission' => 'configuracion.entidad_bancaria'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['operador'], 'permission' => 'configuracion.operador'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['numero_dispositivo', 'numerosdispositivo', 'numerodispositivo', 'numero-dispositivo', 'numeros-dispositivo'], 'permission' => 'lineas_chips.numero_dispositivo'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['numero_telefonico', 'numerotelefonico', 'telefono', 'telefonico'], 'permission' => 'lineas_chips.numero_telefonico'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['lista_precio', 'listaprecio'], 'permission' => 'configuracion.lista_precio'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['proveedor'], 'permission' => 'configuracion.proveedor'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['certificado', 'sunat'], 'permission' => 'configuracion.certificadosunat'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['vigencia_oferta', 'vigenciaoferta', 'vigencia'], 'permission' => 'configuracion.vigencia_oferta'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['audit'], 'permission' => 'configuracion.auditoria'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['moneda'], 'permission' => 'configuracion.moneda'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['tributo'], 'permission' => 'configuracion.tributo'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['unidad'], 'permission' => 'configuracion.unidad_medida'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['estado'], 'permission' => 'configuracion.estado'],
+    ];
+
+    public static function allPermissionKeys(): array
+    {
+        $permissionKeys = ['personal', 'roles', 'usuarios', 'vehiculos', 'dispositivo_cliente', 'servicio_cliente', 'tickets'];
+
+        foreach (self::MODULE_CHILDREN as $children) {
+            $permissionKeys = array_merge($permissionKeys, $children);
+        }
+
+        return array_values(array_unique($permissionKeys));
+    }
+
+    public static function permissionKeyToModule(?string $permissionKey): ?string
+    {
+        $normalized = self::normalizePermissionKey($permissionKey);
+        if ($normalized === null) {
+            return null;
+        }
+
+        if (!str_contains($normalized, '.')) {
+            return $normalized;
+        }
+
+        [$module] = explode('.', $normalized, 2);
+        return $module !== '' ? $module : null;
+    }
+
+    public static function expandPermissionKeys(?string $module): array
+    {
+        $normalized = self::normalizePermissionKey($module);
+        if ($normalized === null) {
+            return [];
+        }
+
+        if ($normalized === 'vehiculos') {
+            return ['vehiculos'];
+        }
+
+        if (isset(self::MODULE_CHILDREN[$normalized])) {
+            return self::MODULE_CHILDREN[$normalized];
+        }
+
+        return [$normalized];
+    }
+
+    public static function resolvePermissionKeyFromRouteName(?string $routeName): ?string
+    {
+        if ($routeName === null || $routeName === '') {
+            return null;
+        }
+
+        if (!str_starts_with($routeName, 'modules.')) {
+            return null;
+        }
+
+        $segments = explode('.', mb_strtolower($routeName));
+        $module = $segments[1] ?? null;
+        $resource = $segments[2] ?? '';
+
+        if (isset(self::FIXED_ROUTE_MODULES[$module])) {
+            return self::FIXED_ROUTE_MODULES[$module];
+        }
+
+        if ($module === 'clientes') {
+            return self::CLIENTES_ROUTE_RULES[$resource] ?? 'clientes.cliente';
+        }
+
+        if ($module === 'configuracion') {
+            return self::CONFIGURACION_ROUTE_RULES[$resource] ?? 'configuracion';
+        }
+
+        if ($module === 'lineas-chips' || $module === 'lineas_chips') {
+            return self::LINEAS_CHIPS_ROUTE_RULES[$resource] ?? 'lineas_chips';
+        }
+
+        return self::FIXED_ROUTE_MODULES[$module] ?? null;
+    }
+
+    public static function normalizePermissionKey(?string $module): ?string
+    {
+        if ($module === null) {
+            return null;
+        }
+
+        $normalized = mb_strtolower(trim($module));
+        if ($normalized === '') {
+            return null;
+        }
+
+        return match ($normalized) {
+            'personal' => 'personal',
+            'rol', 'roles' => 'roles',
+            'usuario', 'usuarios' => 'usuarios',
+            'vehiculo', 'vehiculos' => 'vehiculos',
+            'servicio-cliente', 'servicio_cliente', 'serviciocliente' => 'servicio_cliente',
+            'clientes.cliente', 'clientes.clientes', 'clientes.direccion', 'clientes.direcciones', 'clientes.contacto', 'clientes.contactos' => 'clientes.cliente',
+            'clientes.credenciales', 'clientes.credencial' => 'clientes.credenciales',
+            'clientes.grupo_cliente', 'clientes.grupo-cliente', 'clientes.grupo', 'clientes.grupos' => 'clientes.grupo_cliente',
+            'vehiculos.dispositivo_cliente', 'vehiculos.dispositivo-cliente', 'vehiculos.dispositivo cliente' => 'dispositivo_cliente',
+            'dispositivo_cliente', 'dispositivo-cliente', 'dispositivo cliente' => 'dispositivo_cliente',
+            'ticket', 'tickets' => 'tickets',
+            'configuracion.estado', 'configuracion.estados', 'configuracion.estado_cliente', 'configuracion.estado-cliente' => 'configuracion.estado',
+            'configuracion.tipo_contacto', 'configuracion.tipos_contacto', 'configuracion.tipo-contacto', 'configuracion.tipos-contacto' => 'configuracion.tipo_contacto',
+            'configuracion.ubigeo', 'configuracion.ubigeos' => 'configuracion.ubigeo',
+            'configuracion.cargo', 'configuracion.cargos' => 'configuracion.cargo',
+            'configuracion.auditoria', 'configuracion.audit', 'configuracion.audits' => 'configuracion.auditoria',
+            'configuracion.moneda', 'configuracion.monedas' => 'configuracion.moneda',
+            'configuracion.tributo', 'configuracion.tributos' => 'configuracion.tributo',
+            'configuracion.unidad_medida', 'configuracion.unidad-medida', 'configuracion.unidadmedida' => 'configuracion.unidad_medida',
+            'configuracion.marca', 'configuracion.marcas' => 'configuracion.marca',
+            'configuracion.tecnologia', 'configuracion.tecnologias' => 'configuracion.tecnologia',
+            'configuracion.tipo_gasto', 'configuracion.tipos_gasto', 'configuracion.tipo-gasto', 'configuracion.tipos-gasto' => 'configuracion.tipo_gasto',
+            'configuracion.tipo_cobro', 'configuracion.tipos_cobro', 'configuracion.tipo-cobro', 'configuracion.tipos-cobro' => 'configuracion.tipo_cobro',
+            'configuracion.operador', 'configuracion.operadores' => 'configuracion.operador',
+            'configuracion.tipo_vehiculo', 'configuracion.tipos_vehiculo', 'configuracion.tipo-vehiculo', 'configuracion.tipos-vehiculo' => 'configuracion.tipo_vehiculo',
+            'configuracion.tipo_operacion', 'configuracion.tipos_operacion', 'configuracion.tipo-operacion', 'configuracion.tipos-operacion' => 'configuracion.tipo_operacion',
+            'configuracion.vista', 'configuracion.vistas', 'vista', 'vistas' => 'configuracion.vista',
+            'configuracion.flujo', 'configuracion.flujos', 'flujo', 'flujos' => 'configuracion.flujo',
+            'configuracion.flujoregla', 'configuracion.flujoreglas', 'configuracion.flujo-regla', 'configuracion.flujo_regla', 'flujoregla', 'flujoreglas' => 'configuracion.flujoregla',
+            'configuracion.historialflujo', 'configuracion.historialflujos', 'configuracion.historial-flujo', 'configuracion.historial_flujo', 'historialflujo', 'historialflujos' => 'configuracion.historialflujo',
+            'lineas_chips', 'lineas-chips', 'lineas chips' => 'lineas_chips',
+            'lineas_chips.numero_telefonico', 'lineas_chips.numeros_telefonico', 'lineas_chips.numero-telefonico', 'lineas_chips.numeros-telefonico' => 'lineas_chips.numero_telefonico',
+            'lineas_chips.simcard', 'lineas-chips.simcard', 'simcard' => 'lineas_chips.simcard',
+            'lineas_chips.detallesimcard', 'lineas-chips.detallesimcard', 'detallesimcard', 'detalle-simcard' => 'lineas_chips.detallesimcard',
+            'lineas_chips.numero_dispositivo', 'lineas-chips.numero-dispositivo', 'lineas_chips.numeros_dispositivo', 'lineas-chips.numeros-dispositivo', 'numeros_dispositivo', 'numeros-dispositivo', 'numero_dispositivo', 'numero-dispositivo' => 'lineas_chips.numero_dispositivo',
+            'lineas_chips.cargar_numeros', 'lineas-chips.cargar-numeros', 'cargar_numeros', 'cargar-numeros', 'cargar numeros' => 'lineas_chips.cargar_numeros',
+            'lineas_chips.bajar_numeros', 'lineas-chips.bajar-numeros', 'bajar_numeros', 'bajar-numeros', 'bajar numeros' => 'lineas_chips.bajar_numeros',
+            'cliente', 'clientes', 'direccioncliente', 'direccion cliente' => 'clientes',
+            'configuracion', 'configuración', 'settings', 'setting' => 'configuracion',
+            'estadocliente', 'estado cliente' => 'configuracion.estado',
+            default => self::normalizeCompoundPermissionKey($normalized),
+        };
+    }
+
+    private static function normalizeCompoundPermissionKey(string $normalized): ?string
+    {
+        return self::resolvePermissionByRules($normalized, self::COMPOUND_PERMISSION_RULES, null);
+    }
+
+    private static function resolvePermissionByRules(string $value, array $rules, ?string $default): ?string
+    {
+        foreach ($rules as $rule) {
+            $prefix = $rule['prefix'] ?? null;
+            if ($prefix !== null && !str_starts_with($value, $prefix)) {
+                continue;
+            }
+
+            $containsAny = $rule['containsAny'] ?? [];
+            if ($containsAny !== []) {
+                $matched = false;
+                foreach ($containsAny as $needle) {
+                    if (str_contains($value, $needle)) {
+                        $matched = true;
+                        break;
+                    }
+                }
+
+                if (!$matched) {
+                    continue;
+                }
+            }
+
+            $containsNone = $rule['containsNone'] ?? [];
+            $blocked = false;
+            foreach ($containsNone as $needle) {
+                if (str_contains($value, $needle)) {
+                    $blocked = true;
+                    break;
+                }
+            }
+
+            if ($blocked) {
+                continue;
+            }
+
+            return $rule['permission'] ?? $default;
+        }
+
+        return $default;
+    }
+
+    public static function normalizeModule(?string $module): ?string
+    {
+        return self::permissionKeyToModule($module);
+    }
+
+    public static function normalizeAction(?string $action): ?string
+    {
+        if ($action === null) {
+            return null;
+        }
+
+        $normalized = mb_strtolower(trim($action));
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        return match ($normalized) {
+            'ver', 'read', 'view', 'index', 'listar', 'list' => 'ver',
+            'crear', 'create', 'store', 'new' => 'crear',
+            'editar', 'edit', 'update', 'actualizar' => 'editar',
+            'eliminar', 'delete', 'destroy', 'remove' => 'eliminar',
+            default => null,
+        };
+    }
+
+    public static function normalizeRouteModule(?string $routeName): ?string
+    {
+        $permissionKey = self::resolvePermissionKeyFromRouteName($routeName);
+        return self::permissionKeyToModule($permissionKey);
+    }
+
+    public static function inferActionFromRouteName(string $routeName, string $method): ?string
+    {
+        if (!str_starts_with($routeName, 'modules.')) {
+            return null;
+        }
+
+        $routeNameLower = mb_strtolower($routeName);
+        if (str_contains($routeNameLower, 'modules.lineas-chips.detallesimcard.import.')
+            || str_contains($routeNameLower, 'modules.lineas-chips.detallesimcard.preview.export')
+            || str_contains($routeNameLower, 'modules.lineas-chips.detallesimcard.bulk-deactivate')
+        ) {
+            return 'ver';
+        }
+
+        $segments = explode('.', $routeName);
+        $last = mb_strtolower((string) end($segments));
+        
+        if (in_array($last, ['store', 'crear-rapido'], true)) {
+            return 'crear';
+        }
+
+        if (in_array($last, ['create'], true)) {
+            return 'crear';
+        }
+
+        if (in_array($last, ['edit', 'update', 'actualizar-rapido', 'lock', 'unlock'], true)) {
+            return 'editar';
+        }
+
+        if (in_array($last, ['destroy', 'eliminar-rapido'], true)) {
+            return 'eliminar';
+        }
+
+        if (in_array($last, ['index', 'export', 'opciones', 'lock-status'], true)) {
+            return 'ver';
+        }
+
+        return match (mb_strtoupper($method)) {
+            'POST' => 'crear',
+            'PUT', 'PATCH' => 'editar',
+            'DELETE' => 'eliminar',
+            default => 'ver',
+        };
+    }
+}
+

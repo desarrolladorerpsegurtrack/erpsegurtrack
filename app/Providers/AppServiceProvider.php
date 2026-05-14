@@ -19,6 +19,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // Local WebSocket server is started separately via npm run ws-server.
     }
 }

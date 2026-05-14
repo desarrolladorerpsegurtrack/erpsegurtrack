@@ -1,0 +1,13 @@
+import '../tailwise/js/vendors/dom.js';
+import '../tailwise/js/vendors/tailwind-merge.js';
+import '../tailwise/js/vendors/lucide.js';
+import '../tailwise/js/vendors/alert.js';
+import '../tailwise/js/vendors/tippy.js';
+import '../tailwise/js/vendors/modal.js';
+import '../tailwise/js/vendors/xlsx.js';
+import '../tailwise/js/components/base/theme-color.js';
+import '../tailwise/js/components/base/lucide.js';
+import '../tailwise/js/components/base/tippy.js';
+import './bootstrap.js';
+import './realtime.js';
+import './login.js';

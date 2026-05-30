@@ -16,6 +16,9 @@ class RolePermissionMatrix
                 'clientes.cliente' => 'Cliente',
                 'clientes.credenciales' => 'Credenciales',
                 'clientes.grupo_cliente' => 'Grupo cliente',
+                'servicio_cliente' => 'Servicio cliente',
+                'vehiculos' => 'Vehículos',
+                'dispositivo_cliente' => 'Dispositivo cliente',
             ],
         ],
         
@@ -30,48 +33,68 @@ class RolePermissionMatrix
                 'lineas_chips.bajar_numeros' => 'Dar de Baja números',
             ],
         ],
-        'vehiculos' => [
-            'label' => 'Vehículos',
+        'almacen' => [
+            'label' => 'Almacen',
             'submodules' => [
-                'vehiculos' => 'Vehículos',
+                'almacen.almacen' => 'Almacén',
+                'almacen.planes_servicios' => 'Planes y servicios',
+                'almacen.nota_ingreso' => 'Nota de ingreso',
+                'almacen.nota_salida' => 'Nota de salida',
             ],
         ],
-        'dispositivo_cliente' => 'Dispositivo cliente',
-        'servicio_cliente' => 'Servicio cliente',
-        'tickets' => 'Tickets',
+        'tickets' => 'Gestiones',
         'configuracion' => [
             'label' => 'Configuracion',
             'submodules' => [
+                // Cliente módulo de configuración
                 'configuracion.estado' => 'Estado cliente',
                 'configuracion.tipo_contacto' => 'Tipo de contacto',
                 'configuracion.ubigeo' => 'Ubigeo',
+                // Finanzas módulo de configuración
                 'configuracion.entidad_bancaria' => 'Entidad bancaria',
                 'configuracion.proveedor' => 'Proveedor',
                 'configuracion.tipo_cobro' => 'Tipo de cobro',
                 'configuracion.tipo_gasto' => 'Tipo de gasto',
+                // Facturación módulo de configuración
                 'configuracion.certificadosunat' => 'Certificados SUNAT',
                 'configuracion.forma_pago' => 'Forma de pago',
                 'configuracion.moneda' => 'Moneda',
                 'configuracion.tributo' => 'Tributo',
                 'configuracion.tipo_documento' => 'Tipo de documento',
                 'configuracion.vigencia_oferta' => 'Vigencia de oferta',
+                // Personal módulo de configuración
                 'configuracion.cargo' => 'Cargo Personal',
+                // Plataforma módulo de configuración
                 'configuracion.plataforma' => 'Plataforma',
-                'configuracion.tipo_elemento' => 'Tipo de elemento',
                 'configuracion.tipo_plataforma' => 'Tipo de plataforma',
-                'configuracion.tipo_operacion' => 'Tipo de operación',
-                'configuracion.marca' => 'Marca',
-                'configuracion.unidad_medida' => 'Unidad de medida',
-                'configuracion.tipo_pedido' => 'Tipo de pedido',
-                'configuracion.tecnologia' => 'Tecnologia',
+                // Almacén módulo de configuración
+                'configuracion.detalle_lista_precio' => 'Detalle de lista de precio',
+                'configuracion.empresapropietaria' => 'Empresa propietaria',
+                'configuracion.elemento_almacen' => 'Elemento de almacén',
                 'configuracion.lista_precio' => 'Lista de precio',
+                'configuracion.marca' => 'Marca',
+                'configuracion.modelo' => 'Modelo',
+                'configuracion.tecnologia' => 'Tecnologia',
+                'configuracion.tipo_elemento' => 'Tipo de elemento',
+                'configuracion.tipo_pedido' => 'Tipo de pedido',
+                'configuracion.unidad_medida' => 'Unidad de medida',
+                // Gestión módulo de configuración
+                'configuracion.tipo_operacion' => 'Tipo de operación',
+                // Vehículos módulo de configuración
                 'configuracion.operador' => 'Operador',
                 'configuracion.tipo_vehiculo' => 'Tipo de vehículo',
+                // Auditoria módulo de configuración
                 'configuracion.auditoria' => 'Auditoria',
-                'configuracion.vista' => 'Vista',
-                'configuracion.flujo' => 'Flujo',
-                'configuracion.flujoregla' => 'Flujo Regla',
-                'configuracion.historialflujo' => 'Historial Flujo',
+                
+            ],
+        ],
+        'sistema' => [
+            'label' => 'Sistema',
+            'submodules' => [
+                'sistema.vista' => 'Vista',
+                'sistema.flujo' => 'Flujo',
+                'sistema.flujoregla' => 'Flujo Regla',
+                'sistema.historialflujo' => 'Historial Flujo',
             ],
         ],
         
@@ -79,6 +102,7 @@ class RolePermissionMatrix
 
     private const PERMISSION_ACTIONS = [
         'ver' => 'Ver',
+        'ver_flujo' => 'Ver flujo',
         'crear' => 'Crear',
         'editar' => 'Editar',
         'eliminar' => 'Eliminar',
@@ -89,9 +113,15 @@ class RolePermissionMatrix
         'lineas_chips.numero_dispositivo',
     ];
 
+    private const MODULES_WITHOUT_EDIT_DELETE = [
+        'tickets',
+    ];
+
     private const MODULES_VER_ONLY = [
         'lineas_chips.cargar_numeros',
         'lineas_chips.bajar_numeros',
+        'configuracion.auditoria',
+        'sistema.historialflujo',
     ];
 
     public static function modules(): array
@@ -132,6 +162,10 @@ class RolePermissionMatrix
                     continue;
                 }
 
+                if (in_array($moduleKey, self::MODULES_WITHOUT_EDIT_DELETE, true) && in_array($actionKey, ['editar', 'eliminar'], true)) {
+                    continue;
+                }
+
                 if (in_array($moduleKey, self::MODULES_WITHOUT_EDIT, true) && $actionKey === 'editar') {
                     continue;
                 }
@@ -160,6 +194,10 @@ class RolePermissionMatrix
             }
 
             if (in_array($module, self::MODULES_VER_ONLY, true) && $action !== 'ver') {
+                continue;
+            }
+
+            if (in_array($module, self::MODULES_WITHOUT_EDIT_DELETE, true) && in_array($action, ['editar', 'eliminar'], true)) {
                 continue;
             }
 
@@ -200,6 +238,10 @@ class RolePermissionMatrix
                     continue;
                 }
 
+                if (in_array($moduleKey, self::MODULES_WITHOUT_EDIT_DELETE, true) && in_array($actionKey, ['editar', 'eliminar'], true)) {
+                    continue;
+                }
+
                 if (in_array($moduleKey, self::MODULES_WITHOUT_EDIT, true) && $actionKey === 'editar') {
                     continue;
                 }
@@ -224,11 +266,12 @@ class RolePermissionMatrix
         foreach ($permissionPairs as $permission) {
             $module = $permission['modulo'];
             $action = $permission['accion'];
+            $actionLabel = self::PERMISSION_ACTIONS[$action] ?? ucfirst(str_replace(['_', '-'], ' ', $action));
             $rows[] = [
                 'rol_idrol' => $roleId,
                 'modulo' => $module,
                 'accion' => $action,
-                'nombre' => ucfirst($action) . ' ' . ($moduleLabels[$module] ?? $module),
+                'nombre' => $actionLabel . ' ' . ($moduleLabels[$module] ?? $module),
             ];
         }
 

@@ -133,41 +133,7 @@ Route::middleware('erp.module:configuracion')->group(function () {
     Route::delete('/modulos/configuracion/tipos-operacion/bulk-destroy', [BulkDestroyController::class, 'destroy'])->name('modules.configuracion.tipos-operacion.bulk-destroy');
     Route::delete('/modulos/configuracion/tipos-operacion/{id}', [ConfiguracionController::class, 'tiposOperacionDestroy'])->name('modules.configuracion.tipos-operacion.destroy');
 
-    Route::get('/modulos/configuracion/vistas', [ConfiguracionController::class, 'vistasIndex'])->name('modules.configuracion.vistas.index');
-    Route::get('/modulos/configuracion/vistas/export/{format}', [ConfiguracionController::class, 'vistasExport'])->name('modules.configuracion.vistas.export')->where('format', 'pdf|xlsx');
-    Route::get('/modulos/configuracion/vistas/crear', [ConfiguracionController::class, 'vistasCreate'])->name('modules.configuracion.vistas.create');
-    Route::post('/modulos/configuracion/vistas', [ConfiguracionController::class, 'vistasStore'])->name('modules.configuracion.vistas.store');
-    Route::get('/modulos/configuracion/vistas/{id}/editar', [ConfiguracionController::class, 'vistasEdit'])->name('modules.configuracion.vistas.edit');
-    Route::put('/modulos/configuracion/vistas/{id}', [ConfiguracionController::class, 'vistasUpdate'])->name('modules.configuracion.vistas.update');
-    Route::delete('/modulos/configuracion/vistas/bulk-destroy', [ConfiguracionController::class, 'vistasBulkDestroy'])->name('modules.configuracion.vistas.bulk-destroy');
-    Route::delete('/modulos/configuracion/vistas/{id}', [ConfiguracionController::class, 'vistasDestroy'])->name('modules.configuracion.vistas.destroy');
 
-    Route::get('/modulos/configuracion/flujos', [ConfiguracionController::class, 'flujosIndex'])->name('modules.configuracion.flujos.index');
-    Route::get('/modulos/configuracion/flujos/export/{format}', [ConfiguracionController::class, 'flujosExport'])->name('modules.configuracion.flujos.export')->where('format', 'pdf|xlsx');
-    Route::get('/modulos/configuracion/flujos/crear', [ConfiguracionController::class, 'flujosCreate'])->name('modules.configuracion.flujos.create');
-    Route::post('/modulos/configuracion/flujos', [ConfiguracionController::class, 'flujosStore'])->name('modules.configuracion.flujos.store');
-    Route::get('/modulos/configuracion/flujos/{id}/editar', [ConfiguracionController::class, 'flujosEdit'])->name('modules.configuracion.flujos.edit');
-    Route::put('/modulos/configuracion/flujos/{id}', [ConfiguracionController::class, 'flujosUpdate'])->name('modules.configuracion.flujos.update');
-    Route::delete('/modulos/configuracion/flujos/bulk-destroy', [ConfiguracionController::class, 'flujosBulkDestroy'])->name('modules.configuracion.flujos.bulk-destroy');
-    Route::delete('/modulos/configuracion/flujos/{id}', [ConfiguracionController::class, 'flujosDestroy'])->name('modules.configuracion.flujos.destroy');
-
-    Route::get('/modulos/configuracion/flujo-reglas', [ConfiguracionController::class, 'flujoReglasIndex'])->name('modules.configuracion.flujo-reglas.index');
-    Route::get('/modulos/configuracion/flujo-reglas/export/{format}', [ConfiguracionController::class, 'flujoReglasExport'])->name('modules.configuracion.flujo-reglas.export')->where('format', 'pdf|xlsx');
-    Route::get('/modulos/configuracion/flujo-reglas/crear', [ConfiguracionController::class, 'flujoReglasCreate'])->name('modules.configuracion.flujo-reglas.create');
-    Route::post('/modulos/configuracion/flujo-reglas', [ConfiguracionController::class, 'flujoReglasStore'])->name('modules.configuracion.flujo-reglas.store');
-    Route::get('/modulos/configuracion/flujo-reglas/{id}/editar', [ConfiguracionController::class, 'flujoReglasEdit'])->name('modules.configuracion.flujo-reglas.edit');
-    Route::put('/modulos/configuracion/flujo-reglas/{id}', [ConfiguracionController::class, 'flujoReglasUpdate'])->name('modules.configuracion.flujo-reglas.update');
-    Route::delete('/modulos/configuracion/flujo-reglas/bulk-destroy', [ConfiguracionController::class, 'flujoReglasBulkDestroy'])->name('modules.configuracion.flujo-reglas.bulk-destroy');
-    Route::delete('/modulos/configuracion/flujo-reglas/{id}', [ConfiguracionController::class, 'flujoReglasDestroy'])->name('modules.configuracion.flujo-reglas.destroy');
-
-    Route::get('/modulos/configuracion/historial-flujos', [ConfiguracionController::class, 'historialFlujosIndex'])->name('modules.configuracion.historial-flujos.index');
-    Route::get('/modulos/configuracion/historial-flujos/export/{format}', [ConfiguracionController::class, 'historialFlujosExport'])->name('modules.configuracion.historial-flujos.export')->where('format', 'pdf|xlsx');
-    Route::get('/modulos/configuracion/historial-flujos/crear', [ConfiguracionController::class, 'historialFlujosCreate'])->name('modules.configuracion.historial-flujos.create');
-    Route::post('/modulos/configuracion/historial-flujos', [ConfiguracionController::class, 'historialFlujosStore'])->name('modules.configuracion.historial-flujos.store');
-    Route::get('/modulos/configuracion/historial-flujos/{id}/editar', [ConfiguracionController::class, 'historialFlujosEdit'])->name('modules.configuracion.historial-flujos.edit');
-    Route::put('/modulos/configuracion/historial-flujos/{id}', [ConfiguracionController::class, 'historialFlujosUpdate'])->name('modules.configuracion.historial-flujos.update');
-    Route::delete('/modulos/configuracion/historial-flujos/bulk-destroy', [ConfiguracionController::class, 'historialFlujosBulkDestroy'])->name('modules.configuracion.historial-flujos.bulk-destroy');
-    Route::delete('/modulos/configuracion/historial-flujos/{id}', [ConfiguracionController::class, 'historialFlujosDestroy'])->name('modules.configuracion.historial-flujos.destroy');
 
     Route::get('/modulos/configuracion/listas-precio', [ConfiguracionController::class, 'listaprecioIndex'])->name('modules.configuracion.listas-precio.index');
     Route::get('/modulos/configuracion/listas-precio/export/{format}', [ConfiguracionController::class, 'listaprecioExport'])->name('modules.configuracion.listas-precio.export')->where('format', 'pdf|xlsx');
@@ -177,6 +143,24 @@ Route::middleware('erp.module:configuracion')->group(function () {
     Route::put('/modulos/configuracion/listas-precio/{id}', [ConfiguracionController::class, 'listaprecioUpdate'])->name('modules.configuracion.listas-precio.update');
     Route::delete('/modulos/configuracion/listas-precio/bulk-destroy', [BulkDestroyController::class, 'destroy'])->name('modules.configuracion.listas-precio.bulk-destroy');
     Route::delete('/modulos/configuracion/listas-precio/{id}', [ConfiguracionController::class, 'listaprecioDestroy'])->name('modules.configuracion.listas-precio.destroy');
+
+    Route::get('/modulos/configuracion/detalle-lista-precio', [ConfiguracionController::class, 'detalleListaPrecioIndex'])->name('modules.configuracion.detalle-lista-precio.index');
+    Route::get('/modulos/configuracion/detalle-lista-precio/export/{format}', [ConfiguracionController::class, 'detalleListaPrecioExport'])->name('modules.configuracion.detalle-lista-precio.export')->where('format', 'pdf|xlsx');
+    Route::get('/modulos/configuracion/detalle-lista-precio/crear', [ConfiguracionController::class, 'detalleListaPrecioCreate'])->name('modules.configuracion.detalle-lista-precio.create');
+    Route::post('/modulos/configuracion/detalle-lista-precio', [ConfiguracionController::class, 'detalleListaPrecioStore'])->name('modules.configuracion.detalle-lista-precio.store');
+    Route::get('/modulos/configuracion/detalle-lista-precio/{id}/editar', [ConfiguracionController::class, 'detalleListaPrecioEdit'])->name('modules.configuracion.detalle-lista-precio.edit');
+    Route::put('/modulos/configuracion/detalle-lista-precio/{id}', [ConfiguracionController::class, 'detalleListaPrecioUpdate'])->name('modules.configuracion.detalle-lista-precio.update');
+    Route::delete('/modulos/configuracion/detalle-lista-precio/bulk-destroy', [BulkDestroyController::class, 'destroy'])->name('modules.configuracion.detalle-lista-precio.bulk-destroy');
+    Route::delete('/modulos/configuracion/detalle-lista-precio/{id}', [ConfiguracionController::class, 'detalleListaPrecioDestroy'])->name('modules.configuracion.detalle-lista-precio.destroy');
+
+    Route::get('/modulos/configuracion/elemento-almacen', [ConfiguracionController::class, 'elementoAlmacenIndex'])->name('modules.configuracion.elemento-almacen.index');
+    Route::get('/modulos/configuracion/elemento-almacen/export/{format}', [ConfiguracionController::class, 'elementoAlmacenExport'])->name('modules.configuracion.elemento-almacen.export')->where('format', 'pdf|xlsx');
+    Route::get('/modulos/configuracion/elemento-almacen/crear', [ConfiguracionController::class, 'elementoAlmacenCreate'])->name('modules.configuracion.elemento-almacen.create');
+    Route::post('/modulos/configuracion/elemento-almacen', [ConfiguracionController::class, 'elementoAlmacenStore'])->name('modules.configuracion.elemento-almacen.store');
+    Route::get('/modulos/configuracion/elemento-almacen/{id}/editar', [ConfiguracionController::class, 'elementoAlmacenEdit'])->name('modules.configuracion.elemento-almacen.edit');
+    Route::put('/modulos/configuracion/elemento-almacen/{id}', [ConfiguracionController::class, 'elementoAlmacenUpdate'])->name('modules.configuracion.elemento-almacen.update');
+    Route::delete('/modulos/configuracion/elemento-almacen/bulk-destroy', [BulkDestroyController::class, 'destroy'])->name('modules.configuracion.elemento-almacen.bulk-destroy');
+    Route::delete('/modulos/configuracion/elemento-almacen/{id}', [ConfiguracionController::class, 'elementoAlmacenDestroy'])->name('modules.configuracion.elemento-almacen.destroy');
 
     Route::get('/modulos/configuracion/tipos-pedido', [ConfiguracionController::class, 'tipopedidoIndex'])->name('modules.configuracion.tipos-pedido.index');
     Route::get('/modulos/configuracion/tipos-pedido/export/{format}', [ConfiguracionController::class, 'tipopedidoExport'])->name('modules.configuracion.tipos-pedido.export')->where('format', 'pdf|xlsx');
@@ -213,6 +197,24 @@ Route::middleware('erp.module:configuracion')->group(function () {
     Route::put('/modulos/configuracion/certificados-sunat/{id}', [ConfiguracionController::class, 'certificadosUnatUpdate'])->name('modules.configuracion.certificados-sunat.update');
     Route::delete('/modulos/configuracion/certificados-sunat/bulk-destroy', [BulkDestroyController::class, 'destroy'])->name('modules.configuracion.certificados-sunat.bulk-destroy');
     Route::delete('/modulos/configuracion/certificados-sunat/{id}', [ConfiguracionController::class, 'certificadosUnatDestroy'])->name('modules.configuracion.certificados-sunat.destroy');
+
+    Route::get('/modulos/configuracion/empresapropietaria', [ConfiguracionController::class, 'empresapropietariaIndex'])->name('modules.configuracion.empresapropietaria.index');
+    Route::get('/modulos/configuracion/empresapropietaria/export/{format}', [ConfiguracionController::class, 'empresapropietariaExport'])->name('modules.configuracion.empresapropietaria.export')->where('format', 'pdf|xlsx');
+    Route::get('/modulos/configuracion/empresapropietaria/crear', [ConfiguracionController::class, 'empresapropietariaCreate'])->name('modules.configuracion.empresapropietaria.create');
+    Route::post('/modulos/configuracion/empresapropietaria', [ConfiguracionController::class, 'empresapropietariaStore'])->name('modules.configuracion.empresapropietaria.store');
+    Route::get('/modulos/configuracion/empresapropietaria/{id}/editar', [ConfiguracionController::class, 'empresapropietariaEdit'])->name('modules.configuracion.empresapropietaria.edit');
+    Route::put('/modulos/configuracion/empresapropietaria/{id}', [ConfiguracionController::class, 'empresapropietariaUpdate'])->name('modules.configuracion.empresapropietaria.update');
+    Route::delete('/modulos/configuracion/empresapropietaria/bulk-destroy', [BulkDestroyController::class, 'destroy'])->name('modules.configuracion.empresapropietaria.bulk-destroy');
+    Route::delete('/modulos/configuracion/empresapropietaria/{id}', [ConfiguracionController::class, 'empresapropietariaDestroy'])->name('modules.configuracion.empresapropietaria.destroy');
+
+    Route::get('/modulos/configuracion/modelo', [ConfiguracionController::class, 'modeloIndex'])->name('modules.configuracion.modelo.index');
+    Route::get('/modulos/configuracion/modelo/export/{format}', [ConfiguracionController::class, 'modeloExport'])->name('modules.configuracion.modelo.export')->where('format', 'pdf|xlsx');
+    Route::get('/modulos/configuracion/modelo/crear', [ConfiguracionController::class, 'modeloCreate'])->name('modules.configuracion.modelo.create');
+    Route::post('/modulos/configuracion/modelo', [ConfiguracionController::class, 'modeloStore'])->name('modules.configuracion.modelo.store');
+    Route::get('/modulos/configuracion/modelo/{id}/editar', [ConfiguracionController::class, 'modeloEdit'])->name('modules.configuracion.modelo.edit');
+    Route::put('/modulos/configuracion/modelo/{id}', [ConfiguracionController::class, 'modeloUpdate'])->name('modules.configuracion.modelo.update');
+    Route::delete('/modulos/configuracion/modelo/bulk-destroy', [BulkDestroyController::class, 'destroy'])->name('modules.configuracion.modelo.bulk-destroy');
+    Route::delete('/modulos/configuracion/modelo/{id}', [ConfiguracionController::class, 'modeloDestroy'])->name('modules.configuracion.modelo.destroy');
 
     Route::get('/modulos/configuracion/marca', [ConfiguracionController::class, 'marcasIndex'])->name('modules.configuracion.marcas.index');
     Route::get('/modulos/configuracion/marca/export/{format}', [ConfiguracionController::class, 'marcasExport'])->name('modules.configuracion.marcas.export')->where('format', 'pdf|xlsx');

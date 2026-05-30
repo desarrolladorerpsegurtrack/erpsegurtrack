@@ -20,7 +20,7 @@
 				'title' => 'Top 5 categorías',
 				'subtitle' => 'Categorías populares',
 				'action' => 'Explorar categorías',
-				'images' => ['product10-400x400.jpg', 'product10-400x400.jpg', 'product1-400x400.jpg'],
+				
 			],
 			[
 				'tone' => 'primary',
@@ -28,7 +28,6 @@
 				'title' => 'Destacados de marketing',
 				'subtitle' => 'Campañas recientes',
 				'action' => 'Explorar campañas',
-				'images' => ['product10-400x400.jpg', 'product6-400x400.jpg', 'product1-400x400.jpg'],
 			],
 			[
 				'tone' => 'primary',
@@ -36,7 +35,6 @@
 				'title' => 'Alertas de stock bajo',
 				'subtitle' => 'Artículos por agotarse',
 				'action' => 'Ver inventario',
-				'images' => ['product8-400x400.jpg', 'product6-400x400.jpg', 'product6-400x400.jpg'],
 			],
 			[
 				'tone' => 'success',
@@ -44,7 +42,6 @@
 				'title' => 'Favoritos de clientes',
 				'subtitle' => 'Cliente del mes',
 				'action' => 'Explorar productos',
-				'images' => ['product5-400x400.jpg', 'product3-400x400.jpg', 'product5-400x400.jpg'],
 			],
 			[
 				'tone' => 'success',
@@ -52,7 +49,6 @@
 				'title' => 'Top 10 productos',
 				'subtitle' => 'Productos destacados',
 				'action' => 'Explorar productos',
-				'images' => ['product2-400x400.jpg', 'product3-400x400.jpg', 'product5-400x400.jpg'],
 			],
 		];
 
@@ -65,12 +61,7 @@
 				'statusIcon' => 'package-x',
 				'statusClass' => 'text-primary',
 				'status' => 'Cancelado',
-				'date' => 'Dom dic 2022',
-				'products' => [
-					['image' => 'product10-400x400.jpg', 'title' => 'Parlante Bluetooth con bajos reforzados'],
-					['image' => 'product9-400x400.jpg', 'title' => 'Base de carga para smartphone'],
-					['image' => 'product2-400x400.jpg', 'title' => 'Audífonos inalámbricos con micrófono'],
-				],
+				'date' => 'Lun ene 2023',
 			],
 			[
 				'icon' => 'book',
@@ -81,11 +72,6 @@
 				'statusClass' => 'text-primary',
 				'status' => 'En proceso',
 				'date' => 'Mar mar 2022',
-				'products' => [
-					['image' => 'product9-400x400.jpg', 'title' => 'Mouse gamer inalámbrico'],
-					['image' => 'product8-400x400.jpg', 'title' => 'Cafetera de 8 tazas'],
-					['image' => 'product9-400x400.jpg', 'title' => 'Cafetera de 8 tazas'],
-				],
 			],
 			[
 				'icon' => 'laptop',
@@ -96,11 +82,6 @@
 				'statusClass' => 'text-primary',
 				'status' => 'Pago pendiente',
 				'date' => 'Dom nov 2021',
-				'products' => [
-					['image' => 'product5-400x400.jpg', 'title' => 'Audífonos inalámbricos con cancelación de ruido'],
-					['image' => 'product9-400x400.jpg', 'title' => 'Base de carga para smartphone'],
-					['image' => 'product4-400x400.jpg', 'title' => 'Audífonos inalámbricos con micrófono'],
-				],
 			],
 			[
 				'icon' => 'shirt',
@@ -111,11 +92,6 @@
 				'statusClass' => 'text-success',
 				'status' => 'Entregado',
 				'date' => 'Dom ago 2020',
-				'products' => [
-					['image' => 'product8-400x400.jpg', 'title' => 'Laptop de alto rendimiento'],
-					['image' => 'product7-400x400.jpg', 'title' => 'Laptop de alto rendimiento'],
-					['image' => 'product4-400x400.jpg', 'title' => 'Audífonos inalámbricos con micrófono'],
-				],
 			],
 			[
 				'icon' => 'gamepad2',
@@ -126,11 +102,6 @@
 				'statusClass' => 'text-primary',
 				'status' => 'Cancelado',
 				'date' => 'Sáb dic 2020',
-				'products' => [
-					['image' => 'product6-400x400.jpg', 'title' => 'Audífonos inalámbricos con cancelación de ruido'],
-					['image' => 'product8-400x400.jpg', 'title' => 'Cafetera de 8 tazas'],
-					['image' => 'product9-400x400.jpg', 'title' => 'Cámara de seguridad para hogar inteligente'],
-				],
 			],
 		];
 	@endphp
@@ -316,11 +287,7 @@
 										<i data-lucide="{{ $card['icon'] }}" class="stroke-[1] w-5 h-5 group-[.primary]:text-primary group-[.primary]:fill-primary/10 group-[.success]:text-success group-[.success]:fill-success/10"></i>
 									</div>
 									<div class="ml-auto flex">
-										@foreach($card['images'] as $index => $image)
-											<div class="image-fit zoom-in {{ $index === 0 ? 'h-8 w-8' : '-ml-3 h-8 w-8' }}">
-												<img class="rounded-full shadow-[0px_0px_0px_2px_#fff,_1px_1px_5px_rgba(0,0,0,0.32)]" src="{{ asset('tailwise/images/products/' . $image) }}" alt="Producto">
-											</div>
-										@endforeach
+										
 									</div>
 								</div>
 
@@ -387,11 +354,6 @@
 								<td class="px-5 py-3 border-b box w-44 rounded-l-none rounded-r-none border-x-0 shadow-[5px_3px_5px_#00000005] first:rounded-l-[0.6rem] first:border-l last:rounded-r-[0.6rem] last:border-r">
 									<div class="mb-1.5 whitespace-nowrap text-xs text-slate-500">Ítems</div>
 									<div class="mb-1 flex">
-										@foreach($order['products'] as $index => $product)
-											<div class="image-fit zoom-in {{ $index === 0 ? 'h-5 w-5' : '-ml-1.5 h-5 w-5' }}">
-												<img data-placement="top" title="{{ $product['title'] }}" src="{{ asset('tailwise/images/products/' . $product['image']) }}" alt="Product" class="tooltip cursor-pointer rounded-full shadow-[0px_0px_0px_2px_#fff,_1px_1px_5px_rgba(0,0,0,0.32)]">
-											</div>
-										@endforeach
 									</div>
 								</td>
 

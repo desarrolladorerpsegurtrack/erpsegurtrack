@@ -116,6 +116,8 @@ class AuditLog
             'configuracion.moneda' => ['label' => 'moneda', 'table' => 'moneda', 'primaryKey' => 'idmoneda'],
             'configuracion.tributo' => ['label' => 'tributo', 'table' => 'tributo', 'primaryKey' => 'idtributo'],
             'configuracion.unidad_medida' => ['label' => 'unidad de medida', 'table' => 'unidadmedida', 'primaryKey' => 'idunidadMedida'],
+            'configuracion.empresapropietaria' => ['label' => 'empresa propietaria', 'table' => 'empresapropietaria', 'primaryKey' => 'RUC'],
+            'configuracion.modelo' => ['label' => 'modelo', 'table' => 'modelo', 'primaryKey' => 'idmodelo'],
             'configuracion.marca' => ['label' => 'marca', 'table' => 'marca', 'primaryKey' => 'idmarca'],
             'configuracion.tecnologia' => ['label' => 'tecnología', 'table' => 'tecnologia', 'primaryKey' => 'idtecnologia'],
             'configuracion.tipo_gasto' => ['label' => 'tipo de gasto', 'table' => 'tipogasto', 'primaryKey' => 'idtipoGasto'],
@@ -130,6 +132,10 @@ class AuditLog
             'configuracion.tipo_vehiculo' => ['label' => 'tipo de vehículo', 'table' => 'tipovehiculo', 'primaryKey' => 'idtipoVehiculo'],
             'configuracion.tipo_operacion' => ['label' => 'tipo de operación', 'table' => 'tipooperacion', 'primaryKey' => 'idtipoOperacion'],
             'configuracion.lista_precio' => ['label' => 'lista de precio', 'table' => 'listaprecio', 'primaryKey' => 'idListaPrecio'],
+            'configuracion.detalle_lista_precio' => ['label' => 'detalle de lista de precio', 'table' => 'detallelistaprecio', 'primaryKey' => 'iddetalleListaPrecio'],
+            'configuracion.elemento_almacen' => ['label' => 'elemento de almacén', 'table' => 'elementoalmacen', 'primaryKey' => 'imei'],
+            'almacen.nota_ingreso' => ['label' => 'nota de ingreso', 'table' => 'elementoalmacen', 'primaryKey' => 'imei'],
+            'almacen.nota_salida' => ['label' => 'nota de salida', 'table' => 'elementoalmacen', 'primaryKey' => 'imei'],
             'configuracion.tipo_pedido' => ['label' => 'tipo de pedido', 'table' => 'tipopedido', 'primaryKey' => 'idtipoPedido'],
             'configuracion.proveedor' => ['label' => 'proveedor', 'table' => 'proveedor', 'primaryKey' => 'idproveedor'],
             'configuracion.certificadosunat' => ['label' => 'certificado SUNAT', 'table' => 'certificadosunat', 'primaryKey' => 'idcertificadoSUNAT'],
@@ -419,6 +425,8 @@ class AuditLog
             'configuracion.moneda' => 'moneda',
             'configuracion.tributo' => 'tributo',
             'configuracion.unidad_medida' => 'unidad de medida',
+            'configuracion.empresapropietaria' => 'empresa propietaria',
+            'configuracion.modelo' => 'modelo',
             'configuracion.marca' => 'marca',
             'configuracion.tecnologia' => 'tecnología',
             'configuracion.tipo_gasto' => 'tipo de gasto',
@@ -430,9 +438,13 @@ class AuditLog
             'configuracion.forma_pago' => 'forma de pago',
             'configuracion.entidad_bancaria' => 'entidad bancaria',
             'configuracion.operador' => 'operador',
+            'almacen.nota_ingreso' => 'nota de ingreso',
+            'almacen.nota_salida' => 'nota de salida',
             'configuracion.tipo_vehiculo' => 'tipo de vehículo',
             'configuracion.tipo_operacion' => 'tipo de operación',
             'configuracion.lista_precio' => 'lista de precio',
+            'configuracion.detalle_lista_precio' => 'detalle de lista de precio',
+            'configuracion.elemento_almacen' => 'elemento de almacén',
             'configuracion.tipo_pedido' => 'tipo de pedido',
             'configuracion.proveedor' => 'proveedor',
             'configuracion.certificadosunat' => 'certificado SUNAT',
@@ -861,8 +873,26 @@ class AuditLog
         if (str_starts_with($routeName, 'modules.lineas-chips')) {
             return 'lineas_chips';
         }
+        if (str_starts_with($routeName, 'modules.vehiculos')) {
+            return 'vehiculos';
+        }
+        if (str_starts_with($routeName, 'modules.dispositivo-cliente')) {
+            return 'dispositivo_cliente';
+        }
+        if (str_starts_with($routeName, 'modules.servicio-cliente')) {
+            return 'servicio_cliente';
+        }
+        if (str_starts_with($routeName, 'modules.almacen')) {
+            return 'almacen';
+        }
         if (str_starts_with($routeName, 'modules.configuracion')) {
             return 'configuracion';
+        }
+        if (str_starts_with($routeName, 'modules.ticket')) {
+            return 'tickets';
+        }
+        if (str_starts_with($routeName, 'modules.sistema')) {
+            return 'sistema';
         }
 
         return 'sistema';

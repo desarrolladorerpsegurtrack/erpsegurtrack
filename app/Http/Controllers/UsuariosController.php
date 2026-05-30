@@ -9,7 +9,6 @@ use Illuminate\Database\QueryException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
@@ -103,6 +102,7 @@ class UsuariosController extends Controller
     {
         // Excluir personales que ya estén asignados a un usuario
         $personales = $this->usuarioService->getPersonalesForCreate();
+        $vistasCatalog = $this->usuarioService->getVistasCatalog();
 
         $roles = $this->usuarioService->getRolesCatalog()->map(function ($rol) {
             $rol->nombre = $rol->label;
@@ -120,6 +120,11 @@ class UsuariosController extends Controller
         $manualPermissionsMatrix = is_array($manualPermissionsInput)
             ? RolePermissionMatrix::matrixFromStoredPermissions(RolePermissionMatrix::extractSelectedPermissions($manualPermissionsInput))
             : RolePermissionMatrix::defaultMatrix();
+        // Cargar vistas del rol si está seleccionado
+        $storedVistaIds = $selectedRoleId !== null
+            ? $this->usuarioService->getStoredVistaIdsForRoleIds(collect([$selectedRoleId]))
+            : [];
+        $selectedVistaIds = $this->usuarioService->extractSelectedVistaIds((array) old('vista_permissions', $storedVistaIds));
 
         $selectedRole = $selectedRoleId !== null
             ? $roles->first(fn ($role) => (int) $role->idrol === $selectedRoleId)
@@ -144,7 +149,7 @@ class UsuariosController extends Controller
                     'required' => true,
                     'maxlength' => 50,
                     'minlength' => 2,
-                    'placeholder' => 'Ej: user.name',
+                    'placeholder' => 'Ej: usuario123',
                     'helpText' => 'Mínimo 2 caracteres.',
                 ],
                 [
@@ -164,7 +169,7 @@ class UsuariosController extends Controller
                     'label' => 'Contraseña',
                     'required' => true,
                     'minlength' => 8,
-                    'maxlength' => 500,
+                    'maxlength' => 80,
                     'helpText' => 'Mínimo 8 caracteres.',
                 ],
                 [
@@ -177,7 +182,7 @@ class UsuariosController extends Controller
                 [
                     'name' => 'role_ids',
                     'type' => 'checkbox-object',
-                    'label' => 'Roles asignados',
+                    'label' => 'Roles asignados: Selecciona un rol predefinido o define permisos personalizados.',
                     'optionsData' => $roles,
                     'optionKey' => 'idrol',
                     'optionLabel' => 'nombre',
@@ -190,13 +195,24 @@ class UsuariosController extends Controller
                     'name' => 'permissions',
                     'type' => 'permissions-matrix',
                     'label' => 'Permisos del rol',
-                    'required' => true,
+                    'required' => false,
                     'modules' => RolePermissionMatrix::modules(),
                     'actions' => RolePermissionMatrix::actions(),
                     'value' => $displayPermissionsMatrix,
                     'manualFallbackValue' => $manualPermissionsMatrix,
                     'roleAware' => true,
                     'lockedByRole' => $selectedRoleId !== null,
+                    'colSpan' => 2,
+                ],
+                [
+                    'name' => 'vista_permissions',
+                    'type' => 'vista-permissions',
+                    'label' => 'Acciones permitidas',
+                    'required' => false,
+                    'optionsData' => $vistasCatalog,
+                    'optionKey' => 'idvista',
+                    'optionLabel' => 'nombre',
+                    'value' => $selectedVistaIds,
                     'colSpan' => 2,
                 ],
             ],
@@ -221,19 +237,28 @@ class UsuariosController extends Controller
             'role_ids' => ['nullable', 'array', 'max:1'],
             'role_ids.*' => ['integer', Rule::exists('rol', 'idrol')->where(fn ($query) => $query->where('tipo', 1))],
             'permissions' => ['nullable', 'array'],
+            'vista_permissions' => ['nullable', 'array'],
+            'vista_permissions.*' => ['integer', Rule::exists('vista', 'idvista')],
         ], [
             'usuario.unique' => 'El nombre de usuario ya está en uso.',
             'personal_dniPersonal.unique' => 'Este personal ya tiene una cuenta de usuario asociada.',
             'personal_dniPersonal.exists' => 'El personal seleccionado no está registrado.',
+            'vista_permissions.*.exists' => 'Una de las vistas seleccionadas no existe.',
         ]);
 
         $selectedRoleId = $this->resolveSelectedRoleId($validated['role_ids'] ?? []);
         $permissionPairs = RolePermissionMatrix::extractSelectedPermissions((array) ($request->input('permissions') ?? []));
+        $vistaIds = $this->usuarioService->extractSelectedVistaIds((array) ($request->input('vista_permissions') ?? []));
+
+        if ($selectedRoleId !== null && $this->usuarioService->requestDefaultsMatchRole($selectedRoleId, $permissionPairs, $vistaIds)) {
+            $permissionPairs = [];
+            $vistaIds = [];
+        }
 
         if ($selectedRoleId === null) {
-            if ($permissionPairs === []) {
+            if ($permissionPairs === [] && $vistaIds === []) {
                 return back()
-                    ->withErrors(['permissions' => 'Debes seleccionar al menos un permiso cuando no hay un rol precreado asignado.'])
+                    ->withErrors(['permissions' => 'Debes seleccionar al menos un permiso o una vista cuando no hay un rol precreado asignado.'])
                     ->withInput();
             }
 
@@ -245,7 +270,7 @@ class UsuariosController extends Controller
             }
         }
 
-        $this->usuarioService->createUser($validated, $selectedRoleId, $permissionPairs);
+        $this->usuarioService->createUser($validated, $selectedRoleId, $permissionPairs, $vistaIds);
 
         $this->publishResourceEvent('usuarios', $validated['usuario'], 'created');
         $this->publishUserPermissionsChanged($validated['usuario'], ['source' => 'user.create']);
@@ -288,12 +313,20 @@ class UsuariosController extends Controller
         $storedPermissionsByRole = $assignedRoleIds->isNotEmpty()
             ? $this->usuarioService->getStoredPermissionsForRoleIds($assignedRoleIds)
             : collect();
+        $storedVistaIds = $assignedRoleIds->isNotEmpty()
+            ? $this->usuarioService->getStoredVistaIdsForRoleIds($assignedRoleIds)
+            : [];
 
         $defaultManualMatrix = $assignedInternalRoleId !== null
             ? RolePermissionMatrix::matrixFromStoredPermissions($storedPermissionsByRole->get((int) $assignedInternalRoleId, collect()))
             : RolePermissionMatrix::defaultMatrix();
 
         $selectedRoleId = $this->usuarioService->resolveSelectedRoleId(old('role_ids', $assignedPublicRoleId !== null ? [$assignedPublicRoleId] : []));
+        $oldVistaPermissions = old('vista_permissions', null);
+        $selectedVistaIds = $this->usuarioService->extractSelectedVistaIds((array) ($oldVistaPermissions !== null ? $oldVistaPermissions : $storedVistaIds));
+        if ($oldVistaPermissions !== null) {
+            $selectedRoleId = null;
+        }
         if ($selectedRoleId !== null && !$roles->contains(fn ($role) => (int) $role->idrol === $selectedRoleId)) {
             $selectedRoleId = null;
         }
@@ -358,7 +391,7 @@ class UsuariosController extends Controller
                 [
                     'name' => 'role_ids',
                     'type' => 'checkbox-object',
-                    'label' => 'Roles asignados',
+                    'label' => 'Roles asignados: Selecciona un rol predefinido o define permisos personalizados.',
                     'optionsData' => $roles,
                     'optionKey' => 'idrol',
                     'optionLabel' => 'nombre',
@@ -371,13 +404,24 @@ class UsuariosController extends Controller
                     'name' => 'permissions',
                     'type' => 'permissions-matrix',
                     'label' => 'Permisos del rol',
-                    'required' => true,
+                    'required' => false,
                     'modules' => RolePermissionMatrix::modules(),
                     'actions' => RolePermissionMatrix::actions(),
                     'value' => $displayPermissionsMatrix,
                     'manualFallbackValue' => $manualPermissionsMatrix,
                     'roleAware' => true,
                     'lockedByRole' => $selectedRoleId !== null,
+                    'colSpan' => 2,
+                ],
+                [
+                    'name' => 'vista_permissions',
+                    'type' => 'vista-permissions',
+                    'label' => 'Acciones permitidas',
+                    'required' => false,
+                    'optionsData' => $this->usuarioService->getVistasCatalog(),
+                    'optionKey' => 'idvista',
+                    'optionLabel' => 'nombre',
+                    'value' => $selectedVistaIds,
                     'colSpan' => 2,
                 ],
             ],
@@ -416,19 +460,28 @@ class UsuariosController extends Controller
             'role_ids' => ['nullable', 'array', 'max:1'],
             'role_ids.*' => ['integer', Rule::exists('rol', 'idrol')->where(fn ($query) => $query->where('tipo', 1))],
             'permissions' => ['nullable', 'array'],
+            'vista_permissions' => ['nullable', 'array'],
+            'vista_permissions.*' => ['integer', Rule::exists('vista', 'idvista')],
         ], [
             'usuario.unique' => 'El nombre de usuario ya está en uso.',
             'personal_dniPersonal.unique' => 'Este personal ya tiene una cuenta de usuario asociada.',
             'personal_dniPersonal.exists' => 'El personal seleccionado no está registrado.',
+            'vista_permissions.*.exists' => 'Una de las vistas seleccionadas no existe.',
         ]);
 
         $selectedRoleId = $this->resolveSelectedRoleId($validated['role_ids'] ?? []);
         $permissionPairs = RolePermissionMatrix::extractSelectedPermissions((array) ($request->input('permissions') ?? []));
+        $vistaIds = $this->usuarioService->extractSelectedVistaIds((array) ($request->input('vista_permissions') ?? []));
+
+        if ($selectedRoleId !== null && $this->usuarioService->requestDefaultsMatchRole($selectedRoleId, $permissionPairs, $vistaIds)) {
+            $permissionPairs = [];
+            $vistaIds = [];
+        }
 
         if ($selectedRoleId === null) {
-            if ($permissionPairs === []) {
+            if ($permissionPairs === [] && $vistaIds === []) {
                 return back()
-                    ->withErrors(['permissions' => 'Debes seleccionar al menos un permiso cuando no hay un rol precreado asignado.'])
+                    ->withErrors(['permissions' => 'Debes seleccionar al menos un permiso o una vista cuando no hay un rol precreado asignado.'])
                     ->withInput();
             }
 
@@ -440,7 +493,7 @@ class UsuariosController extends Controller
             }
         }
 
-        $result = $this->usuarioService->updateUser($usuario, $validated, $selectedRoleId, $permissionPairs);
+        $result = $this->usuarioService->updateUser($usuario, $validated, $selectedRoleId, $permissionPairs, $vistaIds);
 
         if ($selectedRoleId !== null && $result['oldInternalRoleId'] !== null) {
             $this->usuarioService->cleanupInternalRoleIfOrphan((int) $result['oldInternalRoleId']);

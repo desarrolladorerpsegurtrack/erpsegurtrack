@@ -19,6 +19,7 @@
             <div class="box p-5">
                 <h2 class="text-lg font-medium mr-auto">{{ $title ?? 'Vista 2' }}</h2>
                 <p class="mt-3">Contenido de la Vista 2</p>
+                @include('vistas._actions')
             </div>
         </div>
     </div>

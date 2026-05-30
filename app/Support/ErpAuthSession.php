@@ -2,7 +2,6 @@
 
 namespace App\Support;
 
-use App\Support\ErpPermission;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +24,7 @@ class ErpAuthSession
         $isAdmin = self::isAdmin($roles);
         $permissions = self::resolvePermissions($roleRows, $isAdmin);
         $modules = self::resolveModules($permissions, $isAdmin);
+        $allowedVistas = self::resolveAllowedVistas($roleRows, $isAdmin);
 
         return [
             'usuario' => $usuario,
@@ -32,6 +32,7 @@ class ErpAuthSession
             'roles' => $roles,
             'modules' => $modules->all(),
             'permissions' => $permissions,
+            'allowed_vistas' => $allowedVistas,
         ];
     }
 
@@ -75,6 +76,10 @@ class ErpAuthSession
         }
 
         if (self::permissionsDiffer($currentAuth['permissions'] ?? [], $freshAuth['permissions'] ?? [])) {
+            return true;
+        }
+
+        if (!self::arraysAreEquivalent($currentAuth['allowed_vistas'] ?? [], $freshAuth['allowed_vistas'] ?? [])) {
             return true;
         }
 
@@ -146,8 +151,23 @@ class ErpAuthSession
             return collect(self::DEFAULT_MODULES);
         }
 
-        return collect(array_keys($permissions))
-            ->map(fn ($permissionKey): ?string => ErpPermission::permissionKeyToModule((string) $permissionKey))
+        $modules = [];
+
+        foreach (array_keys($permissions) as $permissionKey) {
+            $normalizedKey = ErpPermission::normalizePermissionKey((string) $permissionKey);
+            if ($normalizedKey === null) {
+                continue;
+            }
+
+            $modules[] = $normalizedKey;
+
+            $parentModule = ErpPermission::permissionKeyToModule($normalizedKey);
+            if ($parentModule !== null) {
+                $modules[] = $parentModule;
+            }
+        }
+
+        return collect($modules)
             ->filter()
             ->unique()
             ->values();
@@ -178,21 +198,44 @@ class ErpAuthSession
                 continue;
             }
 
-            $permissionKeys = ErpPermission::expandPermissionKeys($row->modulo ?? null);
-            foreach ($permissionKeys as $permissionKey) {
-                $permissions[$permissionKey] ??= [];
-                $permissions[$permissionKey][] = $action;
-
-                $parentModule = ErpPermission::permissionKeyToModule($permissionKey);
-                if ($parentModule !== null) {
-                    $permissions[$parentModule] ??= [];
-                    $permissions[$parentModule][] = $action;
-                }
+            $permissionKey = ErpPermission::normalizePermissionKey($row->modulo ?? null);
+            if ($permissionKey === null) {
+                continue;
             }
+
+            $permissions[$permissionKey] ??= [];
+            $permissions[$permissionKey][] = $action;
         }
 
         return collect($permissions)
             ->map(fn ($actions): array => collect($actions)->unique()->values()->all())
+            ->all();
+    }
+
+    private static function resolveAllowedVistas(Collection $roleRows, bool $isAdmin): array
+    {
+        if ($isAdmin) {
+            return DB::table('vista')
+                ->orderBy('idvista')
+                ->pluck('idvista')
+                ->map(fn ($id) => (int) $id)
+                ->filter(fn ($id) => $id > 0)
+                ->values()
+                ->all();
+        }
+
+        return $roleRows
+            ->filter(function ($row) {
+                $module = (string) ($row->modulo ?? '');
+                return str_starts_with($module, 'ticket.vista.');
+            })
+            ->map(function ($row) {
+                $module = (string) ($row->modulo ?? '');
+                return (int) str_replace('ticket.vista.', '', $module);
+            })
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
             ->all();
     }
 }

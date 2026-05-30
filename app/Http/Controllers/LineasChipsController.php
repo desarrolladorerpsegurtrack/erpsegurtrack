@@ -2734,7 +2734,7 @@ class LineasChipsController extends Controller
             ->get()
             ->mapWithKeys(function ($row): array {
                 $label = trim((string) ($row->nombre ?? ''));
-                $display = $label !== '' ? ($row->idoperador . ' - ' . $label) : (string) $row->idoperador;
+                $display = $label !== '' ? ( $label) : (string) $row->idoperador;
                 return [(string) $row->idoperador => $display];
             })
             ->all();

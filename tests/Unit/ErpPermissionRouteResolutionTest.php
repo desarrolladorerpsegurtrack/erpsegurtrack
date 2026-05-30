@@ -16,6 +16,9 @@ class ErpPermissionRouteResolutionTest extends TestCase
             'modules.clientes.credenciales.index' => 'clientes.credenciales',
             'modules.clientes.credenciales.crear-rapido' => 'clientes.credenciales',
             'modules.clientes.grupos.index' => 'clientes.grupo_cliente',
+            'modules.almacen' => 'almacen.almacen',
+            'modules.almacen.index' => 'almacen.almacen',
+            'modules.almacen.nota-salida.index' => 'almacen.nota_salida',
             'modules.vehiculos.index' => 'vehiculos',
             'modules.dispositivo-cliente.index' => 'dispositivo_cliente',
             'modules.vehiculos.edit' => 'vehiculos',
@@ -57,6 +60,11 @@ class ErpPermissionRouteResolutionTest extends TestCase
     {
         $this->assertSame('clientes.credenciales', ErpPermission::normalizePermissionKey('clientes.credenciales'));
         $this->assertSame('clientes.credenciales', ErpPermission::normalizePermissionKey('clientes.credencial'));
+    }
+
+    public function test_normalizes_almacen_leaf_permission_key(): void
+    {
+        $this->assertSame('almacen.almacen', ErpPermission::normalizePermissionKey('almacen.almacen'));
     }
 
     public function test_normalizes_dispositivo_cliente_permission_key(): void

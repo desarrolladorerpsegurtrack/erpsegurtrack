@@ -68,6 +68,15 @@ class EnsureErpAction
             return $next($request);
         }
 
+        if (
+            $resolvedPermissionKey === 'tickets'
+            && $resolvedAction === 'ver'
+            && $routeName === 'modules.tickets'
+            && $userActions->contains('ver_flujo')
+        ) {
+            return $next($request);
+        }
+
         abort(403, 'No tienes acceso a esta acción.');
     }
 

@@ -121,7 +121,6 @@ class DispositivoClienteController extends Controller
                     'label' => 'Estado',
                     'type' => 'select',
                     'options' => [
-                        ['value' => '', 'label' => 'Todos'],
                         ['value' => '1', 'label' => 'Activo'],
                         ['value' => '0', 'label' => 'Inactivo'],
                     ],

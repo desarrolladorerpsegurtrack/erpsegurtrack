@@ -1,10 +1,20 @@
 import Litepicker from 'litepicker';
 
-(()=>{(function(){"use strict";$(".datepicker").each(function(){
-		let e={autoApply:!1,singleMode:!0,numberOfColumns:1,numberOfMonths:1,showWeekNumbers:!1,format:"D MMM, YYYY",lang:"es-ES",buttonText:{apply:"Aplicar",cancel:"Cancelar"},dropdowns:{minYear:1990,maxYear:null,months:!0,years:!0}};
-		const inputEl = this; // native element
+const initLitepickers = (root = document) => {
+	const scope = root instanceof Document ? root : (root instanceof HTMLElement ? root : document);
+	const inputs = scope.querySelectorAll('.datepicker');
+	inputs.forEach((inputEl) => {
+		if (inputEl.__litepickerInitialized) {
+			return;
+		}
+		inputEl.__litepickerInitialized = true;
+
+		let e = {autoApply:!1,singleMode:!0,numberOfColumns:1,numberOfMonths:1,showWeekNumbers:!1,format:"D MMM, YYYY",lang:"es-ES",buttonText:{apply:"Aplicar",cancel:"Cancelar"},dropdowns:{minYear:1990,maxYear:null,months:!0,years:!0}};
 		const $input = $(inputEl);
 		const noDefault = inputEl.hasAttribute('data-no-default') || $input.data('no-default') === true;
+		if (inputEl.dataset.autoApply !== undefined) {
+			e.autoApply = String(inputEl.dataset.autoApply) !== 'false';
+		}
 
 		if (inputEl.dataset.format) {
 			e.format = inputEl.dataset.format;
@@ -105,4 +115,7 @@ import Litepicker from 'litepicker';
 			// ignore
 		}
 	});
-})();})();
+};
+
+window.initLitepickers = window.initLitepickers || initLitepickers;
+initLitepickers(document);

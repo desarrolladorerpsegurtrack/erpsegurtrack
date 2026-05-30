@@ -16,6 +16,7 @@ window.ERPRealtime = {
     currentListResource: previousRealtimeState.currentListResource || '',
     listMode: Boolean(previousRealtimeState.listMode),
     lockRefreshTimer: previousRealtimeState.lockRefreshTimer || null,
+    suppressUnloadRelease: Boolean(previousRealtimeState.suppressUnloadRelease),
 
     notify(message, type = 'info') {
         const event = new CustomEvent('erp-realtime-notification', {
@@ -100,8 +101,16 @@ window.ERPRealtime = {
 
                 if (payload?.type === 'resource.changed') {
                     if (payload.resource === this.currentListResource && this.listMode) {
+                        if (payload.usuario === this.currentUser && payload.action === 'attend') {
+                            return;
+                        }
+
                         this.notify(`Actualización en tiempo real: ${payload.action} en ${payload.resource}.`, 'info');
-                        window.location.reload();
+                        if (typeof window.ERPListRefresh === 'function') {
+                            window.ERPListRefresh();
+                        } else {
+                            window.location.reload();
+                        }
                     }
 
                     if (payload.resource === this.currentResource && payload.id === this.currentResourceId && payload.usuario !== this.currentUser) {
@@ -270,6 +279,21 @@ window.addEventListener('DOMContentLoaded', () => {
             window.ERPRealtime.currentResourceId = id;
             window.ERPRealtime.subscribeLock(resource, id);
 
+            document.addEventListener('submit', (event) => {
+                const form = event.target;
+                if (!(form instanceof HTMLFormElement)) {
+                    return;
+                }
+                if (!form.hasAttribute('data-lock-action')) {
+                    return;
+                }
+
+                window.ERPRealtime.suppressUnloadRelease = true;
+                setTimeout(() => {
+                    window.ERPRealtime.suppressUnloadRelease = false;
+                }, 3000);
+            });
+
             const form = document.getElementById('main-crud-form');
             if (form) {
                 form.addEventListener('submit', (event) => {
@@ -299,6 +323,9 @@ window.addEventListener('DOMContentLoaded', () => {
             }
 
             window.addEventListener('beforeunload', () => {
+                if (window.ERPRealtime.suppressUnloadRelease) {
+                    return;
+                }
                 window.ERPRealtime.releaseLock(resource, id);
             });
         }

@@ -1,14 +1,14 @@
 @extends('dashboard.overview-1')
 
-@section('title', $title ?? 'Ticket')
-@section('header', $title ?? 'Ticket')
+@section('title', $title ?? 'Gestiones')
+@section('header', $title ?? 'Gestiones')
 
 @section('breadcrumb')
     <nav aria-label="breadcrumb" class="flex hidden flex-1 xl:block">
         <ol class="flex items-center text-theme-1">
             <li><a href="{{ route('home') }}">Inicio</a></li>
             <li class="relative ml-5 pl-0.5 before:content-[''] before:w-[14px] before:h-[14px] before:bg-chevron-black before:transform before:rotate-[-90deg] before:bg-[length:100%] before:-ml-[1.125rem] before:absolute before:my-auto before:inset-y-0 text-slate-600 cursor-text">
-                <span>{{ $title ?? 'Ticket' }}</span>
+                <span>{{ $title ?? 'Gestiones' }}</span>
             </li>
         </ol>
     </nav>
@@ -16,6 +16,9 @@
 
 @section('content')
     {{-- Layout ticket-table. --}}
+    @if(!empty($listResource))
+        <input type="hidden" id="erp-list-resource" value="{{ $listResource }}">
+    @endif
     <div class="grid w-full grid-cols-12 gap-x-6 gap-y-10">
         <div class="col-span-12">
             <!-- HEADER CON TÍTULO Y BOTÓN NUEVO -->
@@ -36,7 +39,6 @@
                     $currentPermissionKey = App\Support\ErpPermission::normalizeRouteModule($currentRouteName);
                 }
 
-                $allPermissions = collect($authData['permissions'] ?? []);
                 $currentPermissions = collect($authData['permissions'][$currentPermissionKey] ?? [])
                     ->map(fn ($value) => App\Support\ErpPermission::normalizeAction((string) $value))
                     ->filter()
@@ -45,54 +47,17 @@
 
                 if (!$isAdmin && is_string($currentPermissionKey) && str_contains($currentPermissionKey, '.') && $currentPermissions->isEmpty()) {
                     $parentModule = App\Support\ErpPermission::permissionKeyToModule($currentPermissionKey);
-                    $hasGranularPermissions = $allPermissions
-                        ->keys()
-                        ->contains(fn ($key) => is_string($key) && str_starts_with(mb_strtolower(trim((string) $key)), $parentModule . '.'));
-
-                    if (!$hasGranularPermissions) {
-                        $currentPermissions = collect($authData['permissions'][$parentModule] ?? [])
-                            ->map(fn ($value) => App\Support\ErpPermission::normalizeAction((string) $value))
-                            ->filter()
-                            ->unique()
-                            ->values();
-                    }
+                    $currentPermissions = collect($authData['permissions'][$parentModule] ?? [])
+                        ->map(fn ($value) => App\Support\ErpPermission::normalizeAction((string) $value))
+                        ->filter()
+                        ->unique()
+                        ->values();
                 }
-                            
-                $canView = $isAdmin || $currentPermissions->contains('ver');
+
                 $canCreate = $isAdmin || $currentPermissions->contains('crear');
-                $canEdit = $isAdmin || $currentPermissions->contains('editar');
-                $canDelete = $isAdmin || $currentPermissions->contains('eliminar');
-                $canPerformActions = $canEdit || $canDelete;
-
-                $listResource = null;
-                if ($currentRouteName) {
-                    $listResource = preg_replace('/^modules\./', '', $currentRouteName);
-                    $listResource = preg_replace('/\.(create|edit|update|destroy|store|show|export|index)$/', '', $listResource);
-                }
-
-                if (empty($bulkDestroyRoute)) {
-                    $candidateBulkRoute = null;
-
-                    if (!empty($currentRouteName)) {
-                        $candidateBulkRoute = preg_replace('/\.index$/', '.bulk-destroy', $currentRouteName);
-                    }
-
-                    if ((empty($candidateBulkRoute) || $candidateBulkRoute === $currentRouteName) && !empty($destroyRoute) && is_string($destroyRoute)) {
-                        $candidateBulkRoute = preg_replace('/\.destroy$/', '.bulk-destroy', $destroyRoute);
-                    }
-
-                    if (!empty($candidateBulkRoute) && \Illuminate\Support\Facades\Route::has($candidateBulkRoute)) {
-                        $bulkDestroyRoute = route($candidateBulkRoute);
-                    }
-                }
+                $canAttend = $isAdmin || $currentPermissions->contains('ver');
                 @endphp
                 <div class="flex flex-col gap-x-3 gap-y-2 sm:flex-row md:ml-auto ticket-board__new">
-                    @if(!empty($bulkDestroyRoute) && $canDelete)
-                        <button type="button" id="bulk-delete-button" class="hidden transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-danger focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-danger text-danger dark:border-danger/70 dark:text-danger" style="border-color:#c71010;color:#c71010;">
-                            <i data-tw-merge="" data-lucide="trash-2" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
-                            Eliminar selección
-                        </button>
-                    @endif
                     @if(!empty($createRoute) && $canCreate)
                         <a href="{{ $createRoute }}">
                             <button type="button" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed dark:border-danger/70 dark:text-danger" style="background-color:#c71010;color:#ffffff;">
@@ -103,11 +68,6 @@
                     @endif
                 </div>
             </div>
-
-            @if(!empty($listResource))
-                <input type="hidden" id="erp-list-resource" value="{{ $listResource }}">
-                <input type="hidden" id="erp-relation-summary-template" value="{{ route('modules.relations.summary', ['resource' => '__RESOURCE__', 'id' => '__ID__']) }}">
-            @endif
 
             <div class="mt-3.5 flex flex-col gap-8">
                 {{-- ALERTAS DE SESIÓN: se envuelven en un contenedor ancho para igualar la tabla --}}
@@ -136,22 +96,23 @@
                         </div>
                     @endif
                 </div>
-                <!-- ESTADÍSTICAS -->
-                @if($stats)
-                    <div class="ticket-stats-white  flex flex-col p-3">
-                        <div class="grid grid-cols-4 gap-5">
-                            @foreach($stats as $stat)
-                                <div class="box col-span-4 rounded-none border border-dashed border-slate-300/80 bg-white p-5 shadow-none md:col-span-2 xl:col-span-1">
-                                    <div class="text-base text-slate-500">{{ $stat['label'] }}</div>
-                                        <div class="mt-1.5 text-2xl font-medium stat-value">{{ $stat['value'] }}</div>
-                                </div>
-                            @endforeach
+                <div id="list-table-wrapper" class="flex w-full flex-col gap-8">
+                    <!-- ESTADÍSTICAS -->
+                    @if($stats)
+                        <div class="ticket-stats-white  flex flex-col p-3">
+                            <div class="grid grid-cols-4 gap-5">
+                                @foreach($stats as $stat)
+                                    <div class="box col-span-4 rounded-none border border-dashed border-slate-300/80 bg-white p-5 shadow-none md:col-span-2 xl:col-span-1">
+                                        <div class="text-base text-slate-500">{{ $stat['label'] }}</div>
+                                            <div class="mt-1.5 text-2xl font-medium stat-value">{{ $stat['value'] }}</div>
+                                    </div>
+                                @endforeach
+                            </div>
                         </div>
-                    </div>
-                @endif
+                    @endif
 
-                <!-- TABLA -->
-                <div id="list-table-wrapper" class="ticket-table-white flex w-full flex-col">
+                    <!-- TABLA -->
+                    <div class="ticket-table-white flex w-full flex-col">
                     @php
                         $filters = $filters ?? [];
                         $showGroupClientsColumn = $showGroupClientsColumn ?? false;
@@ -162,81 +123,80 @@
                             })
                             ->count();
                     @endphp
-                    <div class="flex flex-col gap-y-2 p-5 sm:flex-row sm:items-center">
-                        <form id="list-filter-form" method="GET" action="{{ url()->current() }}" class="flex w-full flex-col gap-y-2 sm:flex-row sm:items-center">
-                            <div>
-                                <div class="relative">
-                                    <i data-tw-merge="" data-lucide="search" class="absolute inset-y-0 left-0 z-10 my-auto ml-3 h-4 w-4 stroke-[1.3] text-slate-500"></i>
-                                    <input data-tw-merge="" type="text" name="q" autocomplete="off" value="{{ request('q') }}" placeholder="Buscar..." class="disabled:bg-slate-100 disabled:cursor-not-allowed dark:disabled:bg-darkmode-800/50 dark:disabled:border-transparent [&[readonly]]:bg-slate-100 [&[readonly]]:cursor-not-allowed [&[readonly]]:dark:bg-darkmode-800/50 [&[readonly]]:dark:border-transparent transition duration-200 ease-in-out w-full pr-10 text-sm border-slate-200 shadow-sm placeholder:text-slate-400/90 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 dark:placeholder:text-slate-500/80 [&[type='file']]:border file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:border-r-[1px] file:border-slate-100/10 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-500/70 hover:file:bg-200 group-[.form-inline]:flex-1 group-[.input-group]:rounded-none group-[.input-group]:[&:not(:first-child)]:border-l-transparent group-[.input-group]:first:rounded-l group-[.input-group]:last:rounded-r group-[.input-group]:z-10 rounded-[0.5rem] pl-9 sm:w-64">
-                                    <button type="button" data-list-clear-search="true" style="display: none;" class="absolute inset-y-0 right-0 z-10 mr-2 flex items-center justify-center rounded-full bg-transparent px-2 text-slate-500 transition hover:bg-transparent hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-40">
-                                        <i data-tw-merge="" data-lucide="x" class="h-4 w-4 stroke-[1.3]"></i>
-                                    </button>
+                    <div class="p-5">
+                        <form id="list-filter-form" method="GET" action="{{ url()->current() }}" class="ticket-filters-bar">
+                            <div class="ticket-filters-track pl-2">
+                                <div class="ticket-filter-item ticket-filter-item--wide">
+                                    <label class="ticket-filter-label">Buscar</label>
+                                    <input type="text" name="q" autocomplete="off" value="{{ request('q') }}" placeholder="Buscar por ID o detalle..." class="ticket-filter-control">
                                 </div>
-                            </div>
-                            @php $exportMode = $exportMode ?? 'dropdown'; @endphp
-                            <div class="flex flex-col gap-x-3 gap-y-2 sm:ml-auto sm:flex-row">
-                                @if($filters)
-                                    <div data-tw-merge="" data-tw-placement="bottom-end" class="dropdown relative inline-flex shrink-0">
-                                        <button type="button" data-tw-merge="" data-local-dropdown-toggle="true" aria-expanded="false" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 [&:hover:not(:disabled)]:dark:bg-darkmode-100/10 w-full sm:w-auto">
-                                            <i data-tw-merge="" data-lucide="arrow-down-wide-narrow" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
-                                            Filtro
-                                            @if($activeFilters)
-                                                <span class="ml-2 flex h-5 items-center justify-center rounded-full border bg-slate-100 px-1.5 text-xs font-medium">
-                                                    {{ $activeFilters }}
-                                                </span>
-                                            @endif
-                                        </button>
-                                        <div class="dropdown-menu absolute right-0 top-full z-[9999] mt-2 origin-top-right invisible opacity-0 pointer-events-none hidden">
-                                            <div data-tw-merge="" class="dropdown-content rounded-xl border border-slate-200/80 bg-white p-4 shadow-xl shadow-slate-200/70 dark:border-transparent dark:bg-darkmode-600">
-                                                @foreach($filters as $filter)
+
+                                @foreach($filters as $filter)
+                                    @php
+                                        $filterName = $filter['name'] ?? '';
+                                        $filterLabel = $filter['label'] ?? 'Filtro';
+                                        $filterType = $filter['type'] ?? 'select';
+                                        $filterOptions = $filter['options'] ?? [];
+                                        $filterPlaceholder = $filter['placeholder'] ?? 'Todos';
+                                        $filterValue = (string) request($filterName, '');
+                                        $isTomFilter = in_array($filterName, ['estado', 'tipo_operacion'], true);
+                                    @endphp
+                                    @continue($filterName === '')
+
+                                    <div class="ticket-filter-item {{ $isTomFilter ? 'ticket-filter-item--tom' : '' }}">
+                                        <label class="ticket-filter-label">{{ $filterLabel }}</label>
+                                        @if($filterType === 'date')
+                                            <input
+                                                type="text"
+                                                name="{{ $filterName }}"
+                                                value="{{ $filterValue }}"
+                                                placeholder="Selecciona la Fecha"
+                                                autocomplete="off"
+                                                class="ticket-filter-control datepicker"
+                                                data-no-default="true"
+                                                data-auto-apply="true"
+                                            >
+                                        @elseif(!empty($filterOptions))
+                                            @php
+                                                $selectClasses = 'ticket-filter-control ticket-filter-control--select';
+                                                if ($isTomFilter) {
+                                                    $selectClasses .= ' tom-select tom-select--compact';
+                                                }
+                                            @endphp
+                                            <select
+                                                name="{{ $filterName }}"
+                                                class="{{ $selectClasses }}"
+                                                data-placeholder="{{ $filterPlaceholder }}"
+                                            >
+                                                <option value="">{{ $filterPlaceholder }}</option>
+                                                @foreach($filterOptions as $option)
                                                     @php
-                                                        $filterName = $filter['name'] ?? '';
-                                                        $filterLabel = $filter['label'] ?? 'Filtro';
-                                                        $filterType = $filter['type'] ?? 'select';
-                                                        $filterOptions = $filter['options'] ?? [];
-                                                        $filterPlaceholder = $filter['placeholder'] ?? 'Todos';
+                                                        $optionValue = (string) ($option['value'] ?? '');
+                                                        $optionLabel = (string) ($option['label'] ?? $optionValue);
                                                     @endphp
-                                                    <div class="mb-3 last:mb-0">
-                                                        <div class="text-xs font-medium uppercase text-slate-500">{{ $filterLabel }}</div>
-                                                        @if($filterType === 'text')
-                                                            <input
-                                                                type="text"
-                                                                name="{{ $filterName }}"
-                                                                value="{{ request($filterName) }}"
-                                                                placeholder="{{ $filterPlaceholder }}"
-                                                                class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20"
-                                                            >
-                                                        @elseif($filterType === 'date')
-                                                            <input
-                                                                type="date"
-                                                                name="{{ $filterName }}"
-                                                                value="{{ request($filterName) }}"
-                                                                class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20"
-                                                            >
-                                                        @else
-                                                            <select name="{{ $filterName }}" class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20">
-                                                                <option value="">{{ $filterPlaceholder }}</option>
-                                                                @foreach($filterOptions as $option)
-                                                                    <option value="{{ $option['value'] }}" @selected((string) request($filterName) === (string) $option['value'])>
-                                                                        {{ $option['label'] }}
-                                                                    </option>
-                                                                @endforeach
-                                                            </select>
-                                                        @endif
-                                                    </div>
+                                                    <option value="{{ $optionValue }}" @selected($filterValue === $optionValue)>{{ $optionLabel }}</option>
                                                 @endforeach
-                                                <div class="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3">
-                                                    <button type="submit" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 bg-primary border-primary text-white">
-                                                        Aplicar
-                                                    </button>
-                                                    <a href="{{ url()->current() }}" data-list-clear="true" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none border-secondary text-slate-500">
-                                                        Limpiar
-                                                    </a>
-                                                </div>
-                                            </div>
-                                        </div>
+                                            </select>
+                                        @else
+                                            <input
+                                                type="text"
+                                                name="{{ $filterName }}"
+                                                value="{{ $filterValue }}"
+                                                placeholder="{{ $filterPlaceholder }}"
+                                                class="ticket-filter-control"
+                                            >
+                                        @endif
                                     </div>
-                                @endif
+                                @endforeach
+                            </div>
+
+                            <div class="ticket-filters-actions">
+                                <button type="submit" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 bg-primary border-primary text-white">
+                                    Aplicar
+                                </button>
+                                <a href="{{ url()->current() }}" data-list-clear="true" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none border-secondary text-slate-500">
+                                    Limpiar
+                                </a>
                             </div>
                         </form>
                     </div>
@@ -245,29 +205,26 @@
                         <table data-tw-merge="" class="w-full text-left border-b border-slate-200/60 @if(collect($columns)->contains(fn ($column) => !empty($column['wrap'] ?? false))) table-fixed @endif">
                             <thead data-tw-merge="" class="">
                                 <tr data-tw-merge="" class="">
-                                    <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 w-5 border-t border-slate-200/60 bg-slate-50 py-4 font-medium text-slate-500">
-                                        <input id="list-select-all" data-tw-merge="" type="checkbox" class="transition-all duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&[type='radio']]:checked:bg-primary [&[type='radio']]:checked:border-primary [&[type='radio']]:checked:border-opacity-10 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:not(:checked)]:dark:bg-darkmode-800/50 [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed [&:disabled:checked]:dark:bg-darkmode-800/50">
-                                    </td>
                                     @foreach($columns as $column)
                                         @if(($column['key'] ?? '') === 'estado')
                                             <td data-tw-merge="" class="px-5 text-center align-middle border-b dark:border-darkmode-300 border-t border-slate-200/60 bg-slate-50 py-4 font-medium text-slate-500 @if(!empty($column['wrap'] ?? false)) w-[38%] @endif">
-                                                <div class="th-sort th-sort--center" role="button" tabindex="0" data-sort-index="{{ $loop->index + 1 }}" aria-label="Ordenar {{ $column['label'] }}">
+                                                <div class="th-sort th-sort--center" role="button" tabindex="0" data-sort-index="{{ $loop->index }}" aria-label="Ordenar {{ $column['label'] }}">
                                                     <span class="th-sort__label">{{ $column['label'] }}</span>
                                                     <span class="th-sort__icon" aria-hidden="true"></span>
                                                 </div>
                                             </td>
                                         @else
                                             <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 border-t border-slate-200/60 bg-slate-50 py-4 font-medium text-slate-500 @if(!empty($column['wrap'] ?? false)) w-[38%] @endif">
-                                                <div class="th-sort" role="button" tabindex="0" data-sort-index="{{ $loop->index + 1 }}" aria-label="Ordenar {{ $column['label'] }}">
+                                                <div class="th-sort" role="button" tabindex="0" data-sort-index="{{ $loop->index }}" aria-label="Ordenar {{ $column['label'] }}">
                                                     <span class="th-sort__label">{{ $column['label'] }}</span>
                                                     <span class="th-sort__icon" aria-hidden="true"></span>
                                                 </div>
                                             </td>
                                         @endif
                                     @endforeach                         
-                                    @if(($showActionsColumn ?? true) && $canPerformActions)
+                                    @if($showActionsColumn ?? true)
                                         <td data-tw-merge="" class="px-5 text-center align-middle border-b dark:border-darkmode-300 border-t border-slate-200/60 bg-slate-50 py-4 font-medium text-slate-500">
-                                            Acciones
+                                            Acción
                                         </td>
                                     @endif
                                 </tr>
@@ -275,33 +232,17 @@
                             <tbody>
                                 @forelse($items as $row)
                                     <tr data-tw-merge="" class="[&_td]:last:border-b-0">
-                                        <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 border-dashed py-4 dark:bg-darkmode-600">
-                                            <div class="flex items-center gap-2">
-                                                <input data-tw-merge="" type="checkbox" class="list-row-checkbox transition-all duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&[type='radio']]:checked:bg-primary [&[type='radio']]:checked:border-primary [&[type='radio']]:checked:border-opacity-10 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:not(:checked)]:dark:bg-darkmode-800/50 [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed [&:disabled:checked]:dark:bg-darkmode-800/50" value="{{ data_get($row, $identifierKey) }}">
-                                            </div>
-                                        </td>
                                         @foreach($columns as $columnIndex => $column)
                                             <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 border-dashed py-4 dark:bg-darkmode-600 @if(($column['key'] ?? '') === 'estado') text-center align-middle @endif @if(!empty($column['wrap'] ?? false)) align-top w-[38%] @endif">
                                                 @switch($column['type'] ?? 'text')
                                                     @case('text')
-                                                        @php
-                                                            $canShowLink = $columnIndex === 0 
-                                                                && isset($showRoute) 
-                                                                && !empty($showRoute)
-                                                                && isset($identifierKey) 
-                                                                && !empty($identifierKey)
-                                                                && data_get($row, $identifierKey) !== null
-                                                                && $canEdit;
-                                                        @endphp
-                                                        @if($canShowLink)
-                                                            <a class="font-medium text-slate-700 hover:text-slate-900 hover:underline @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif" href="{{ route($showRoute, data_get($row, $identifierKey)) }}">
+                                                        <span class="font-medium @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif">
+                                                            @if($column['key'] === 'idticket' && data_get($row, $column['key']))
+                                                                # {{ data_get($row, $column['key']) }}
+                                                            @else
                                                                 {{ data_get($row, $column['key']) ?? '-' }}
-                                                            </a>
-                                                        @else
-                                                            <span class="font-medium @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif">
-                                                                {{ data_get($row, $column['key']) ?? '-' }}
-                                                            </span>
-                                                        @endif
+                                                            @endif
+                                                        </span>
                                                     @break
                                                     @case('date')
                                                         @php
@@ -351,28 +292,23 @@
                                                             $estadoValue = data_get($row, $column['key']) ?? '';
                                                             $estadoLabel = trim((string) $estadoValue) !== '' ? trim((string) $estadoValue) : 'Sin estado';
                                                             $estadoNormalized = mb_strtolower($estadoLabel);
-                                                            
                                                             $estadoColores = match($estadoNormalized) {
-                                                                'nuevo'       => ['bg' => '#e0f2fe', 'text' => '#0369a1'], 
-    
-                                                                'asignado'    => ['bg' => '#e0e7ff', 'text' => '#4338ca'], 
-                                                                
-                                                                'en progreso' => ['bg' => '#ffedd5', 'text' => '#9a3412'], 
-                                                                
-                                                                'en espera'   => ['bg' => '#eff6fd', 'text' => '#475569'], 
-                                                                
-                                                                'resuelto'    => ['bg' => '#dcfce7', 'text' => '#15803d'], 
-                                                                
-                                                                'cerrado'     => ['bg' => '#1f2937', 'text' => '#ffffff'], 
-                                                                
-                                                                'cancelado'   => ['bg' => '#fee2e2', 'text' => '#991b1b'], 
-                                                                
+                                                                'activo' => ['bg' => '#dbeafe', 'text' => '#1d4ed8'],
+                                                                'en proceso' => ['bg' => '#ffedd5', 'text' => '#9a3412'],
+                                                                'resuelto' => ['bg' => '#dcfce7', 'text' => '#15803d'],
                                                                 default       => ['bg' => '#f9fafb', 'text' => '#6b7280'],
                                                             };
                                                         @endphp
-                                                        <span class="inline-flex items-center rounded-md border px-2.5 py-2 text-xs font-semibold" style="background-color: {{ $estadoColores['bg'] }}; color: {{ $estadoColores['text'] }};">
-                                                            {{ $estadoLabel }}
-                                                        </span>
+                                                        <div class="flex flex-col items-center gap-1">
+                                                            <span class="inline-flex items-center rounded-md border px-2.5 py-2 text-xs font-semibold" style="background-color: {{ $estadoColores['bg'] }}; color: {{ $estadoColores['text'] }};">
+                                                                {{ $estadoLabel }}
+                                                            </span>
+                                                            @if(!empty($row->estado_fase_texto))
+                                                                <span class="text-xs font-medium text-slate-500">
+                                                                    {{ $row->estado_fase_texto }}
+                                                                </span>
+                                                            @endif
+                                                        </div>
                                                     @break
                                                     @case('custom')
                                                         {!! data_get($row, $column['key']) ?? '-' !!}
@@ -395,11 +331,6 @@
                                                                 }
                                                             }
                                                             $initials = $initials ?: 'US';
-                                                            $canShowLink = isset($showRoute) 
-                                                                && !empty($showRoute)
-                                                                && isset($identifierKey) 
-                                                                && !empty($identifierKey)
-                                                                && data_get($row, $identifierKey) !== null;
                                                         @endphp
                                                         <div class="flex items-center">
                                                             <div class="w-10 h-10 flex-none overflow-hidden rounded-full bg-slate-100 text-slate-700 shadow-[0px_0px_0px_2px_#fff,_1px_1px_5px_rgba(0,0,0,0.12)] dark:bg-slate-700 dark:text-slate-200">
@@ -410,11 +341,7 @@
                                                                 @endif
                                                             </div>
                                                             <div class="ml-4">
-                                                                @if($canShowLink)
-                                                                    <a href="{{ route($showRoute, data_get($row, $identifierKey)) }}" class="font-medium whitespace-nowrap text-slate-700 hover:text-slate-900 hover:underline">{{ $name }}</a>
-                                                                @else
-                                                                    <span class="font-medium whitespace-nowrap text-slate-800 dark:text-slate-100">{{ $name }}</span>
-                                                                @endif
+                                                                <span class="font-medium whitespace-nowrap text-slate-800 dark:text-slate-100">{{ $name }}</span>
                                                                 @if($subtitle)
                                                                     <div class="text-slate-500 text-sm whitespace-nowrap mt-0.5">{{ $subtitle }}</div>
                                                                 @endif
@@ -424,69 +351,63 @@
                                                 @endswitch
                                             </td>
                                         @endforeach
-                                        @if(($showActionsColumn ?? true) && $canPerformActions)
+                                        @if($showActionsColumn ?? true)
                                             <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 relative border-dashed py-4 dark:bg-darkmode-600">
                                                 <div class="flex items-center justify-center h-full">
                                                     @php
-                                                        $canEditRoute = $canEdit && !empty($editRoute);
-                                                        $canDeleteRoute = $canDelete && !empty($destroyRoute);
-                                                        $rowLockBlocked = false;
-                                                        $rowLockOwner = null;
-
-                                                    if (isset($row->lockBlocked)) {
-                                                        $rowLockBlocked = (bool) $row->lockBlocked;
-                                                        $rowLockOwner = $row->lockOwner ?? null;
-                                                    } elseif (isset($lockResource) && !empty($lockResource) && isset($row->{$identifierKey})) {
-                                                        $lockInfo = \App\Support\ResourceLock::status($lockResource, (string) data_get($row, $identifierKey));
-                                                        $currentUser = session('erp_auth.usuario', 'anonimo');
-                                                        if ($lockInfo) {
-                                                            $rowLockBlocked = ($lockInfo['usuario'] ?? '') !== $currentUser;
-                                                            $rowLockOwner = $lockInfo['usuario'] ?? null;
-                                                        }
-                                                    }
-                                                @endphp
-                                                @if(($showActionsColumn ?? true) && ($canEditRoute || $canDeleteRoute))
-                                                    <div data-tw-merge="" data-tw-placement="bottom-end" class="dropdown dropdown--action relative h-5">
-                                                        <button type="button" data-local-dropdown-toggle="true" aria-expanded="false" class="cursor-pointer h-5 w-5 text-slate-500">
-                                                            <i data-tw-merge="" data-lucide="more-vertical" class="stroke-[1] w-5 h-5 fill-slate-400/70 stroke-slate-400/70"></i>
-                                                        </button>
-                                                        <div class="dropdown-menu absolute right-0 top-full z-[9999] mt-2 origin-top-right invisible opacity-0 pointer-events-none hidden">
-                                                            <div data-tw-merge="" class="dropdown-content rounded-xl border border-slate-200/80 bg-white p-2 shadow-xl shadow-slate-200/70 dark:border-transparent dark:bg-darkmode-600">
-                                                                @if($canEditRoute)
-                                                                    @if($rowLockBlocked)
-                                                                        <button type="button" disabled class="cursor-not-allowed flex items-center p-2 transition duration-300 ease-in-out rounded-md text-slate-400 dark:text-slate-500 dropdown-item opacity-50" title="Bloqueado por {{ $rowLockOwner ?? 'otro usuario' }}">
-                                                                            <i data-tw-merge="" data-lucide="check-square" class="stroke-[1] mr-2 h-4 w-4"></i>
-                                                                            Editar
-                                                                        </button>
-                                                                    @else
-                                                                        <a href="{{ route($editRoute, data_get($row, $identifierKey)) }}" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item">
-                                                                            <i data-tw-merge="" data-lucide="check-square" class="stroke-[1] mr-2 h-4 w-4"></i>
-                                                                            Editar
-                                                                        </a>
-                                                                     @endif
-                                                                @endif
-                                                                @if($canDeleteRoute)
-                                                                    <form method="POST" action="{{ route($destroyRoute, data_get($row, $identifierKey)) }}" class="inline delete-confirmation-form" data-relation-resource="{{ $listResource ?? '' }}" data-relation-record-id="{{ data_get($row, $identifierKey) }}">
-                                                                        @csrf
-                                                                        @method('DELETE')
-                                                                        <button type="button" data-delete-open="true" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item text-danger w-full text-left @if($rowLockBlocked) opacity-50 cursor-not-allowed pointer-events-none @endif" @if($rowLockBlocked) disabled title="Bloqueado por {{ $rowLockOwner ?? 'otro usuario' }}" @endif>
-                                                                            <i data-tw-merge="" data-lucide="trash2" class="stroke-[1] mr-2 h-4 w-4"></i>
-                                                                            Eliminar
-                                                                        </button>
-                                                                    </form>
-                                                                @endif
-                                                            </div>
+                                                        $currentUser = session('erp_auth.usuario', '');
+                                                        $lockedByOther = !empty($row->locked_by_other);
+                                                        $statusText = $row->estado_accion_texto ?? null;
+                                                        $estadoLabel = mb_strtolower(trim((string) ($row->estado ?? '')));
+                                                        $isResolved = $estadoLabel === 'resuelto';
+                                                    @endphp
+                                                    @if(!$canAttend)
+                                                        <div class="flex flex-col items-center gap-2">
+                                                            <span class="inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold text-slate-500 bg-slate-100 border-slate-200">
+                                                                Seguimiento
+                                                            </span>
+                                                            @if($statusText)
+                                                                <span class="text-xs text-slate-500">{{ $statusText }}</span>
+                                                            @endif
                                                         </div>
-                                                    </div>
-                                                @endif
-                                            </div>
-                                        </td>
-                                    @endif
+                                                    @elseif($isResolved)
+                                                        <div class="flex flex-col items-center gap-2">
+                                                            <button type="button" disabled class="inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition duration-200 opacity-60 cursor-not-allowed" style="color: #ffffff; background-color: #c71010;">
+                                                                Finalizado
+                                                            </button>
+                                                            @if($statusText)
+                                                                <span class="text-xs text-slate-500">{{ $statusText }}</span>
+                                                            @endif
+                                                        </div>
+                                                    @elseif($lockedByOther)
+                                                        <div class="flex flex-col items-center gap-2">
+                                                            <button type="button" disabled class="inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition duration-200 opacity-60 cursor-not-allowed" style="color: #ffffff; background-color: #c71010;">
+                                                                Atender
+                                                            </button>
+                                                            @if($statusText)
+                                                                <span class="text-xs text-slate-500">{{ $statusText }}</span>
+                                                            @endif
+                                                        </div>
+                                                    @else
+                                                        <div class="flex flex-col items-center gap-2">
+                                                            <a href="{{ route('modules.tickets.show', ['ticketId' => $row->idticket]) }}">
+                                                                <button type="button" class="inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition duration-200 " style="color: #ffffff; background-color: #c71010;">
+                                                                    Atender
+                                                                </button>
+                                                            </a>
+                                                                @if($statusText)
+                                                                    <span class="text-xs text-slate-500">{{ $statusText }}</span>
+                                                            @endif
+                                                        </div>
+                                                    @endif
+                                                </div>
+                                            </td>
+                                        @endif
                                     </tr>
                                     
                                 @empty
                                     <tr>
-                                        <td colspan="{{ count($columns) + 2 + ($showGroupClientsColumn ? 1 : 0) + (($showActionsColumn ?? true) && $canPerformActions ? 1 : 0) }}" class="px-5 py-10 text-center text-slate-500">
+                                        <td colspan="{{ count($columns) + 1 + ($showGroupClientsColumn ? 1 : 0) + (($showActionsColumn ?? true) ? 1 : 0) }}" class="px-5 py-10 text-center text-slate-500">
                                             No hay registros.
                                         </td>
                                     </tr>
@@ -495,46 +416,24 @@
                         </table>
                     </div>
 
-                    @if($items instanceof \Illuminate\Contracts\Pagination\Paginator)
-                        <div class="flex-reverse flex flex-col-reverse flex-wrap items-center gap-y-2 p-5 sm:flex-row">
-                           <div class="mr-auto w-full flex-1 sm:w-auto">
-                                {{ $items->onEachSide(1)->links('layouts.pagination') }}
+                        @if($items instanceof \Illuminate\Contracts\Pagination\Paginator)
+                            <div class="flex-reverse flex flex-col-reverse flex-wrap items-center gap-y-2 p-5 sm:flex-row">
+                               <div class="mr-auto w-full flex-1 sm:w-auto">
+                                    {{ $items->onEachSide(1)->links('layouts.pagination') }}
+                                </div>
+                               <select data-tw-merge="" name="perPage" id="list-per-page" class="transition duration-200 ease-in-out w-full text-sm border-slate-200 shadow-sm py-2 px-3 pr-8 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 group-[.form-inline]:flex-1 rounded-[0.5rem] sm:w-20">
+                                    @foreach([10, 25, 50, 100] as $limit)
+                                        <option value="{{ $limit }}" @if(request('perPage', 10) == $limit) selected @endif>{{ $limit }}</option>
+                                    @endforeach
+                                </select>
                             </div>
-                           <select data-tw-merge="" name="perPage" id="list-per-page" class="transition duration-200 ease-in-out w-full text-sm border-slate-200 shadow-sm py-2 px-3 pr-8 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 group-[.form-inline]:flex-1 rounded-[0.5rem] sm:w-20">
-                                @foreach([10, 25, 50, 100] as $limit)
-                                    <option value="{{ $limit }}" @if(request('perPage', 10) == $limit) selected @endif>{{ $limit }}</option>
-                                @endforeach
-                            </select>
-                        </div>
-                    @endif
+                        @endif
+                    </div>
                 </div>
             </div>
         </div>
     </div>        
             
-    <div id="delete-confirmation-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;" role="dialog" aria-modal="true" aria-labelledby="delete-confirmation-title" aria-describedby="delete-confirmation-message">
-        <div style="width:720px;max-width:92%;margin:0 auto;position:relative;border-radius:20px;background:#ffffff;box-shadow:0 20px 40px rgba(2,6,23,0.12);overflow:hidden;">
-            <button type="button" data-delete-modal-close style="position:absolute;right:16px;top:16px;height:44px;width:44px;border-radius:9999px;border:1px solid #e6e9ee;background:#fff;color:#6b7280;display:inline-flex;align-items:center;justify-content:center;" aria-label="Cerrar">
-                <i data-lucide="x" style="width:16px;height:16px"></i>
-            </button>
-            <div style="padding:40px 48px;text-align:left;">
-                <div style="margin:0 auto 24px;display:flex;height:64px;width:64px;align-items:center;justify-content:center;border-radius:9999px;border:1px solid #ef4444;background:#fff7f7;color:#ef4444;">
-                    <i data-lucide="x-circle" style="width:22px;height:22px"></i>
-                </div>
-                <h2 id="delete-confirmation-title" style="font-size:22px;font-weight:600;margin:0;color:#111827;">¿Estás seguro?</h2>
-                <p id="delete-confirmation-message" style="margin-top:12px;color:#6b7280;font-size:14px;line-height:1.6;">Esta acción eliminará el registro y no se podrá deshacer.</p>
-                <div id="delete-confirmation-details" class="mt-5 hidden rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900"></div>
-                <div id="delete-confirmation-relations" class="mt-5 hidden rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"></div>
-                <div id="delete-confirmation-hint" class="mt-3 hidden text-sm text-slate-600"></div>
-                <div style="margin-top:26px;display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;align-items:center;">
-                    <div id="delete-confirmation-actions" class="hidden flex flex-wrap gap-3 mr-auto"></div>
-                    <button type="button" data-delete-modal-close style="min-width:120px;padding:10px 18px;border-radius:10px;border:1px solid #e6e9ee;background:#ffffff;color:#374151;font-weight:600;">Cancelar</button>
-                    <button type="button" id="delete-confirmation-submit" style="min-width:120px;padding:10px 18px;border-radius:10px;background:#ef4444;color:#ffffff;font-weight:600;border:none;">Eliminar</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <style>
         .ticket-stats-white,
         .ticket-table-white {
@@ -562,6 +461,252 @@
             border: 1px solid #d9e2ec !important;
         }
 
+        .ticket-filters-bar {
+            display: flex;
+            align-items: center;
+            gap: 1.8rem;
+            justify-content: space-evenly;
+        }
+
+        .ticket-filters-track {
+            display: flex;
+            gap: 0.8rem;
+            overflow: visible;
+            justify-content:start;
+            padding-bottom: 0.5rem;
+        }
+
+        .ticket-filter-item {
+            min-width: 155px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            flex: 0 0 auto;
+        }
+
+        .ticket-filter-item--tom {
+            width: 165px;
+            min-width: 165px;
+            max-width: 165px;
+            position: relative;
+            z-index: 30;
+        }
+
+        .ticket-filter-item--wide {
+            min-width: 210px;
+        }
+
+        .ticket-filter-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #64748b;
+            letter-spacing: 0.04em;
+        }
+
+        .ticket-filter-control {
+            width: 100%;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            padding: 0.48rem 0.65rem;
+            font-size: 0.86rem;
+            background: #fff;
+            color: #0f172a;
+        }
+
+        .ticket-filter-control--select {
+            appearance: auto;
+            -webkit-appearance: menulist;
+            -moz-appearance: auto;
+            min-height: 2.45rem;
+            padding: 0.42rem 0.75rem;
+            line-height: 1.2rem;
+        }
+
+        #list-filter-form .ts-wrapper,
+        #list-filter-form .ts-wrapper.single,
+        #list-filter-form .ts-wrapper.plugin-dropdown_input,
+        #list-filter-form .ts-wrapper.plugin-dropdown_input.focus,
+        #list-filter-form .ts-wrapper.plugin-dropdown_input.dropdown-active,
+        .ticket-filter-item--tom .ts-wrapper,
+        .ticket-filter-item--tom .ts-wrapper.single,
+        .ticket-filter-item--tom .ts-wrapper.plugin-dropdown_input,
+        .ticket-filter-item--tom .ts-wrapper.plugin-dropdown_input.focus,
+        .ticket-filter-item--tom .ts-wrapper.plugin-dropdown_input.dropdown-active {
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            display: block !important;
+            box-sizing: border-box !important;
+            flex: 1 1 auto !important;
+        }
+
+        /* Tom Select compacto para ticket-table, alineado con los demás inputs */
+        #list-filter-form .tom-select.ts-wrapper,
+        #list-filter-form .tom-select,
+        #list-filter-form .tom-select.plugin-dropdown_input.focus.dropdown-active,
+        .ticket-filter-item--tom .tom-select.ts-wrapper,
+        .ticket-filter-item--tom .tom-select,
+        .ticket-filter-item--tom .tom-select.plugin-dropdown_input.focus.dropdown-active {
+            min-height: 2.45rem !important;
+            height: 2.45rem !important;
+            border: 1px solid #d1d5db !important;
+            border-radius: 0.5rem !important;
+            background-color: #fff !important;
+            box-shadow: none !important;
+            background-image: none !important;
+            width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+
+        #list-filter-form .tom-select.ts-wrapper .ts-control,
+        #list-filter-form .tom-select .ts-control,
+        #list-filter-form .tom-select.plugin-dropdown_input.focus.dropdown-active .ts-control,
+        .ticket-filter-item--tom .tom-select.ts-wrapper .ts-control,
+        .ticket-filter-item--tom .tom-select .ts-control,
+        .ticket-filter-item--tom .tom-select.plugin-dropdown_input.focus.dropdown-active .ts-control {
+            min-height: 2.45rem !important;
+            height: 2.45rem !important;
+            border: 0 !important;
+            box-shadow: none !important;
+            background: transparent !important;
+            padding: 0.35rem 0.75rem 0.15rem 0.75rem !important;
+            display: flex !important;
+            align-items: flex-start !important;
+            font-size: 0.8rem;
+            color: #0f172a;
+            width: 100% !important;
+            max-width: 100% !important;
+            box-sizing: border-box !important;
+        }
+
+        #list-filter-form .tom-select.ts-wrapper .ts-control .item,
+        #list-filter-form .tom-select.ts-wrapper .ts-control .items {
+            line-height: 1.2rem !important;
+            min-height: 1.6rem !important;
+            margin: 0 !important;
+        }
+
+        #list-filter-form .tom-select.ts-wrapper .ts-control .item,
+        .ticket-filter-item--tom .tom-select.ts-wrapper .ts-control .item {
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            max-width: calc(100% - 1.5rem) !important;
+        }
+
+        #list-filter-form .tom-select.ts-wrapper .ts-control .item {
+            padding: 0 !important;
+        }
+
+        #list-filter-form .tom-select .ts-control input.ts-input,
+        #list-filter-form .tom-select.plugin-dropdown_input.focus.dropdown-active .ts-control input.ts-input {
+            font-size: 0.86rem !important;
+            line-height: 1.1rem !important;
+            height: auto !important;
+            min-height: 1.1rem !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+
+        #list-filter-form .tom-select .ts-dropdown,
+        .ts-dropdown.ts-dropdown-portal,
+        .ticket-filter-item--tom .tom-select .ts-dropdown {
+            z-index: 9999 !important;
+            border: 1px solid #d1d5db !important;
+            border-radius: 0.5rem !important;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12) !important;
+            margin-top: 0.35rem !important;
+            width: auto !important;
+            min-width: 100% !important;
+            background: #ffffff !important;
+        }
+
+        #list-filter-form .tom-select .ts-dropdown.ts-dropdown-portal {
+            position: fixed !important;
+            margin-top: 0 !important;
+        }
+
+        #list-filter-form .tom-select .ts-dropdown .dropdown-input-wrap,
+        .ts-dropdown .dropdown-input-wrap {
+            padding: 0.5rem !important;
+        }
+
+        #list-filter-form .tom-select .ts-dropdown .dropdown-input-wrap .dropdown-input,
+        .ts-dropdown .dropdown-input-wrap .dropdown-input,
+        .ticket-filter-item--tom .tom-select .ts-dropdown .dropdown-input-wrap .dropdown-input {
+            border: 1px solid #d1d5db !important;
+            border-radius: 0.45rem !important;
+            font-size: 0.86rem !important;
+            padding: 0.45rem 0.65rem !important;
+            outline: none !important;
+            box-shadow: none !important;
+            color: #0f172a !important;
+        }
+
+        #list-filter-form .tom-select .ts-dropdown .dropdown-input-wrap .dropdown-input:focus,
+        #list-filter-form .tom-select .ts-dropdown .dropdown-input-wrap .dropdown-input:focus-visible,
+        .ts-dropdown .dropdown-input-wrap .dropdown-input:focus,
+        .ts-dropdown .dropdown-input-wrap .dropdown-input:focus-visible,
+        .ticket-filter-item--tom .tom-select .ts-dropdown .dropdown-input-wrap .dropdown-input:focus,
+        .ticket-filter-item--tom .tom-select .ts-dropdown .dropdown-input-wrap .dropdown-input:focus-visible {
+            border-color: #c71010 !important;
+            box-shadow: 0 0 0 3px rgba(199, 16, 16, 0.15) !important;
+            outline: none !important;
+        }
+
+        #list-filter-form .tom-select.ts-wrapper.focus,
+        #list-filter-form .tom-select.ts-wrapper.dropdown-active,
+        #list-filter-form .tom-select.plugin-dropdown_input.focus.dropdown-active {
+            border-color: #c71010 !important;
+            box-shadow: 0 0 0 3px rgba(199, 16, 16, 0.15) !important;
+        }
+
+        #list-filter-form .tom-select .ts-dropdown .ts-dropdown-content,
+        .ts-dropdown .ts-dropdown-content,
+        .ticket-filter-item--tom .tom-select .ts-dropdown .ts-dropdown-content {
+            max-height: 150px !important;
+            overflow-y: auto !important;
+        }
+
+        #list-filter-form .tom-select .ts-dropdown .option,
+        .ts-dropdown .option,
+        .ticket-filter-item--tom .tom-select .ts-dropdown .option {
+            padding: 0.55rem 0.75rem;
+            font-size: 0.86rem;
+        }
+
+        #list-filter-form .tom-select .ts-dropdown .option[data-selectable]:hover:not(.selected),
+        #list-filter-form .tom-select .ts-dropdown .option[data-selectable].active:not(.selected),
+        .ts-dropdown .option[data-selectable]:hover:not(.selected),
+        .ts-dropdown .option[data-selectable].active:not(.selected),
+        .ticket-filter-item--tom .tom-select .ts-dropdown .option[data-selectable]:hover:not(.selected),
+        .ticket-filter-item--tom .tom-select .ts-dropdown .option[data-selectable].active:not(.selected) {
+            background-color: #f8fafc;
+        }
+
+        #list-filter-form .tom-select .ts-dropdown .selected,
+        .ts-dropdown .selected,
+        .ticket-filter-item--tom .tom-select .ts-dropdown .selected {
+            background-color: rgb(199 16 16 / 1) !important;
+            color: #ffffff !important;
+        }
+
+        .ticket-filter-control:focus,
+        .ticket-filter-control:focus-visible {
+            outline: none;
+            border-color: #c71010;
+            box-shadow: 0 0 0 3px rgba(199, 16, 16, 0.15);
+        }
+
+        .ticket-filters-actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+            margin-top: 0.8rem;
+        }
+
         /* Aumentar tamaño de fuente del título y ajustar alineado con la tabla */
         .ticket-board__title {
             font-size: 1.25rem;
@@ -573,17 +718,6 @@
         .ticket-table-white table th,
         .ticket-table-white table td {
             font-size: 0.97rem;
-        }
-
-        .dropdown--action .dropdown-content {
-            min-width: 100px !important;
-            max-width: 140px !important;
-            width: auto !important;
-            padding: 6px !important;
-        }
-        .dropdown--action .dropdown-content .dropdown-item {
-            padding: 6px 8px !important;
-            font-size: 0.95rem !important;
         }
 
         .th-sort {
@@ -709,6 +843,19 @@
             }
         }
 
+        @media (max-width: 768px) {
+            .ticket-filters-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .ticket-filter-item,
+            .ticket-filter-item--wide {
+                min-width: 220px;
+            }
+
+        }
+
     </style>
     <script>
         (function () {
@@ -723,16 +870,195 @@
             let hasBoundEscapeDropdownClose = false;
             let fetchController = null;
             let fetchRequestId = 0;
-            let selectAllCheckbox = null;
-            let rowCheckboxes = [];
-            let bulkDeleteButton = null;
-            let bulkDeleteForm = null;
-            let bulkDeleteInputs = null;
 
             const getWrapper = () => document.getElementById(listWrapperId);
             const getForm = () => document.getElementById(formId);
             const getSearchInput = () => (form ? form.querySelector('[name="q"]') : null);
             const getPageSizeElement = () => (wrapper ? wrapper.querySelector('[name="perPage"]') : null);
+
+            const syncTomSelectControlWidth = (instance) => {
+                if (!instance) {
+                    return;
+                }
+
+                const stableWidth = instance?.input?.dataset?.tomselectBaseWidth;
+                if (!stableWidth) {
+                    return;
+                }
+
+                if (instance.wrapper) {
+                    instance.wrapper.style.width = stableWidth;
+                    instance.wrapper.style.minWidth = stableWidth;
+                    instance.wrapper.style.maxWidth = stableWidth;
+                    instance.wrapper.style.boxSizing = 'border-box';
+                }
+
+                if (instance.control) {
+                    instance.control.style.width = stableWidth;
+                    instance.control.style.minWidth = stableWidth;
+                    instance.control.style.maxWidth = stableWidth;
+                    instance.control.style.boxSizing = 'border-box';
+                }
+            };
+
+            const resetTomSelectDropdown = (dropdown) => {
+                if (!dropdown) {
+                    return;
+                }
+
+                dropdown.style.position = '';
+                dropdown.style.top = '';
+                dropdown.style.left = '';
+                dropdown.style.right = '';
+                dropdown.style.bottom = '';
+                dropdown.style.width = '';
+                dropdown.style.minWidth = '';
+                dropdown.style.maxWidth = '';
+                dropdown.style.marginTop = '';
+                dropdown.style.display = '';
+                dropdown.classList.remove('ts-dropdown-portal');
+            };
+
+            const portalTomSelectDropdown = (instance) => {
+                if (!instance || !instance.dropdown) {
+                    return;
+                }
+
+                if (instance.settings.dropdownParent !== 'body') {
+                    return;
+                }
+
+                const dropdown = instance.dropdown;
+                if (dropdown.dataset.originalParent === undefined && dropdown.parentNode) {
+                    dropdown.dataset.originalParent = '';
+                }
+
+                if (dropdown.parentNode !== document.body) {
+                    dropdown.dataset.originalParent = dropdown.parentNode ? '1' : '';
+                    document.body.appendChild(dropdown);
+                }
+
+                dropdown.classList.add('ts-dropdown-portal');
+            };
+
+            const cleanupTomSelectPortals = () => {
+                try {
+                    document.querySelectorAll('.ts-dropdown[data-erp-tomselect="1"]').forEach((el) => {
+                        if (el && el.parentNode) {
+                            el.parentNode.removeChild(el);
+                        }
+                    });
+                } catch (error) {
+                    console.warn('cleanupTomSelectPortals failed', error);
+                }
+            };
+
+            const positionTomSelectDropdown = (instance) => {
+                if (!instance || !instance.dropdown || !instance.control) {
+                    return;
+                }
+
+                const dropdown = instance.dropdown;
+                const control = instance.control;
+                const rect = control.getBoundingClientRect();
+                const dropdownHeight = dropdown.offsetHeight || dropdown.scrollHeight || 0;
+                const spaceBelow = window.innerHeight - rect.bottom;
+                const spaceAbove = rect.top;
+                const openUp = dropdownHeight > 0 && spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+
+                resetTomSelectDropdown(dropdown);
+
+                if (instance.settings.dropdownParent === 'body') {
+                    const gap = 6;
+                    dropdown.style.position = 'fixed';
+                    dropdown.style.left = `${Math.round(rect.left)}px`;
+                    dropdown.style.width = `${Math.round(rect.width)}px`;
+                    dropdown.style.maxWidth = `${Math.round(rect.width)}px`;
+                    dropdown.style.marginTop = '0';
+                    if (openUp) {
+                        dropdown.style.top = `${Math.max(Math.round(rect.top - dropdownHeight - gap), 6)}px`;
+                    } else {
+                        dropdown.style.top = `${Math.round(rect.bottom + gap)}px`;
+                    }
+                    return;
+                }
+
+                if (openUp) {
+                    dropdown.style.top = 'auto';
+                    dropdown.style.bottom = '100%';
+                    dropdown.style.marginTop = '0';
+                    dropdown.style.marginBottom = '0.25rem';
+                }
+            };
+
+            const initTomSelectFilters = () => {
+                if (typeof window.TomSelect !== 'function') {
+                    return;
+                }
+
+                cleanupTomSelectPortals();
+                document.querySelectorAll('select.tom-select').forEach((select) => {
+                    if (select.tomselect || select.tomSelect || select._tomselect) {
+                        try {
+                            (select.tomselect || select.tomSelect || select._tomselect).destroy();
+                        } catch (error) {
+                            console.warn('TomSelect destroy failed:', error);
+                        }
+                    }
+
+                    const baseWidth = Math.ceil(select.getBoundingClientRect().width || select.offsetWidth || select.parentElement?.getBoundingClientRect().width || select.parentElement?.offsetWidth || 0);
+                    if (baseWidth > 0) {
+                        select.dataset.tomselectBaseWidth = `${baseWidth}px`;
+                    }
+
+                    const dropdownParent = select.closest('.ticket-filter-item--tom') || wrapper;
+
+                    const instance = new TomSelect(select, {
+                        width: '100%',
+                        allowEmptyOption: true,
+                        create: false,
+                        maxOptions: 100,
+                        placeholder: select.getAttribute('data-placeholder') || 'Selecciona una opción',
+                        dropdownParent,
+                        closeAfterSelect: true,
+                        hidePlaceholder: true,
+                        openOnFocus: true,
+                        plugins: {
+                            dropdown_input: {}
+                        }
+                    });
+
+                    if (instance && instance.wrapper) {
+                        instance.wrapper.style.width = select.dataset.tomselectBaseWidth || '100%';
+                        instance.wrapper.style.maxWidth = select.dataset.tomselectBaseWidth || '100%';
+                        instance.wrapper.style.minWidth = select.dataset.tomselectBaseWidth || '0';
+                        instance.wrapper.style.boxSizing = 'border-box';
+                    }
+
+                    if (instance && instance.control) {
+                        instance.control.style.width = select.dataset.tomselectBaseWidth || '100%';
+                        instance.control.style.maxWidth = select.dataset.tomselectBaseWidth || '100%';
+                        instance.control.style.minWidth = select.dataset.tomselectBaseWidth || '0';
+                        instance.control.style.boxSizing = 'border-box';
+                    }
+
+                    syncTomSelectControlWidth(instance);
+
+                    if (instance && typeof instance.on === 'function') {
+                        instance.on('dropdown_open', () => {
+                            syncTomSelectControlWidth(instance);
+                            if (instance.settings.dropdownParent === 'body') {
+                                portalTomSelectDropdown(instance);
+                                requestAnimationFrame(() => positionTomSelectDropdown(instance));
+                            }
+                        });
+                        instance.on('dropdown_close', () => {
+                            resetTomSelectDropdown(instance.dropdown);
+                            syncTomSelectControlWidth(instance);
+                        });
+                    }
+                });
+            };
 
             const restoreIcons = () => {
                 try {
@@ -791,7 +1117,7 @@
             const positionMenu = (menu, toggle) => {
                 const rect = toggle.getBoundingClientRect();
                 const menuWidth = menu.offsetWidth;
-                let left = rect.left;
+                let left = rect.right - menuWidth;
                 const viewportMargin = 12;
 
                 if (left + menuWidth > window.innerWidth - viewportMargin) {
@@ -822,6 +1148,7 @@
                     window.visualViewport.addEventListener('scroll', handler);
                 }
                 window.addEventListener('resize', handler);
+                window.addEventListener('scroll', handler, true);
             };
 
             const detachMenuReposition = (menu) => {
@@ -834,6 +1161,7 @@
                     window.visualViewport.removeEventListener('scroll', handler);
                 }
                 window.removeEventListener('resize', handler);
+                window.removeEventListener('scroll', handler, true);
                 if (menu._repositionRaf) {
                     cancelAnimationFrame(menu._repositionRaf);
                 }
@@ -892,17 +1220,10 @@
                                     const rect = toggle.getBoundingClientRect();
                                     const naturalWidth = Math.ceil(menu.scrollWidth || menu.offsetWidth || 120);
                                     const buttonWidth = Math.ceil(rect.width || toggle.offsetWidth || 0);
-                                    let desiredWidth;
-                                    const isActionDropdown = Boolean(dropdown.closest('td'));
                                     const hasFormControls = Boolean(menu.querySelector('select, input[type="text"], input[type="search"], textarea, button[type="submit"], [data-list-clear]'));
-
-                                    if (isActionDropdown) {
-                                        desiredWidth = Math.min(Math.max(buttonWidth, 100), 140);
-                                    } else if (hasFormControls) {
-                                        desiredWidth = Math.min(Math.max(Math.ceil(naturalWidth + 16), buttonWidth, 230), 230);
-                                    } else {
-                                        desiredWidth = Math.min(Math.max(buttonWidth, 110), 140);
-                                    }
+                                    const desiredWidth = hasFormControls
+                                        ? Math.min(Math.max(Math.ceil(naturalWidth + 16), buttonWidth, 230), 230)
+                                        : Math.min(Math.max(buttonWidth, 110), 140);
 
                                     menu.style.minWidth = `${desiredWidth}px`;
                                     menu.style.right = 'auto';
@@ -912,7 +1233,6 @@
                                         inner.style.width = `${desiredWidth}px`;
                                         inner.style.minWidth = `${desiredWidth}px`;
                                         inner.style.maxWidth = `${desiredWidth}px`;
-                                        inner.style.padding = isActionDropdown ? '6px' : '';
                                     }
 
                                     positionMenu(menu, toggle);
@@ -1039,12 +1359,33 @@
             };
 
             const buildUrl = () => {
-                const params = new URLSearchParams(new FormData(form));
+                const formData = new FormData(form);
+                const params = new URLSearchParams();
+                const dateIsoValues = {};
+
+                for (const [key, value] of formData.entries()) {
+                    if (key.endsWith('_iso')) {
+                        const visibleKey = key.slice(0, -4);
+                        if (String(value).trim() !== '') {
+                            dateIsoValues[visibleKey] = value;
+                        }
+                        continue;
+                    }
+                    params.append(key, value);
+                }
+
+                Object.entries(dateIsoValues).forEach(([visibleKey, value]) => {
+                    if (String(value).trim() !== '') {
+                        params.set(visibleKey, value);
+                    }
+                });
+
                 for (const [key, value] of Array.from(params.entries())) {
                     if (value === null || String(value).trim() === '') {
                         params.delete(key);
                     }
                 }
+
                 const pageSizeElement = getPageSizeElement();
                 if (pageSizeElement && pageSizeElement.value) {
                     params.set('perPage', pageSizeElement.value);
@@ -1091,9 +1432,13 @@
                 if (!nextWrapper || !wrapper) {
                     return;
                 }
+                cleanupTomSelectPortals();
                 wrapper.innerHTML = nextWrapper.innerHTML;
                 restoreIcons();
                 initDropdowns();
+                if (window.initLitepickers && typeof window.initLitepickers === 'function') {
+                    window.initLitepickers(wrapper);
+                }
                 init();
             };
 
@@ -1202,161 +1547,6 @@
                 });
             };
 
-            const updateBulkActionState = () => {
-                if (!selectAllCheckbox || !rowCheckboxes.length) {
-                    if (bulkDeleteButton) {
-                        bulkDeleteButton.classList.add('hidden');
-                    }
-                    return;
-                }
-
-                const selectedCount = rowCheckboxes.filter((checkbox) => checkbox.checked).length;
-                if (bulkDeleteButton) {
-                    bulkDeleteButton.classList.toggle('hidden', selectedCount === 0);
-                }
-                selectAllCheckbox.checked = selectedCount > 0 && selectedCount === rowCheckboxes.length;
-                selectAllCheckbox.indeterminate = selectedCount > 0 && selectedCount < rowCheckboxes.length;
-
-                if (bulkDeleteForm && bulkDeleteInputs) {
-                    bulkDeleteInputs.innerHTML = '';
-                    rowCheckboxes.forEach((checkbox) => {
-                        if (!checkbox.checked) {
-                            return;
-                        }
-                        const input = document.createElement('input');
-                        input.type = 'hidden';
-                        input.name = 'selectedIds[]';
-                        input.value = checkbox.value;
-                        bulkDeleteInputs.appendChild(input);
-                    });
-                }
-            };
-
-            const handleSelectAllChange = () => {
-                if (!selectAllCheckbox) {
-                    return;
-                }
-                const checked = selectAllCheckbox.checked;
-                rowCheckboxes.forEach((checkbox) => {
-                    checkbox.checked = checked;
-                });
-                updateBulkActionState();
-            };
-
-            const handleRowCheckboxChange = () => {
-                updateBulkActionState();
-            };
-
-            const handleBulkDeleteButtonClick = (event) => {
-                if (!bulkDeleteButton || !bulkDeleteForm) {
-                    return;
-                }
-                event.preventDefault();
-                const selectedCount = rowCheckboxes.filter((checkbox) => checkbox.checked).length;
-                if (selectedCount === 0) {
-                    return;
-                }
-                bulkDeleteForm.submit();
-            };
-
-            const initBulkSelection = () => {
-                if (!wrapper) {
-                    return;
-                }
-
-                selectAllCheckbox = wrapper.querySelector('#list-select-all');
-                rowCheckboxes = Array.from(wrapper.querySelectorAll('.list-row-checkbox'));
-                bulkDeleteButton = document.getElementById('bulk-delete-button');
-                bulkDeleteForm = document.getElementById('bulk-delete-form');
-                bulkDeleteInputs = bulkDeleteForm ? bulkDeleteForm.querySelector('#bulk-delete-inputs') : null;
-
-                if (selectAllCheckbox) {
-                    selectAllCheckbox.removeEventListener('change', handleSelectAllChange);
-                    selectAllCheckbox.addEventListener('change', handleSelectAllChange);
-                }
-
-                rowCheckboxes.forEach((checkbox) => {
-                    checkbox.removeEventListener('change', handleRowCheckboxChange);
-                    checkbox.addEventListener('change', handleRowCheckboxChange);
-                });
-
-                if (bulkDeleteButton) {
-                    bulkDeleteButton.removeEventListener('click', handleBulkDeleteButtonClick);
-                    bulkDeleteButton.addEventListener('click', handleBulkDeleteButtonClick);
-                }
-
-                updateBulkActionState();
-            };
-
-            let deleteConfirmationModal = null;
-            let deleteConfirmationSubmit = null;
-            let activeDeleteForm = null;
-
-            const resetDeleteConfirmation = () => {
-                if (!deleteConfirmationModal) {
-                    return;
-                }
-                deleteConfirmationModal.style.display = 'none';
-                document.body.style.overflow = '';
-                activeDeleteForm = null;
-            };
-
-            const openDeleteConfirmation = (form) => {
-                if (!deleteConfirmationModal) {
-                    return;
-                }
-                activeDeleteForm = form;
-                deleteConfirmationModal.style.display = 'flex';
-                deleteConfirmationModal.style.justifyContent = 'center';
-                deleteConfirmationModal.style.alignItems = 'center';
-                deleteConfirmationModal.style.background = 'rgba(0,0,0,0.8)';
-                deleteConfirmationModal.style.zIndex = '9999';
-                document.body.style.overflow = 'hidden';
-            };
-
-            const handleDeleteButtonClick = (event) => {
-                const button = event.target.closest('button[data-delete-open="true"]');
-                if (!button || !wrapper || !wrapper.contains(button)) {
-                    return;
-                }
-
-                event.preventDefault();
-                const form = button.closest('form.delete-confirmation-form');
-                if (!form) {
-                    return;
-                }
-
-                closeOpenDropdowns();
-                openDeleteConfirmation(form);
-            };
-
-            const initDeleteConfirmation = () => {
-                deleteConfirmationModal = document.getElementById('delete-confirmation-modal');
-                deleteConfirmationSubmit = deleteConfirmationModal ? deleteConfirmationModal.querySelector('#delete-confirmation-submit') : null;
-
-                if (deleteConfirmationModal) {
-                    if (deleteConfirmationModal.parentElement !== document.body) {
-                        document.body.appendChild(deleteConfirmationModal);
-                    }
-
-                    deleteConfirmationModal.querySelectorAll('[data-delete-modal-close]').forEach((button) => {
-                        button.addEventListener('click', resetDeleteConfirmation);
-                    });
-                }
-
-                if (deleteConfirmationSubmit) {
-                    deleteConfirmationSubmit.addEventListener('click', () => {
-                        if (activeDeleteForm) {
-                            activeDeleteForm.submit();
-                        }
-                    });
-                }
-
-                if (wrapper) {
-                    wrapper.addEventListener('click', handleDeleteButtonClick);
-                }
-            };
-
             const init = () => {
                 form = getForm();
                 wrapper = getWrapper();
@@ -1366,6 +1556,10 @@
 
                 restoreIcons();
                 initDropdowns();
+                if (window.initLitepickers && typeof window.initLitepickers === 'function') {
+                    window.initLitepickers(document);
+                }
+                initTomSelectFilters();
                 closeLocalDropdowns();
                 searchInput = getSearchInput();
                 searchClearBtn = form.querySelector('[data-list-clear-search]');
@@ -1400,30 +1594,25 @@
                 }
 
                 attachPaginationLinks();
-                initBulkSelection();
-                initDeleteConfirmation();
             };
 
             const handlePageSizeChange = () => {
                 fetchList(buildUrl());
             };
 
+            window.ERPListRefresh = () => {
+                if (!form || !wrapper) {
+                    init();
+                }
+                if (!form || !wrapper) {
+                    return;
+                }
+                fetchList(buildUrl());
+            };
+
             window.addEventListener('popstate', () => {
                 if (form && wrapper) {
                     fetchList(window.location.href);
-                }
-            });
-
-            document.addEventListener('change', (event) => {
-                const target = event.target;
-                if (!(target instanceof HTMLInputElement)) {
-                    return;
-                }
-                if (target.id === 'list-select-all') {
-                    handleSelectAllChange();
-                }
-                if (target.classList.contains('list-row-checkbox')) {
-                    handleRowCheckboxChange();
                 }
             });
 

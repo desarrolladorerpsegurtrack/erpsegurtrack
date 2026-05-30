@@ -12,6 +12,18 @@ use Illuminate\Support\Facades\Hash;
 
 class UsuarioService
 {
+    public function getVistasCatalog(): Collection
+    {
+        return DB::table('vista')
+            ->select('idvista', 'nombre', 'detalle', 'estado')
+            ->orderBy('nombre')
+            ->get()
+            ->map(function ($vista) {
+                $vista->view_name = 'vistas.vista_' . $vista->idvista;
+                return $vista;
+            });
+    }
+
     public function getUserList(Request $request, int $perPage): LengthAwarePaginator
     {
         $query = $this->applyFilters($this->buildBaseQuery(), $this->extractFilters($request));
@@ -84,20 +96,36 @@ class UsuarioService
 
         $roleIds = $roles->pluck('idrol')->map(fn ($id) => (int) $id)->filter()->values();
         $permissionsByRole = collect();
+        $vistasByRole = collect();
+
         if ($roleIds->isNotEmpty()) {
             $permissionsByRole = DB::table('inforol')
                 ->whereIn('rol_idrol', $roleIds)
                 ->select('rol_idrol', 'modulo', 'accion')
                 ->get()
                 ->groupBy('rol_idrol');
+
+            $vistasByRole = DB::table('inforol')
+                ->whereIn('rol_idrol', $roleIds)
+                ->where('accion', 'ver')
+                ->where('modulo', 'like', 'ticket.vista.%')
+                ->select('rol_idrol', 'modulo')
+                ->get()
+                ->groupBy('rol_idrol');
         }
 
-        return $roles->map(function ($role) use ($permissionsByRole) {
+        return $roles->map(function ($role) use ($permissionsByRole, $vistasByRole) {
             $role->label = $role->nombre;
             $role->submodules_summary = $this->formatRoleSubmodules($role->submodulos);
             $role->permission_matrix = RolePermissionMatrix::matrixFromStoredPermissions(
                 $permissionsByRole->get((int) $role->idrol, collect())
             );
+            $role->vista_ids = collect($vistasByRole->get((int) $role->idrol, collect()))
+                ->map(fn ($row) => (int) str_replace('ticket.vista.', '', (string) ($row->modulo ?? '')))
+                ->filter(fn ($id) => $id > 0)
+                ->unique()
+                ->values()
+                ->all();
             return $role;
         });
     }
@@ -120,9 +148,9 @@ class UsuarioService
             ->get();
     }
 
-    public function createUser(array $validated, ?int $selectedRoleId, array $permissionPairs): void
+    public function createUser(array $validated, ?int $selectedRoleId, array $permissionPairs, array $vistaIds): void
     {
-        DB::transaction(function () use ($validated, $selectedRoleId, $permissionPairs) {
+        DB::transaction(function () use ($validated, $selectedRoleId, $permissionPairs, $vistaIds) {
             DB::table('usuario')->insert([
                 'usuario' => $validated['usuario'],
                 'personal_dniPersonal' => $validated['personal_dniPersonal'],
@@ -130,7 +158,9 @@ class UsuarioService
                 'estado' => $validated['estado'] ?? '1',
             ]);
 
-            if ($selectedRoleId !== null) {
+            $hasCustomPermissions = $permissionPairs !== [] || $vistaIds !== [];
+
+            if ($selectedRoleId !== null && !$hasCustomPermissions) {
                 DB::table('detallerol')->insert([
                     'usuario_usuario' => $validated['usuario'],
                     'rol_idrol' => $selectedRoleId,
@@ -141,8 +171,16 @@ class UsuarioService
             $internalRoleId = $this->createInternalRoleWithPermissions(
                 $validated['usuario'],
                 (string) ($validated['estado'] ?? '1'),
-                $permissionPairs
+                $permissionPairs,
+                $vistaIds
             );
+
+            if ($selectedRoleId !== null) {
+                DB::table('detallerol')->insert([
+                    'usuario_usuario' => $validated['usuario'],
+                    'rol_idrol' => $selectedRoleId,
+                ]);
+            }
 
             DB::table('detallerol')->insert([
                 'usuario_usuario' => $validated['usuario'],
@@ -174,6 +212,74 @@ class UsuarioService
             ->groupBy('rol_idrol');
     }
 
+    public function getStoredVistaIdsForRoleIds(Collection $roleIds): array
+    {
+        if ($roleIds->isEmpty()) {
+            return [];
+        }
+
+        return DB::table('inforol')
+            ->whereIn('rol_idrol', $roleIds->all())
+            ->where('accion', 'ver')
+            ->where('modulo', 'like', 'ticket.vista.%')
+            ->pluck('modulo')
+            ->map(function ($module) {
+                $module = (string) $module;
+                return (int) str_replace('ticket.vista.', '', $module);
+            })
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    public function extractSelectedVistaIds(array $vistaInput): array
+    {
+        return collect($vistaInput)
+            ->map(fn ($id) => is_numeric($id) ? (int) $id : null)
+            ->filter(fn ($id) => $id !== null && $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    public function requestDefaultsMatchRole(int $roleId, array $permissionPairs, array $vistaIds): bool
+    {
+        $requestMatrix = RolePermissionMatrix::defaultMatrix();
+        foreach ($permissionPairs as $permission) {
+            $module = mb_strtolower(trim((string) ($permission['modulo'] ?? '')));
+            $action = mb_strtolower(trim((string) ($permission['accion'] ?? '')));
+            if ($module === '' || $action === '') {
+                continue;
+            }
+            if (isset($requestMatrix[$module][$action])) {
+                $requestMatrix[$module][$action] = true;
+            }
+        }
+
+        $storedPermissions = $this->getStoredPermissionsForRoleIds(collect([$roleId]))
+            ->get($roleId, collect());
+
+        if ($requestMatrix !== RolePermissionMatrix::matrixFromStoredPermissions($storedPermissions)) {
+            return false;
+        }
+
+        $submittedVistaIds = collect($vistaIds)
+            ->map(fn ($id) => is_numeric($id) ? (int) $id : null)
+            ->filter(fn ($id) => $id !== null && $id > 0)
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        $roleVistaIds = collect($this->getStoredVistaIdsForRoleIds(collect([$roleId])))
+            ->sort()
+            ->values()
+            ->all();
+
+        return $submittedVistaIds === $roleVistaIds;
+    }
+
     public function resolveSelectedRoleId($roleInput): ?int
     {
         $roleIds = is_array($roleInput) ? $roleInput : [$roleInput];
@@ -188,11 +294,11 @@ class UsuarioService
         return $selected !== null ? (int) $selected : null;
     }
 
-    public function updateUser(string $usuario, array $validated, ?int $selectedRoleId, array $permissionPairs): array
+    public function updateUser(string $usuario, array $validated, ?int $selectedRoleId, array $permissionPairs, array $vistaIds): array
     {
         $result = ['newUsuario' => $usuario, 'oldInternalRoleId' => null];
 
-        DB::transaction(function () use ($usuario, $validated, $selectedRoleId, $permissionPairs, &$result) {
+        DB::transaction(function () use ($usuario, $validated, $selectedRoleId, $permissionPairs, $vistaIds, &$result) {
             $assignedRoles = $this->getAssignedRoles($usuario);
             $result['oldInternalRoleId'] = $assignedRoles
                 ->first(fn ($role) => (int) ($role->tipo ?? 1) === 0)?->idrol;
@@ -211,13 +317,26 @@ class UsuarioService
             DB::table('usuario')->where('usuario', $usuario)->update($payload);
             DB::table('detallerol')->where('usuario_usuario', $usuario)->delete();
 
+            $hasCustomPermissions = $permissionPairs !== [] || $vistaIds !== [];
+
+            if ($selectedRoleId !== null && !$hasCustomPermissions) {
+                DB::table('detallerol')->insert([
+                    'usuario_usuario' => $newUsuario,
+                    'rol_idrol' => $selectedRoleId,
+                ]);
+                if ($result['oldInternalRoleId'] !== null) {
+                    DB::table('inforol')->where('rol_idrol', (int) $result['oldInternalRoleId'])->delete();
+                    DB::table('rol')->where('idrol', (int) $result['oldInternalRoleId'])->where('tipo', 0)->delete();
+                }
+                $result['newUsuario'] = $newUsuario;
+                return;
+            }
+
             if ($selectedRoleId !== null) {
                 DB::table('detallerol')->insert([
                     'usuario_usuario' => $newUsuario,
                     'rol_idrol' => $selectedRoleId,
                 ]);
-                $result['newUsuario'] = $newUsuario;
-                return;
             }
 
             if ($result['oldInternalRoleId'] !== null) {
@@ -230,7 +349,12 @@ class UsuarioService
                     ]);
 
                 DB::table('inforol')->where('rol_idrol', (int) $result['oldInternalRoleId'])->delete();
-                DB::table('inforol')->insert(RolePermissionMatrix::buildInforolRows((int) $result['oldInternalRoleId'], $permissionPairs));
+                $permissionRows = RolePermissionMatrix::buildInforolRows((int) $result['oldInternalRoleId'], $permissionPairs);
+                $vistaRows = $this->buildVistaInforolRows((int) $result['oldInternalRoleId'], $vistaIds);
+                $rows = array_merge($permissionRows, $vistaRows);
+                if ($rows !== []) {
+                    DB::table('inforol')->insert($rows);
+                }
                 DB::table('detallerol')->insert([
                     'usuario_usuario' => $newUsuario,
                     'rol_idrol' => (int) $result['oldInternalRoleId'],
@@ -242,7 +366,8 @@ class UsuarioService
             $internalRoleId = $this->createInternalRoleWithPermissions(
                 $newUsuario,
                 (string) ($validated['estado'] ?? '1'),
-                $permissionPairs
+                $permissionPairs,
+                $vistaIds
             );
 
             DB::table('detallerol')->insert([
@@ -407,7 +532,7 @@ class UsuarioService
             ->groupBy('usuario_usuario');
     }
 
-    private function createInternalRoleWithPermissions(string $usuario, string $estado, array $permissionPairs): int
+    private function createInternalRoleWithPermissions(string $usuario, string $estado, array $permissionPairs, array $vistaIds): int
     {
         $roleId = DB::table('rol')->insertGetId([
             'nombre' => $this->internalRoleNameForUser($usuario),
@@ -416,9 +541,43 @@ class UsuarioService
             'fechaCreacion' => now(),
         ]);
 
-        DB::table('inforol')->insert(RolePermissionMatrix::buildInforolRows($roleId, $permissionPairs));
+        $permissionRows = RolePermissionMatrix::buildInforolRows($roleId, $permissionPairs);
+        $vistaRows = $this->buildVistaInforolRows($roleId, $vistaIds);
+
+        if ($permissionRows !== [] || $vistaRows !== []) {
+            DB::table('inforol')->insert(array_merge($permissionRows, $vistaRows));
+        }
 
         return (int) $roleId;
+    }
+
+    private function buildVistaInforolRows(int $roleId, array $vistaIds): array
+    {
+        if ($vistaIds === []) {
+            return [];
+        }
+
+        $vistasById = $this->getVistasCatalog()->keyBy(fn ($vista) => (int) $vista->idvista);
+        $rows = [];
+
+        foreach ($vistaIds as $vistaId) {
+            $vistaId = (int) $vistaId;
+            if ($vistaId <= 0) {
+                continue;
+            }
+
+            $vista = $vistasById->get($vistaId);
+            $vistaName = $vista !== null ? (string) $vista->nombre : 'Vista ' . $vistaId;
+
+            $rows[] = [
+                'rol_idrol' => $roleId,
+                'modulo' => 'ticket.vista.' . $vistaId,
+                'accion' => 'ver',
+                'nombre' => 'Ver vista ' . $vistaName,
+            ];
+        }
+
+        return $rows;
     }
 
     private function internalRoleNameForUser(string $usuario): string
@@ -458,6 +617,7 @@ class UsuarioService
         }
 
         $visible = array_slice($modules, 0, $limit);
+        $visible = array_map(fn (string $module) => $this->normalizeRoleModuleDisplayName($module), $visible);
         $result = implode(', ', $visible);
 
         return count($modules) > $limit ? $result . ', ...' : $result;
@@ -486,5 +646,14 @@ class UsuarioService
             ->unique()
             ->values()
             ->all();
+    }
+
+    private function normalizeRoleModuleDisplayName(string $module): string
+    {
+        return match (mb_strtolower(trim($module))) {
+            'ticket' => 'gestion',
+            'tickets' => 'gestiones',
+            default => $module,
+        };
     }
 }

@@ -19,9 +19,11 @@ Route::middleware(['erp.auth', 'audit.log', 'erp.action'])->group(function () {
     require __DIR__.'/usuarios.php';
     require __DIR__.'/clientes.php';
     require __DIR__.'/vehiculos.php';
+    require __DIR__.'/almacen.php';
     require __DIR__.'/dispositivo-cliente.php';
     require __DIR__.'/servicio-cliente.php';
     require __DIR__.'/configuracion.php';
+    require __DIR__.'/sistema.php';
     require __DIR__.'/lineas-chips.php';
     require __DIR__.'/tickets.php';
 

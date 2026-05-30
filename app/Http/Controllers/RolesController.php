@@ -30,20 +30,24 @@ class RolesController extends Controller
         'personal' => 'Personal',
         'roles' => 'Roles',
         'usuarios' => 'Usuarios',
-        'vehiculos' => [
-            'label' => 'Vehículos',
-            'submodules' => [
-                'vehiculos' => 'Vehículos',
-            ],
-        ],
-        'dispositivo_cliente' => 'Dispositivo cliente',
-        'servicio_cliente' => 'Servicio cliente',
         'clientes' => [
             'label' => 'Clientes',
             'submodules' => [
                 'clientes.cliente' => 'Cliente',
                 'clientes.credenciales' => 'Credenciales',
                 'clientes.grupo_cliente' => 'Grupo cliente',
+                'servicio_cliente' => 'Servicio cliente',
+                'vehiculos' => 'Vehículos',
+                'dispositivo_cliente' => 'Dispositivo cliente',
+            ],
+        ],
+        'almacen' => [
+            'label' => 'Almacen',
+            'submodules' => [
+                'almacen' => 'Almacen',
+                'almacen.planes_servicios' => 'Planes y servicios',
+                'almacen.nota_ingreso' => 'Nota de ingreso',
+                'almacen.nota_salida' => 'Nota de salida',
             ],
         ],
         'configuracion' => [
@@ -61,10 +65,15 @@ class RolesController extends Controller
                 'configuracion.tecnologia' => 'Tecnologia',
                 'configuracion.tipo_gasto' => 'Tipo de gasto',
                 'configuracion.tipo_cobro' => 'Tipo de cobro',
-                'configuracion.vista' => 'Vista',
-                'configuracion.flujo' => 'Flujo',
-                'configuracion.flujoregla' => 'Flujo Regla',
-                'configuracion.historialflujo' => 'Historial Flujo',
+            ],
+        ],
+        'sistema' => [
+            'label' => 'Sistema',
+            'submodules' => [
+                'sistema.vista' => 'Vista',
+                'sistema.flujo' => 'Flujo',
+                'sistema.flujoregla' => 'Flujo Regla',
+                'sistema.historialflujo' => 'Historial Flujo',
             ],
         ],
         'lineas_chips' => [
@@ -79,13 +88,6 @@ class RolesController extends Controller
             ],
         ],
     ];
-    private const PERMISSION_ACTIONS = [
-        'ver' => 'Ver',
-        'crear' => 'Crear',
-        'editar' => 'Editar',
-        'eliminar' => 'Eliminar',
-    ];
-
     public function index(Request $request): View
     {
         $roles = $this->rolesService->getRoleList($request, $this->resolvePerPage($request));
@@ -146,6 +148,9 @@ class RolesController extends Controller
 
     public function create(): View
     {
+        $vistas = $this->rolesService->getVistasCatalog();
+        $selectedVistaIds = $this->rolesService->extractSelectedVistaIds((array) old('vista_permissions', []));
+
         return view('role.roles-form', [
             'title' => 'Nuevo Rol',
             'moduleTitle' => 'Módulo Roles',
@@ -153,7 +158,7 @@ class RolesController extends Controller
             'formAction' => route('modules.roles.store'),
             'backRoute' => route('modules.roles'),
             'record' => null,
-            'fields' => $this->buildRoleFields($this->defaultPermissionMatrix()),
+            'fields' => $this->buildRoleFields($this->defaultPermissionMatrix(), $vistas, $selectedVistaIds),
             'readOnly' => false,
         ]);
     }
@@ -161,18 +166,23 @@ class RolesController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'nombre' => ['required', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('rol', 'nombre')->where(fn ($query) => $query->where('tipo', 1))],
-            'estado' => ['nullable', Rule::in(['0', '1'])],
-            'permissions' => ['required', 'array'],
+            'nombre' => ['required', 'string', 'min:2', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('rol', 'nombre')->where(fn ($query) => $query->where('tipo', 1))],
+            'estado' => ['required', Rule::in(['0', '1'])],
+            'permissions' => ['nullable', 'array'],
+            'vista_permissions' => ['nullable', 'array'],
+            'vista_permissions.*' => ['integer', Rule::exists('vista', 'idvista')],
         ], [
             'nombre.unique' => 'Ya existe un rol con ese nombre.',
-            'permissions.required' => 'Debes seleccionar al menos un permiso.',
+            'estado.required' => 'El estado es requerido.',
+            'vista_permissions.*.exists' => 'Una de las vistas seleccionadas no existe.',
         ]);
 
         $permissionPairs = $this->rolesService->extractSelectedPermissions((array) ($request->input('permissions') ?? []));
-        if ($permissionPairs === []) {
+        $vistaIds = $this->rolesService->extractSelectedVistaIds((array) ($request->input('vista_permissions') ?? []));
+
+        if ($permissionPairs === [] && $vistaIds === []) {
             return back()
-                ->withErrors(['permissions' => 'Debes seleccionar al menos un permiso.'])
+                ->withErrors(['permissions' => 'Debes seleccionar al menos un permiso o una vista permitida.'])
                 ->withInput();
         }
 
@@ -183,7 +193,7 @@ class RolesController extends Controller
                 ->withInput();
         }
 
-        $roleId = $this->rolesService->createRole($validated, $permissionPairs);
+        $roleId = $this->rolesService->createRole($validated, $permissionPairs, $vistaIds);
 
         $this->publishResourceEvent('roles', (string) $roleId, 'created');
 
@@ -203,6 +213,8 @@ class RolesController extends Controller
         }
 
         $storedPermissions = $this->rolesService->getStoredPermissionsByRoleId($id);
+        $storedVistaIds = $this->rolesService->getStoredVistaIdsByRoleId($id);
+        $selectedVistaIds = $this->rolesService->extractSelectedVistaIds((array) old('vista_permissions', $storedVistaIds));
 
         return view('role.roles-form', [
             'title' => 'Editar Rol',
@@ -211,7 +223,11 @@ class RolesController extends Controller
             'formAction' => route('modules.roles.update', $id),
             'backRoute' => route('modules.roles'),
             'record' => $role,
-            'fields' => $this->rolesService->buildRoleFields($this->rolesService->matrixFromStoredPermissions($storedPermissions)),
+            'fields' => $this->rolesService->buildRoleFields(
+                $this->rolesService->matrixFromStoredPermissions($storedPermissions),
+                $this->rolesService->getVistasCatalog(),
+                $selectedVistaIds
+            ),
             'readOnly' => true,
         ] + $this->prepareLockViewData('roles', (string) $id));
     }
@@ -231,18 +247,23 @@ class RolesController extends Controller
         }
 
         $validated = $request->validate([
-            'nombre' => ['required', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('rol', 'nombre')->ignore($id, 'idrol')->where(fn ($query) => $query->where('tipo', 1))],
-            'estado' => ['nullable', Rule::in(['0', '1'])],
-            'permissions' => ['required', 'array'],
+            'nombre' => ['required', 'string', 'min:2', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('rol', 'nombre')->ignore($id, 'idrol')->where(fn ($query) => $query->where('tipo', 1))],
+            'estado' => ['required', Rule::in(['0', '1'])],
+            'permissions' => ['nullable', 'array'],
+            'vista_permissions' => ['nullable', 'array'],
+            'vista_permissions.*' => ['integer', Rule::exists('vista', 'idvista')],
         ], [
             'nombre.unique' => 'Ya existe un rol con ese nombre.',
-            'permissions.required' => 'Debes seleccionar al menos un permiso.',
+            'estado.required' => 'El estado es requerido.',
+            'vista_permissions.*.exists' => 'Una de las vistas seleccionadas no existe.',
         ]);
 
         $permissionPairs = $this->rolesService->extractSelectedPermissions((array) ($request->input('permissions') ?? []));
-        if ($permissionPairs === []) {
+        $vistaIds = $this->rolesService->extractSelectedVistaIds((array) ($request->input('vista_permissions') ?? []));
+
+        if ($permissionPairs === [] && $vistaIds === []) {
             return back()
-                ->withErrors(['permissions' => 'Debes seleccionar al menos un permiso.'])
+                ->withErrors(['permissions' => 'Debes seleccionar al menos un permiso o una vista permitida.'])
                 ->withInput();
         }
 
@@ -253,7 +274,7 @@ class RolesController extends Controller
                 ->withInput();
         }
 
-        $this->rolesService->updateRole($id, $validated, $permissionPairs);
+        $this->rolesService->updateRole($id, $validated, $permissionPairs, $vistaIds);
 
         $this->publishResourceEvent('roles', (string) $id, 'updated');
         $this->publishUsersAffectedByRole($id, ['source' => 'role.update']);
@@ -315,34 +336,10 @@ class RolesController extends Controller
     }
 
 
-    private function buildRoleFields(array $permissionsMatrix): array
+    private function buildRoleFields(array $permissionsMatrix, 
+        Collection $vistasCatalog, array $selectedVistaIds): array
     {
-        return [
-            [
-                'name' => 'nombre',
-                'type' => 'text',
-                'label' => 'Nombre',
-                'required' => true,
-                'maxlength' => 50,
-            ],
-            [
-                'name' => 'estado',
-                'type' => 'select',
-                'label' => 'Estado',
-                'required' => false,
-                'options' => ['1' => 'Activo', '0' => 'Inactivo'],
-            ],
-            [
-                'name' => 'permissions',
-                'type' => 'permissions-matrix',
-                'label' => 'Permisos del rol',
-                'required' => true,
-                'modules' => RolePermissionMatrix::modules(),
-                'actions' => RolePermissionMatrix::actions(),
-                'value' => $permissionsMatrix,
-                'colSpan' => 2,
-            ],
-        ];
+        return $this->rolesService->buildRoleFields($permissionsMatrix, $vistasCatalog, $selectedVistaIds);
     }
 
     private function defaultPermissionMatrix(): array

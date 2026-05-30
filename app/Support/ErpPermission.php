@@ -6,6 +6,12 @@ namespace App\Support;
 class ErpPermission
 {
     private const MODULE_CHILDREN = [
+        'almacen' => [
+            'almacen.almacen',
+            'almacen.planes_servicios',
+            'almacen.nota_ingreso',
+            'almacen.nota_salida',
+        ],
         'clientes' => [
             'clientes.cliente',
             'clientes.credenciales',
@@ -20,6 +26,8 @@ class ErpPermission
             'configuracion.moneda',
             'configuracion.tributo',
             'configuracion.unidad_medida',
+            'configuracion.empresapropietaria',
+            'configuracion.modelo',
             'configuracion.marca',
             'configuracion.tecnologia',
             'configuracion.tipo_gasto',
@@ -38,10 +46,15 @@ class ErpPermission
             'configuracion.proveedor',
             'configuracion.certificadosunat',
             'configuracion.vigencia_oferta',
-            'configuracion.vista',
-            'configuracion.flujo',
-            'configuracion.flujoregla',
-            'configuracion.historialflujo',
+            'configuracion.detalle_lista_precio',
+            'configuracion.elemento_almacen',
+            
+        ],
+        'sistema' => [
+            'sistema.vista',
+            'sistema.flujo',
+            'sistema.flujoregla',
+            'sistema.historialflujo',
         ],
         'lineas_chips' => [
             'lineas_chips.numero_telefonico',
@@ -60,12 +73,25 @@ class ErpPermission
         'vehiculo' => 'vehiculos',
         'vehiculos' => 'vehiculos',
         'dispositivo-cliente' => 'dispositivo_cliente',
-        'dispositivo_cliente' => 'dispositivo_cliente',
         'servicio-cliente' => 'servicio_cliente',
         'servicio_cliente' => 'servicio_cliente',
         'serviciocliente' => 'servicio_cliente',
         'tickets' => 'tickets',
         'ticket' => 'tickets',
+    ];
+
+    private const ALMACEN_ROUTE_RULES = [
+        'planes-servicios' => 'almacen.planes_servicios',
+        'planes_servicios' => 'almacen.planes_servicios',
+        'planes servicios' => 'almacen.planes_servicios',
+        'nota-ingreso' => 'almacen.nota_ingreso',
+        'nota_ingreso' => 'almacen.nota_ingreso',
+        'nota ingreso' => 'almacen.nota_ingreso',
+        'nota-salida' => 'almacen.nota_salida',
+        'nota_salida' => 'almacen.nota_salida',
+        'nota salida' => 'almacen.nota_salida',
+        '' => 'almacen.almacen',
+        'index' => 'almacen.almacen',
     ];
 
     private const CLIENTES_ROUTE_RULES = [
@@ -133,6 +159,12 @@ class ErpPermission
         'tipoelemento' => 'configuracion.tipo_elemento',
         'tipos-elemento' => 'configuracion.tipo_elemento',
         'tipos_elemento' => 'configuracion.tipo_elemento',
+        'empresapropietaria' => 'configuracion.empresapropietaria',
+        'empresa-propietaria' => 'configuracion.empresapropietaria',
+        'empresa_propietaria' => 'configuracion.empresapropietaria',
+        'empresa propietaria' => 'configuracion.empresapropietaria',
+        'modelo' => 'configuracion.modelo',
+        'modelos' => 'configuracion.modelo',
         'tipos-documento' => 'configuracion.tipo_documento',
         'tipos_documento' => 'configuracion.tipo_documento',
         'tipo-documento' => 'configuracion.tipo_documento',
@@ -159,6 +191,12 @@ class ErpPermission
         'listas_precio' => 'configuracion.lista_precio',
         'lista-precio' => 'configuracion.lista_precio',
         'lista_precio' => 'configuracion.lista_precio',
+        'detalle-lista-precio' => 'configuracion.detalle_lista_precio',
+        'detalle_lista_precio' => 'configuracion.detalle_lista_precio',
+        'detallelistaprecio' => 'configuracion.detalle_lista_precio',
+        'elemento-almacen' => 'configuracion.elemento_almacen',
+        'elemento_almacen' => 'configuracion.elemento_almacen',
+        'elementoalmacen' => 'configuracion.elemento_almacen',
         'tipos-pedido' => 'configuracion.tipo_pedido',
         'tipos_pedido' => 'configuracion.tipo_pedido',
         'tipo-pedido' => 'configuracion.tipo_pedido',
@@ -172,19 +210,23 @@ class ErpPermission
         'vigencias_oferta' => 'configuracion.vigencia_oferta',
         'vigencia-oferta' => 'configuracion.vigencia_oferta',
         'vigencia_oferta' => 'configuracion.vigencia_oferta',
-        'vistas' => 'configuracion.vista',
-        'vista' => 'configuracion.vista',
-        'flujos' => 'configuracion.flujo',
-        'flujo' => 'configuracion.flujo',
-        'flujo-reglas' => 'configuracion.flujoregla',
-        'flujo_reglas' => 'configuracion.flujoregla',
-        'flujoregla' => 'configuracion.flujoregla',
-        'flujoreglas' => 'configuracion.flujoregla',
-        'historial-flujos' => 'configuracion.historialflujo',
-        'historial_flujos' => 'configuracion.historialflujo',
-        'historialflujo' => 'configuracion.historialflujo',
-        'historial-flujo' => 'configuracion.historialflujo',
-        'historial_flujo' => 'configuracion.historialflujo',
+        
+    ];
+
+    private const SISTEMA_ROUTE_RULES = [
+        'vistas' => 'sistema.vista',
+        'vista' => 'sistema.vista',
+        'flujos' => 'sistema.flujo',
+        'flujo' => 'sistema.flujo',
+        'flujo-reglas' => 'sistema.flujoregla',
+        'flujo_reglas' => 'sistema.flujoregla',
+        'flujoregla' => 'sistema.flujoregla',
+        'flujoreglas' => 'sistema.flujoregla',
+        'historial-flujos' => 'sistema.historialflujo',
+        'historial_flujos' => 'sistema.historialflujo',
+        'historialflujo' => 'sistema.historialflujo',
+        'historial-flujo' => 'sistema.historialflujo',
+        'historial_flujo' => 'sistema.historialflujo',
     ];
 
     private const COMPOUND_PERMISSION_RULES = [
@@ -194,6 +236,7 @@ class ErpPermission
         ['prefix' => 'clientes.', 'permission' => 'clientes.cliente'],
         ['prefix' => 'vehiculo', 'permission' => 'vehiculos'],
         ['prefix' => 'vehiculos', 'permission' => 'vehiculos'],
+        ['prefix' => 'almacen', 'permission' => 'almacen'],
         ['prefix' => 'servicio-cliente', 'permission' => 'servicio_cliente'],
         ['prefix' => 'servicio_cliente', 'permission' => 'servicio_cliente'],
         ['prefix' => 'serviciocliente', 'permission' => 'servicio_cliente'],
@@ -209,18 +252,27 @@ class ErpPermission
         ['prefix' => 'configuracion.', 'containsAny' => ['ubigeo'], 'permission' => 'configuracion.ubigeo'],
         ['prefix' => 'configuracion.', 'containsAny' => ['cargo'], 'permission' => 'configuracion.cargo'],
         ['prefix' => 'configuracion.', 'containsAny' => ['marca'], 'permission' => 'configuracion.marca'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['empresapropietaria', 'empresa-propietaria', 'empresa_propietaria', 'empresa propietaria'], 'permission' => 'configuracion.empresapropietaria'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['modelo'], 'permission' => 'configuracion.modelo'],
         ['prefix' => 'configuracion.', 'containsAny' => ['tecnologia'], 'permission' => 'configuracion.tecnologia'],
         ['prefix' => 'configuracion.', 'containsAny' => ['plataforma'], 'containsNone' => ['tipo'], 'permission' => 'configuracion.plataforma'],
         ['prefix' => 'configuracion.', 'containsAny' => ['flujoregla', 'flujo-regla', 'flujo_regla', 'flujo regla'], 'permission' => 'configuracion.flujoregla'],
         ['prefix' => 'configuracion.', 'containsAny' => ['historialflujo', 'historial-flujo', 'historial_flujo', 'historial flujo'], 'permission' => 'configuracion.historialflujo'],
         ['prefix' => 'configuracion.', 'containsAny' => ['vista'], 'permission' => 'configuracion.vista'],
         ['prefix' => 'configuracion.', 'containsAny' => ['flujo'], 'containsNone' => ['flujoregla', 'historial'], 'permission' => 'configuracion.flujo'],
+
+        ['prefix' => 'sistema.', 'containsAny' => ['flujoregla', 'flujo-regla', 'flujo_regla', 'flujo regla'], 'permission' => 'sistema.flujoregla'],
+        ['prefix' => 'sistema.', 'containsAny' => ['historialflujo', 'historial-flujo', 'historial_flujo', 'historial flujo'], 'permission' => 'sistema.historialflujo'],
+        ['prefix' => 'sistema.', 'containsAny' => ['vista'], 'permission' => 'sistema.vista'],
+        ['prefix' => 'sistema.', 'containsAny' => ['flujo'], 'containsNone' => ['flujoregla', 'historial'], 'permission' => 'sistema.flujo'],
         ['prefix' => 'configuracion.', 'containsAny' => ['forma_pago', 'formapago', 'pago'], 'permission' => 'configuracion.forma_pago'],
         ['prefix' => 'configuracion.', 'containsAny' => ['entidad_bancaria', 'entidadbancaria', 'bancaria'], 'permission' => 'configuracion.entidad_bancaria'],
         ['prefix' => 'configuracion.', 'containsAny' => ['operador'], 'permission' => 'configuracion.operador'],
         ['prefix' => 'configuracion.', 'containsAny' => ['numero_dispositivo', 'numerosdispositivo', 'numerodispositivo', 'numero-dispositivo', 'numeros-dispositivo'], 'permission' => 'lineas_chips.numero_dispositivo'],
         ['prefix' => 'configuracion.', 'containsAny' => ['numero_telefonico', 'numerotelefonico', 'telefono', 'telefonico'], 'permission' => 'lineas_chips.numero_telefonico'],
         ['prefix' => 'configuracion.', 'containsAny' => ['lista_precio', 'listaprecio'], 'permission' => 'configuracion.lista_precio'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['detalle_lista_precio', 'detallelistaprecio', 'detalle-lista-precio', 'detalle lista precio'], 'permission' => 'configuracion.detalle_lista_precio'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['elemento_almacen', 'elementoalmacen', 'elemento-almacen', 'elemento almacen'], 'permission' => 'configuracion.elemento_almacen'],
         ['prefix' => 'configuracion.', 'containsAny' => ['proveedor'], 'permission' => 'configuracion.proveedor'],
         ['prefix' => 'configuracion.', 'containsAny' => ['certificado', 'sunat'], 'permission' => 'configuracion.certificadosunat'],
         ['prefix' => 'configuracion.', 'containsAny' => ['vigencia_oferta', 'vigenciaoferta', 'vigencia'], 'permission' => 'configuracion.vigencia_oferta'],
@@ -233,7 +285,7 @@ class ErpPermission
 
     public static function allPermissionKeys(): array
     {
-        $permissionKeys = ['personal', 'roles', 'usuarios', 'vehiculos', 'dispositivo_cliente', 'servicio_cliente', 'tickets'];
+        $permissionKeys = ['personal', 'roles', 'usuarios', 'vehiculos', 'almacen', 'dispositivo_cliente', 'servicio_cliente', 'tickets'];
 
         foreach (self::MODULE_CHILDREN as $children) {
             $permissionKeys = array_merge($permissionKeys, $children);
@@ -293,12 +345,20 @@ class ErpPermission
             return self::FIXED_ROUTE_MODULES[$module];
         }
 
+        if ($module === 'almacen') {
+            return self::ALMACEN_ROUTE_RULES[$resource] ?? 'almacen.almacen';
+        }
+
         if ($module === 'clientes') {
             return self::CLIENTES_ROUTE_RULES[$resource] ?? 'clientes.cliente';
         }
 
         if ($module === 'configuracion') {
             return self::CONFIGURACION_ROUTE_RULES[$resource] ?? 'configuracion';
+        }
+
+        if ($module === 'sistema') {
+            return self::SISTEMA_ROUTE_RULES[$resource] ?? 'sistema';
         }
 
         if ($module === 'lineas-chips' || $module === 'lineas_chips') {
@@ -324,6 +384,11 @@ class ErpPermission
             'rol', 'roles' => 'roles',
             'usuario', 'usuarios' => 'usuarios',
             'vehiculo', 'vehiculos' => 'vehiculos',
+            'almacen' => 'almacen',
+            'almacen.almacen' => 'almacen.almacen',
+            'almacen.planes_servicios', 'almacen.planes-servicios', 'almacen.planes servicios' => 'almacen.planes_servicios',
+            'almacen.nota_ingreso', 'almacen.nota-ingreso', 'almacen.nota ingreso' => 'almacen.nota_ingreso',
+            'almacen.nota_salida', 'almacen.nota-salida', 'almacen.nota salida' => 'almacen.nota_salida',
             'servicio-cliente', 'servicio_cliente', 'serviciocliente' => 'servicio_cliente',
             'clientes.cliente', 'clientes.clientes', 'clientes.direccion', 'clientes.direcciones', 'clientes.contacto', 'clientes.contactos' => 'clientes.cliente',
             'clientes.credenciales', 'clientes.credencial' => 'clientes.credenciales',
@@ -340,16 +405,24 @@ class ErpPermission
             'configuracion.tributo', 'configuracion.tributos' => 'configuracion.tributo',
             'configuracion.unidad_medida', 'configuracion.unidad-medida', 'configuracion.unidadmedida' => 'configuracion.unidad_medida',
             'configuracion.marca', 'configuracion.marcas' => 'configuracion.marca',
+            'configuracion.empresapropietaria', 'configuracion.empresapropietarias', 'configuracion.empresa-propietaria', 'configuracion.empresa_propietaria', 'empresapropietaria', 'empresa-propietaria', 'empresa_propietaria', 'empresa propietaria' => 'configuracion.empresapropietaria',
+            'configuracion.modelo', 'configuracion.modelos', 'modelo', 'modelos' => 'configuracion.modelo',
             'configuracion.tecnologia', 'configuracion.tecnologias' => 'configuracion.tecnologia',
             'configuracion.tipo_gasto', 'configuracion.tipos_gasto', 'configuracion.tipo-gasto', 'configuracion.tipos-gasto' => 'configuracion.tipo_gasto',
             'configuracion.tipo_cobro', 'configuracion.tipos_cobro', 'configuracion.tipo-cobro', 'configuracion.tipos-cobro' => 'configuracion.tipo_cobro',
             'configuracion.operador', 'configuracion.operadores' => 'configuracion.operador',
             'configuracion.tipo_vehiculo', 'configuracion.tipos_vehiculo', 'configuracion.tipo-vehiculo', 'configuracion.tipos-vehiculo' => 'configuracion.tipo_vehiculo',
             'configuracion.tipo_operacion', 'configuracion.tipos_operacion', 'configuracion.tipo-operacion', 'configuracion.tipos-operacion' => 'configuracion.tipo_operacion',
+            'configuracion.detalle_lista_precio', 'configuracion.detallelistaprecio', 'configuracion.detalle-lista-precio', 'detalle_lista_precio', 'detallelistaprecio', 'detalle-lista-precio' => 'configuracion.detalle_lista_precio',
+            'configuracion.elemento_almacen', 'configuracion.elementoalmacen', 'configuracion.elemento-almacen', 'elemento_almacen', 'elementoalmacen', 'elemento-almacen' => 'configuracion.elemento_almacen',
             'configuracion.vista', 'configuracion.vistas', 'vista', 'vistas' => 'configuracion.vista',
             'configuracion.flujo', 'configuracion.flujos', 'flujo', 'flujos' => 'configuracion.flujo',
             'configuracion.flujoregla', 'configuracion.flujoreglas', 'configuracion.flujo-regla', 'configuracion.flujo_regla', 'flujoregla', 'flujoreglas' => 'configuracion.flujoregla',
             'configuracion.historialflujo', 'configuracion.historialflujos', 'configuracion.historial-flujo', 'configuracion.historial_flujo', 'historialflujo', 'historialflujos' => 'configuracion.historialflujo',
+            'sistema.vista', 'sistema.vistas' => 'sistema.vista',
+            'sistema.flujo', 'sistema.flujos' => 'sistema.flujo',
+            'sistema.flujoregla', 'sistema.flujoreglas', 'sistema.flujo-regla', 'sistema.flujo_regla' => 'sistema.flujoregla',
+            'sistema.historialflujo', 'sistema.historialflujos', 'sistema.historial-flujo', 'sistema.historial_flujo' => 'sistema.historialflujo',
             'lineas_chips', 'lineas-chips', 'lineas chips' => 'lineas_chips',
             'lineas_chips.numero_telefonico', 'lineas_chips.numeros_telefonico', 'lineas_chips.numero-telefonico', 'lineas_chips.numeros-telefonico' => 'lineas_chips.numero_telefonico',
             'lineas_chips.simcard', 'lineas-chips.simcard', 'simcard' => 'lineas_chips.simcard',
@@ -359,6 +432,8 @@ class ErpPermission
             'lineas_chips.bajar_numeros', 'lineas-chips.bajar-numeros', 'bajar_numeros', 'bajar-numeros', 'bajar numeros' => 'lineas_chips.bajar_numeros',
             'cliente', 'clientes', 'direccioncliente', 'direccion cliente' => 'clientes',
             'configuracion', 'configuración', 'settings', 'setting' => 'configuracion',
+            'sistema', 'sistemas' => 'sistema',
+           
             'estadocliente', 'estado cliente' => 'configuracion.estado',
             default => self::normalizeCompoundPermissionKey($normalized),
         };
@@ -430,6 +505,7 @@ class ErpPermission
 
         return match ($normalized) {
             'ver', 'read', 'view', 'index', 'listar', 'list' => 'ver',
+            'ver flujo', 'ver_flujo', 'verflujo' => 'ver_flujo',
             'crear', 'create', 'store', 'new' => 'crear',
             'editar', 'edit', 'update', 'actualizar' => 'editar',
             'eliminar', 'delete', 'destroy', 'remove' => 'eliminar',
@@ -459,6 +535,10 @@ class ErpPermission
 
         $segments = explode('.', $routeName);
         $last = mb_strtolower((string) end($segments));
+
+        if (str_starts_with($routeNameLower, 'modules.tickets.') && in_array($last, ['advance', 'cancel'], true)) {
+            return 'ver';
+        }
         
         if (in_array($last, ['store', 'crear-rapido'], true)) {
             return 'crear';

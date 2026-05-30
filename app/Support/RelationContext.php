@@ -25,16 +25,21 @@ class RelationContext
         'configuracion.ubigeo' => ['table' => 'ubigeo', 'primaryKey' => 'idubigeo', 'label' => 'Ubigeo'],
         'configuracion.ubigeos' => ['table' => 'ubigeo', 'primaryKey' => 'idubigeo', 'label' => 'Ubigeo'],
         'configuracion.cargo' => ['table' => 'cargopersonal', 'primaryKey' => 'idcargoPersonal', 'label' => 'Cargo de personal'],
+        'configuracion.cargos' => ['table' => 'cargopersonal', 'primaryKey' => 'idcargoPersonal', 'label' => 'Cargo de personal'],
         'configuracion.moneda' => ['table' => 'moneda', 'primaryKey' => 'idmoneda', 'label' => 'Moneda'],
         'configuracion.monedas' => ['table' => 'moneda', 'primaryKey' => 'idmoneda', 'label' => 'Moneda'],
         'configuracion.tributo' => ['table' => 'tributo', 'primaryKey' => 'idtributo', 'label' => 'Tributo'],
         'configuracion.tributos' => ['table' => 'tributo', 'primaryKey' => 'idtributo', 'label' => 'Tributo'],
         'configuracion.unidad_medida' => ['table' => 'unidadmedida', 'primaryKey' => 'idunidadMedida', 'label' => 'Unidad de medida'],
         'configuracion.unidad-medida' => ['table' => 'unidadmedida', 'primaryKey' => 'idunidadMedida', 'label' => 'Unidad de medida'],
+        'configuracion.empresapropietaria' => ['table' => 'empresapropietaria', 'primaryKey' => 'RUC', 'label' => 'Empresa propietaria'],
+        'configuracion.modelo' => ['table' => 'modelo', 'primaryKey' => 'idmodelo', 'label' => 'Modelo'],
         'configuracion.marca' => ['table' => 'marca', 'primaryKey' => 'idmarca', 'label' => 'Marca'],
         'configuracion.tecnologia' => ['table' => 'tecnologia', 'primaryKey' => 'idtecnologia', 'label' => 'Tecnología'],
         'configuracion.tipo_gasto' => ['table' => 'tipogasto', 'primaryKey' => 'idtipoGasto', 'label' => 'Tipo de gasto'],
+        'configuracion.tipos-gasto' => ['table' => 'tipogasto', 'primaryKey' => 'idtipoGasto', 'label' => 'Tipo de gasto'],
         'configuracion.tipo_cobro' => ['table' => 'tipocobro', 'primaryKey' => 'idtipoCobros', 'label' => 'Tipo de cobro'],
+        'configuracion.tipos-cobro' => ['table' => 'tipocobro', 'primaryKey' => 'idtipoCobros', 'label' => 'Tipo de cobro'],
         'configuracion.tipo_plataforma' => ['table' => 'tipoplataforma', 'primaryKey' => 'idtipoPlataforma', 'label' => 'Tipo de plataforma'],
         'configuracion.tipos-plataforma' => ['table' => 'tipoplataforma', 'primaryKey' => 'idtipoPlataforma', 'label' => 'Tipo de plataforma'],
         'configuracion.plataforma' => ['table' => 'plataforma', 'primaryKey' => 'idplataforma', 'label' => 'Plataforma'],
@@ -54,6 +59,12 @@ class RelationContext
         'configuracion.tipos-operacion' => ['table' => 'tipooperacion', 'primaryKey' => 'idtipoOperacion', 'label' => 'Tipo de operación'],
         'configuracion.lista_precio' => ['table' => 'listaprecio', 'primaryKey' => 'idlistaPrecio', 'label' => 'Lista de precio'],
         'configuracion.listas-precio' => ['table' => 'listaprecio', 'primaryKey' => 'idlistaPrecio', 'label' => 'Lista de precio'],
+        'configuracion.detalle_lista_precio' => ['table' => 'detallelistaprecio', 'primaryKey' => 'iddetalleListaPrecio', 'label' => 'Detalle de lista de precio'],
+        'configuracion.detalle-lista-precio' => ['table' => 'detallelistaprecio', 'primaryKey' => 'iddetalleListaPrecio', 'label' => 'Detalle de lista de precio'],
+        'configuracion.elemento_almacen' => ['table' => 'elementoalmacen', 'primaryKey' => 'imei', 'label' => 'Elemento de almacén'],
+        'configuracion.elemento-almacen' => ['table' => 'elementoalmacen', 'primaryKey' => 'imei', 'label' => 'Elemento de almacén'],
+        'almacen.nota_ingreso' => ['table' => 'elementoalmacen', 'primaryKey' => 'imei', 'label' => 'Nota de ingreso'],
+        'almacen.nota_salida' => ['table' => 'elementoalmacen', 'primaryKey' => 'imei', 'label' => 'Nota de salida'],
         'configuracion.tipo_pedido' => ['table' => 'tipopedido', 'primaryKey' => 'idtipoPedido', 'label' => 'Tipo de pedido'],
         'configuracion.tipos-pedido' => ['table' => 'tipopedido', 'primaryKey' => 'idtipoPedido', 'label' => 'Tipo de pedido'],
         'configuracion.proveedor' => ['table' => 'proveedor', 'primaryKey' => 'idproveedor', 'label' => 'Proveedor'],
@@ -83,16 +94,18 @@ class RelationContext
         'estadocliente' => ['label' => 'Estado de cliente', 'primaryKey' => 'idestadoCliente', 'previewColumns' => ['idestadoCliente', 'detalle']],
         'tipocontacto' => ['label' => 'Tipo de contacto', 'primaryKey' => 'idtipoContacto', 'previewColumns' => ['idtipoContacto', 'nombre']],
         'ubigeo' => ['label' => 'Ubigeo', 'primaryKey' => 'idubigeo', 'previewColumns' => ['idubigeo', 'departamento', 'provincia', 'distrito']],
-        'cargopersonal' => ['label' => 'Cargo de personal', 'primaryKey' => 'idcargoPersonal', 'previewColumns' => ['idcargoPersonal', 'nombreCargo']],
+        'cargopersonal' => ['label' => 'Cargo de personal', 'primaryKey' => 'idcargoPersonal', 'previewColumns' => ['descripcion']],
         'moneda' => ['label' => 'Moneda', 'primaryKey' => 'idmoneda', 'previewColumns' => ['idmoneda', 'nombre']],
-        'tributo' => ['label' => 'Tributo', 'primaryKey' => 'idtributo', 'previewColumns' => ['idtributo', 'nombre']],
-        'unidadmedida' => ['label' => 'Unidad de medida', 'primaryKey' => 'idunidadMedida', 'previewColumns' => ['idunidadMedida', 'nombre']],
+        'tributo' => ['label' => 'Tributo', 'primaryKey' => 'idtributo', 'previewColumns' => ['idtributo', 'nombreTributo']],
+        'unidadmedida' => ['label' => 'Unidad de medida', 'primaryKey' => 'idunidadMedida', 'previewColumns' => ['idunidadMedida', 'detalle', 'nomenclatura']],
+        'empresapropietaria' => ['label' => 'Empresa propietaria', 'primaryKey' => 'RUC', 'previewColumns' => ['RUC', 'razonSocial', 'rubro']],
+        'modelo' => ['label' => 'Modelo', 'primaryKey' => 'idmodelo', 'previewColumns' => ['idmodelo', 'nombreModelo']],
         'marca' => ['label' => 'Marca', 'primaryKey' => 'idmarca', 'previewColumns' => ['idmarca', 'nombre']],
-        'tecnologia' => ['label' => 'Tecnología', 'primaryKey' => 'idtecnologia', 'previewColumns' => ['idtecnologia', 'nombre']],
+        'tecnologia' => ['label' => 'Tecnología', 'primaryKey' => 'idtecnologia', 'previewColumns' => ['idtecnologia', 'nombreTecnologia', 'detalle' ]],
         'tipogasto' => ['label' => 'Tipo de gasto', 'primaryKey' => 'idtipoGasto', 'previewColumns' => ['idtipoGasto', 'nombre']],
-        'tipocobro' => ['label' => 'Tipo de cobro', 'primaryKey' => 'idtipoCobros', 'previewColumns' => ['idtipoCobros', 'nombre']],
+        'tipocobro' => ['label' => 'Tipo de cobro', 'primaryKey' => 'idtipoCobros', 'previewColumns' => ['idtipoCobros', 'nombre', 'recurrencia']],
         'tipoplataforma' => ['label' => 'Tipo de plataforma', 'primaryKey' => 'idtipoPlataforma', 'previewColumns' => ['idtipoPlataforma', 'nombre']],
-        'plataforma' => ['label' => 'Plataforma', 'primaryKey' => 'idplataforma', 'previewColumns' => ['idplataforma', 'nombre']],
+        'plataforma' => ['label' => 'Plataforma', 'primaryKey' => 'idplataforma', 'previewColumns' => ['idplataforma', 'nombrePlataforma']],
         'tipoelemento' => ['label' => 'Tipo de elemento', 'primaryKey' => 'idtipoElemento', 'previewColumns' => ['idtipoElemento', 'nombre']],
         'tipodocumento' => ['label' => 'Tipo de documento', 'primaryKey' => 'idtipoDocumento', 'previewColumns' => ['idtipoDocumento', 'nombre']],
         'formapago' => ['label' => 'Forma de pago', 'primaryKey' => 'idformaPago', 'previewColumns' => ['idformaPago', 'nombre']],
@@ -100,8 +113,10 @@ class RelationContext
         'operador' => ['label' => 'Operador', 'primaryKey' => 'idoperador', 'previewColumns' => ['idoperador', 'nombre']],
         'tipovehiculo' => ['label' => 'Tipo de vehículo', 'primaryKey' => 'idtipoVehiculo', 'previewColumns' => ['idtipoVehiculo', 'nombre']],
         'tipooperacion' => ['label' => 'Tipo de operación', 'primaryKey' => 'idtipoOperacion', 'previewColumns' => ['idtipoOperacion', 'nombre']],
-        'listaprecio' => ['label' => 'Lista de precio', 'primaryKey' => 'idlistaPrecio', 'previewColumns' => ['idlistaPrecio', 'nombre']],
-        'tipopedido' => ['label' => 'Tipo de pedido', 'primaryKey' => 'idtipoPedido', 'previewColumns' => ['idtipoPedido', 'nombre']],
+        'listaprecio' => ['label' => 'Lista de precio', 'primaryKey' => 'idlistaPrecio', 'previewColumns' => ['idlistaPrecio', 'nombreLista']],
+        'detallelistaprecio' => ['label' => 'Detalle de lista de precio', 'primaryKey' => 'iddetalleListaPrecio', 'previewColumns' => ['almacen_idalmacen', 'ListaPrecio_idListaPrecio', 'precio']],
+        'elementoalmacen' => ['label' => 'Elemento de almacén', 'primaryKey' => 'imei', 'previewColumns' => ['imei', 'dispositivo_iddispositivo']],
+        'tipopedido' => ['label' => 'Tipo de pedido', 'primaryKey' => 'idtipoPedido', 'previewColumns' => ['idtipoPedido', 'nomenclatura']],
         'proveedor' => ['label' => 'Proveedor', 'primaryKey' => 'idproveedor', 'previewColumns' => ['idproveedor', 'razonSocial', 'nombreComercial']],
         'certificadosunat' => ['label' => 'Certificado SUNAT', 'primaryKey' => 'idcertificadosSunat', 'previewColumns' => ['idcertificadosSunat', 'nombre']],
         'vigenciaoferta' => ['label' => 'Vigencia de oferta', 'primaryKey' => 'idvigenciaOferta', 'previewColumns' => ['idvigenciaOferta', 'nombre']],
@@ -274,10 +289,12 @@ class RelationContext
         }
 
         $singular = (string) Str::singular($base);
+        $tableInfo = self::TABLE_LABELS[$singular] ?? null;
+        $primaryKey = $tableInfo['primaryKey'] ?? ('id' . Str::studly($singular));
 
         return [
             'table' => $singular,
-            'primaryKey' => 'id' . Str::studly($singular),
+            'primaryKey' => $primaryKey,
             'label' => self::guessLabelFromResource($normalized),
         ];
     }
@@ -314,14 +331,65 @@ class RelationContext
                 return (string) $clientId;
             }
 
+                if ($context['table'] === 'detallelistaprecio') {
+                    $almacenId = data_get($record, 'almacen_idalmacen');
+                    $listaPrecioId = data_get($record, 'ListaPrecio_idListaPrecio');
+                    $precio = trim((string) data_get($record, 'precio', ''));
+
+                    $parts = [];
+
+                    if ($almacenId !== null && $almacenId !== '') {
+                        $almacen = DB::table('almacen')->where('idalmacen', $almacenId)->first();
+                        if ($almacen) {
+                            $almacenLabel = trim((string) data_get($almacen, 'detalle', ''));
+                            if ($almacenLabel === '') {
+                                $almacenLabel = trim((string) data_get($almacen, 'idalmacen', ''));
+                            }
+                            if ($almacenLabel !== '') {
+                                $parts[] = $almacenLabel;
+                            }
+                        }
+                    }
+
+                    if ($listaPrecioId !== null && $listaPrecioId !== '') {
+                        $listaPrecio = DB::table('listaprecio')->where('idListaPrecio', $listaPrecioId)->first();
+                        if ($listaPrecio) {
+                            $listaPrecioLabel = trim((string) data_get($listaPrecio, 'nombreLista', ''));
+                            if ($listaPrecioLabel === '') {
+                                $listaPrecioLabel = trim((string) data_get($listaPrecio, 'idListaPrecio', ''));
+                            }
+                            if ($listaPrecioLabel !== '') {
+                                $parts[] = $listaPrecioLabel;
+                            }
+                        }
+                    }
+
+                    if ($precio !== '') {
+                        $parts[] = $precio;
+                    }
+
+                    if (!empty($parts)) {
+                        return implode(' - ', $parts);
+                    }
+
+                    return (string) data_get($record, 'iddetalleListaPrecio', '');
+                }
+
             $preferredColumns = [
                 'nombre',
+                'nombreTecnologia',
+                'nombreLista',
+                'imei',
                 'nombreComercial',
                 'razonSocial',
-                'descripcion',
                 'detalle',
+                'nomenclatura',
+                'nombreMarca',
+                'nombreTributo',
+                'descripcion',
                 'titulo',
                 'usuario',
+                'recurrencia',
                 'correo',
                 'placa',
                 'numeroTelefonico',
@@ -434,6 +502,22 @@ class RelationContext
 
     private static function formatPreviewRecord(string $table, object $record): string
     {
+        if ($table === 'personal') {
+            $nombre = trim((string) data_get($record, 'nombre', ''));
+            $apellido = trim((string) data_get($record, 'apellido', ''));
+            $dni = trim((string) data_get($record, 'dniPersonal', ''));
+
+            $parts = array_filter([$nombre, $apellido]);
+            $namePart = implode(' ', $parts);
+            $suffix = $dni !== '' ? (' - ' . $dni) : '';
+
+            if ($namePart === '') {
+                return $dni ?: '';
+            }
+
+            return $namePart . $suffix;
+        }
+
         if ($table === 'detallegrupocliente') {
             $clientId = data_get($record, 'cliente_idcliente');
             if ($clientId) {
@@ -455,11 +539,97 @@ class RelationContext
             return (string) $clientId;
         }
 
+        if ($table === 'detallelistaprecio') {
+            $almacenId = data_get($record, 'almacen_idalmacen');
+            $listaPrecioId = data_get($record, 'ListaPrecio_idListaPrecio');
+            $precio = trim((string) data_get($record, 'precio', ''));
+
+            $parts = [];
+
+            if ($almacenId !== null && $almacenId !== '') {
+                $almacen = DB::table('almacen')->where('idalmacen', $almacenId)->first();
+                if ($almacen) {
+                    $almacenLabel = trim((string) data_get($almacen, 'detalle', ''));
+                    if ($almacenLabel === '') {
+                        $almacenLabel = trim((string) data_get($almacen, 'idalmacen', ''));
+                    }
+                    if ($almacenLabel !== '') {
+                        $parts[] = $almacenLabel;
+                    }
+                }
+            }
+
+            if ($listaPrecioId !== null && $listaPrecioId !== '') {
+                $listaPrecio = DB::table('listaprecio')->where('idListaPrecio', $listaPrecioId)->first();
+                if ($listaPrecio) {
+                    $listaPrecioLabel = trim((string) data_get($listaPrecio, 'nombreLista', ''));
+                    if ($listaPrecioLabel === '') {
+                        $listaPrecioLabel = trim((string) data_get($listaPrecio, 'idListaPrecio', ''));
+                    }
+                    if ($listaPrecioLabel !== '') {
+                        $parts[] = $listaPrecioLabel;
+                    }
+                }
+            }
+
+            if ($precio !== '') {
+                $parts[] = $precio;
+            }
+
+            if (!empty($parts)) {
+                return implode(' - ', $parts);
+            }
+
+            return (string) data_get($record, 'iddetalleListaPrecio', '');
+        }
+
+        if ($table === 'elementoalmacen') {
+            $imei = trim((string) data_get($record, 'imei', ''));
+            $dispositivoId = data_get($record, 'dispositivo_iddispositivo');
+            $dispositivoLabel = '';
+
+            if ($dispositivoId !== null && $dispositivoId !== '') {
+                $dispositivo = DB::table('almacen')
+                    ->where('idalmacen', $dispositivoId)
+                    ->first();
+
+                if ($dispositivo) {
+                    $dispositivoLabel = trim((string) data_get($dispositivo, 'detalle', ''));
+                    if ($dispositivoLabel === '') {
+                        $dispositivoLabel = trim((string) data_get($dispositivo, 'idalmacen', ''));
+                    }
+                }
+            }
+
+            $parts = array_values(array_filter([$imei, $dispositivoLabel], fn ($part) => $part !== ''));
+
+            if (!empty($parts)) {
+                return implode(' - ', $parts);
+            }
+
+            return $imei !== '' ? $imei : (string) data_get($record, 'dispositivo_iddispositivo', '');
+        }
+
         $tableInfo = self::TABLE_LABELS[$table] ?? null;
         $columns = $tableInfo['previewColumns'] ?? array_keys((array) $record);
+        $primaryKey = $tableInfo['primaryKey'] ?? null;
         $parts = [];
 
         foreach ($columns as $column) {
+            // skip primary key and likely identifier columns (start with 'id' or contain '_id')
+            $lowerColumn = Str::lower((string) $column);
+            if ($primaryKey !== null && $column === $primaryKey) {
+                continue;
+            }
+            if (Str::startsWith($lowerColumn, 'id') || Str::contains($lowerColumn, '_id')) {
+                continue;
+            }
+
+            // skip renovation column which often contains 0 and isn't useful in previews
+            if ($lowerColumn === 'renovacion') {
+                continue;
+            }
+
             $value = data_get($record, $column);
             if ($value !== null && $value !== '') {
                 $parts[] = (string) $value;

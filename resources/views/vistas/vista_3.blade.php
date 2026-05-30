@@ -3,7 +3,6 @@
 @section('title', $title ?? 'Vista 3')
 @section('header', $title ?? 'Vista 3')
 
-
 @section('breadcrumb')
     <nav aria-label="breadcrumb" class="flex hidden flex-1 xl:block">
         <ol class="flex items-center text-theme-1">
@@ -14,13 +13,13 @@
         </ol>
     </nav>
 @endsection
-
 @section('content')
     <div class="grid grid-cols-12 gap-6">
         <div class="col-span-12">
             <div class="box p-5">
                 <h2 class="text-lg font-medium mr-auto">{{ $title ?? 'Vista 3' }}</h2>
                 <p class="mt-3">Contenido de la Vista 3</p>
+                @include('vistas._actions')
             </div>
         </div>
     </div>

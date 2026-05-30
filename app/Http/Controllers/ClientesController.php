@@ -29,21 +29,6 @@ class ClientesController extends Controller
         $this->clienteService = $clienteService;
     }
 
-    private const SPANISH_MONTHS_SHORT = [
-        '01' => 'ene',
-        '02' => 'feb',
-        '03' => 'mar',
-        '04' => 'abr',
-        '05' => 'may',
-        '06' => 'jun',
-        '07' => 'jul',
-        '08' => 'ago',
-        '09' => 'sep',
-        '10' => 'oct',
-        '11' => 'nov',
-        '12' => 'dic',
-    ];
-
     public function index(Request $request): View
     {
         $clientes = $this->clienteService->getClientList($request, $this->resolvePerPage($request));
@@ -103,6 +88,7 @@ class ClientesController extends Controller
             ],
             'createRoute' => route('modules.clientes.create'),
             'editRoute' => 'modules.clientes.edit',
+            'relationPanelView' => 'cliente.relation-panel',
             'showRoute' => 'modules.clientes.edit',
             'destroyRoute' => 'modules.clientes.destroy',
             'lockResource' => 'clientes',
@@ -371,8 +357,8 @@ class ClientesController extends Controller
             'tipoCliente' => ['required', 'in:0,1'],
             'idcliente' => [
                 'required',
-                Rule::when($request->input('tipoCliente') === '1', ['digits:11']),
                 Rule::when($request->input('tipoCliente') === '0', ['digits:8']),
+                Rule::when($request->input('tipoCliente') === '1', ['digits:11']),
                 'unique:cliente,idcliente',
             ],
             'razonSocial' => ['nullable', 'string', 'min:2', 'max:200', 'regex:'.self::SAFE_TEXT_REGEX],

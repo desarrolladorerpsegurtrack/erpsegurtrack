@@ -248,22 +248,22 @@ class PersonalController extends Controller
                 [
                     'name' => 'apellido',
                     'type' => 'text',
-                    'label' => 'Apellido',
+                    'label' => 'Apellidos',
                     'required' => false,
                     'maxlength' => 50,
-                    'minlength' => 2,
-                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}',
-                    'helpText' => 'Solo letras. Mínimo 2 caracteres.',
+                    'minlength' => 5,
+                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}',
+                    'helpText' => 'Solo letras. Mínimo 5 caracteres.',
                 ],
                 [
                     'name' => 'nombre',
                     'type' => 'text',
-                    'label' => 'Nombre',
+                    'label' => 'Nombres',
                     'required' => false,
                     'maxlength' => 50,
-                    'minlength' => 2,
-                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}',
-                    'helpText' => 'Solo letras. Mínimo 2 caracteres.',
+                    'minlength' => 5,
+                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}',
+                    'helpText' => 'Solo letras. Mínimo 5 caracteres.',
                 ],
                 [
                     'name' => 'correo',
@@ -273,7 +273,7 @@ class PersonalController extends Controller
                     'maxlength' => 100,
                     'pattern' => '[^@\s]+@[^@\s]+\.com',
                     'inputmode' => 'email',
-                    'helpText' => 'Correo válido. Debe incluir @.',
+                    'helpText' => 'Correo válido. Debe incluir @ y terminar en .com.',
                 ],
                 [
                     'name' => 'estado',
@@ -303,8 +303,8 @@ class PersonalController extends Controller
     {
         $validated = $request->validate([
             'dniPersonal' => ['required', 'digits:8', 'unique:personal,dniPersonal'],
-            'apellido' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}$/u', 'unique:personal,apellido'],
-            'nombre' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}$/u', 'unique:personal,nombre'],
+            'apellido' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}$/u', 'unique:personal,apellido'],
+            'nombre' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}$/u', 'unique:personal,nombre'],
             'cargoPersonal_idcargoPersonal' => ['required', 'integer', 'exists:cargopersonal,idcargoPersonal'],
             'foto' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
             'firma' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
@@ -388,22 +388,22 @@ class PersonalController extends Controller
                 [
                     'name' => 'apellido',
                     'type' => 'text',
-                    'label' => 'Apellido',
+                    'label' => 'Apellidos',
                     'required' => false,
                     'maxlength' => 50,
-                    'minlength' => 2,
-                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}',
-                    'helpText' => 'Solo letras. Mínimo 2 caracteres.',
+                    'minlength' => 5,
+                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}',
+                    'helpText' => 'Solo letras. Mínimo 5 caracteres.',
                 ],
                 [
                     'name' => 'nombre',
                     'type' => 'text',
-                    'label' => 'Nombre',
+                    'label' => 'Nombres',
                     'required' => false,
                     'maxlength' => 50,
-                    'minlength' => 2,
-                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}',
-                    'helpText' => 'Solo letras. Mínimo 2 caracteres.',
+                    'minlength' => 5,
+                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}',
+                    'helpText' => 'Solo letras. Mínimo 5 caracteres.',
                 ],
                 [
                     'name' => 'correo',
@@ -455,8 +455,8 @@ class PersonalController extends Controller
 
         $validated = $request->validate([
             'dniPersonal' => ['required', 'digits:8', Rule::unique('personal', 'dniPersonal')->ignore($dni, 'dniPersonal')],
-            'apellido' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}$/u', Rule::unique('personal', 'apellido')->ignore($dni, 'dniPersonal')],
-            'nombre' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}$/u', Rule::unique('personal', 'nombre')->ignore($dni, 'dniPersonal')],
+            'apellido' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}$/u', Rule::unique('personal', 'apellido')->ignore($dni, 'dniPersonal')],
+            'nombre' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}$/u', Rule::unique('personal', 'nombre')->ignore($dni, 'dniPersonal')],
             'cargoPersonal_idcargoPersonal' => ['required', 'integer', 'exists:cargopersonal,idcargoPersonal'],
             'foto' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
             'firma' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
@@ -507,128 +507,7 @@ class PersonalController extends Controller
             ->route('modules.personal')
             ->with('success', 'Personal actualizado correctamente.');
     }
-
-    public function cargosOpcionesRapidas(): JsonResponse
-    {
-        $cargos = DB::table('cargopersonal')
-            ->orderBy('descripcion')
-            ->orderBy('idcargoPersonal')
-            ->get()
-            ->map(fn ($cargo) => [
-                'id' => (int) $cargo->idcargoPersonal,
-                'label' => trim(((string) $cargo->idcargoPersonal) . ' - ' . ((string) ($cargo->descripcion ?? ''))),
-                'descripcion' => (string) ($cargo->descripcion ?? ''),
-            ])
-            ->values();
-
-        return response()->json([
-            'ok' => true,
-            'data' => $cargos,
-        ]);
-    }
-
-    public function cargosCrearRapido(Request $request): JsonResponse
-    {
-        $validated = $request->validate([
-            'descripcion' => ['required', 'string', 'max:30', 'regex:'.self::SAFE_TEXT_REGEX],
-        ]);
-
-        $newId = DB::transaction(function () use ($validated) {
-            $nextId = ((int) DB::table('cargopersonal')->max('idcargoPersonal')) + 1;
-
-            DB::table('cargopersonal')->insert([
-                'idcargoPersonal' => $nextId,
-                'descripcion' => $validated['descripcion'],
-            ]);
-
-            return $nextId;
-        });
-
-        $this->publishResourceEvent(self::CARGO_LOCK_RESOURCE, (string) $newId, 'created');
-
-        return response()->json([
-            'ok' => true,
-            'message' => 'Cargo creado correctamente.',
-            'data' => [
-                'id' => $newId,
-                'label' => trim(((string) $newId) . ' - ' . $validated['descripcion']),
-                'descripcion' => $validated['descripcion'],
-            ],
-        ], 201);
-    }
-
-    public function cargosActualizarRapido(Request $request, int $cargo): JsonResponse
-    {
-        $exists = DB::table('cargopersonal')->where('idcargoPersonal', $cargo)->exists();
-        if (!$exists) {
-            return response()->json([
-                'ok' => false,
-                'message' => 'No se encontro el cargo solicitado.',
-            ], 404);
-        }
-
-        if ($lockConflict = $this->assertCargoLockAvailableJson($request, $cargo)) {
-            return $lockConflict;
-        }
-
-        $validated = $request->validate([
-            'descripcion' => ['required', 'string', 'max:30', 'regex:'.self::SAFE_TEXT_REGEX],
-        ]);
-
-        DB::table('cargopersonal')
-            ->where('idcargoPersonal', $cargo)
-            ->update([
-                'descripcion' => $validated['descripcion'],
-            ]);
-
-        $this->publishResourceEvent(self::CARGO_LOCK_RESOURCE, (string) $cargo, 'updated');
-
-        return response()->json([
-            'ok' => true,
-            'message' => 'Cargo actualizado correctamente.',
-            'data' => [
-                'id' => $cargo,
-                'label' => trim(((string) $cargo) . ' - ' . $validated['descripcion']),
-                'descripcion' => $validated['descripcion'],
-            ],
-        ]);
-    }
-
-    public function cargosEliminarRapido(Request $request, int $cargo): JsonResponse
-    {
-        $exists = DB::table('cargopersonal')->where('idcargoPersonal', $cargo)->exists();
-        if (!$exists) {
-            return response()->json([
-                'ok' => false,
-                'message' => 'No se encontro el cargo solicitado.',
-            ], 404);
-        }
-
-        if ($lockConflict = $this->assertCargoLockAvailableJson($request, $cargo)) {
-            return $lockConflict;
-        }
-
-        $enUso = DB::table('personal')
-            ->where('cargoPersonal_idcargoPersonal', $cargo)
-            ->exists();
-
-        if ($enUso) {
-            return response()->json([
-                'ok' => false,
-                'message' => 'No se puede eliminar porque el cargo esta asignado a uno o mas registros de personal.',
-            ], 422);
-        }
-
-        DB::table('cargopersonal')->where('idcargoPersonal', $cargo)->delete();
-        $this->publishResourceEvent(self::CARGO_LOCK_RESOURCE, (string) $cargo, 'deleted');
-        $this->releaseLockIfOwned($request, self::CARGO_LOCK_RESOURCE, (string) $cargo);
-
-        return response()->json([
-            'ok' => true,
-            'message' => 'Cargo eliminado correctamente.',
-        ]);
-    }
-
+    
     private function assertCargoLockAvailableJson(Request $request, int $cargo): ?JsonResponse
     {
         $currentUser = $request->session()->get('erp_auth.usuario', 'anonimo');

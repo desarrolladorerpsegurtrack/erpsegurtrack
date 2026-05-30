@@ -47,7 +47,7 @@ class LockController extends Controller
 
         if ($result['success']) {
             $this->publishLockEvent($resource, $id, $usuario, 'released', null);
-
+            $this->publishResourceEvent($resource, $id, 'released', ['source' => 'lock']);
             return response()->json([
                 'success' => true,
                 'lock' => $result['lock'],

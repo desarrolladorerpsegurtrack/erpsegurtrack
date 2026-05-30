@@ -29,6 +29,7 @@ class ConfiguracionController extends Controller
     public function estadosIndex(Request $request): View
     {
         $baseQuery = DB::table('estadocliente');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -60,14 +61,13 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de estados', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.estados.create'),
             'editRoute' => 'modules.configuracion.estados.edit',
             'showRoute' => 'modules.configuracion.estados.edit',
             'destroyRoute' => 'modules.configuracion.estados.destroy',
             'bulkDestroyRoute' => route('modules.configuracion.estados.bulk-destroy'),
             'identifierKey' => 'idestadoCliente',
-            'lockResource' => 'configuracion.estados',
         ]);
     }
 
@@ -98,13 +98,11 @@ class ConfiguracionController extends Controller
     public function estadosStore(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'detalle' => ['required', 'string', 'min:2', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('estadocliente', 'detalle')],
-        ], [
-            'detalle.unique' => 'Ya existe un estado de cliente con ese detalle.',
+            'detalle' => ['required', 'string', 'min:2', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX],
         ]);
 
         $newId = DB::table('estadocliente')->insertGetId($validated);
-        $this->publishResourceEvent('configuracion.estados', (string) $newId, 'created');
+        $this->publishResourceEvent('configuracion.estado_cliente', (string) $newId, 'created');
 
         return redirect()
             ->route('modules.configuracion.estados.index')
@@ -117,7 +115,7 @@ class ConfiguracionController extends Controller
         if (!$record) {
             return redirect()
                 ->route('modules.configuracion.estados.index')
-                ->with('error', 'No se encontro el estado solicitado.');
+                ->with('error', 'No se encontro el estado de cliente solicitado.');
         }
 
         return view('configuracion.estadocliente.estadocliente-form', [
@@ -139,7 +137,7 @@ class ConfiguracionController extends Controller
                 ],
             ],
             'readOnly' => true,
-        ] + $this->prepareLockViewData('configuracion.estados', (string) $id));
+        ] + $this->prepareLockViewData('configuracion.estado_cliente', (string) $id));
     }
 
     public function estadosUpdate(Request $request, int $id): RedirectResponse
@@ -148,23 +146,21 @@ class ConfiguracionController extends Controller
         if (!$exists) {
             return redirect()
                 ->route('modules.configuracion.estados.index')
-                ->with('error', 'No se encontro el estado solicitado.');
+                ->with('error', 'No se encontro el estado de cliente solicitado.');
         }
 
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.estados', (string) $id, 'estado de cliente', 'modules.configuracion.estados.index')) {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.estado_cliente', (string) $id, 'estado de cliente', 'modules.configuracion.estados.index')) {
             return $redirect;
         }
 
         $validated = $request->validate([
-            'detalle' => ['required', 'string', 'min:2', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('estadocliente', 'detalle')->ignore($id, 'idestadoCliente')],
-        ], [
-            'detalle.unique' => 'Ya existe un estado de cliente con ese detalle.',
+            'detalle' => ['required', 'string', 'min:2', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX],
         ]);
 
         DB::table('estadocliente')->where('idestadoCliente', $id)->update($validated);
-        $this->publishResourceEvent('configuracion.estados', (string) $id, 'updated');
+        $this->publishResourceEvent('configuracion.estado_cliente', (string) $id, 'updated');
 
-        $this->releaseLockIfOwned($request, 'configuracion.estados', (string) $id);
+        $this->releaseLockIfOwned($request, 'configuracion.estado_cliente', (string) $id);
 
         return redirect()
             ->route('modules.configuracion.estados.index')
@@ -173,21 +169,22 @@ class ConfiguracionController extends Controller
 
     public function estadosDestroy(Request $request, int $id): RedirectResponse
     {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.estados', (string) $id, 'estado de cliente', 'modules.configuracion.estados.index')) {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.estado_cliente', (string) $id, 'estado de cliente', 'modules.configuracion.estados.index')) {
             return $redirect;
         }
 
         try {
             DB::table('estadocliente')->where('idestadoCliente', $id)->delete();
-            $this->publishResourceEvent('configuracion.estados', (string) $id, 'deleted');
-            $this->releaseLockIfOwned($request, 'configuracion.estados', (string) $id);
+            $this->publishResourceEvent('configuracion.estado_cliente', (string) $id, 'deleted');
+            $this->releaseLockIfOwned($request, 'configuracion.estado_cliente', (string) $id);
+
             return redirect()
                 ->route('modules.configuracion.estados.index')
                 ->with('success', 'Estado de cliente eliminado correctamente.');
         } catch (QueryException) {
             return redirect()
                 ->route('modules.configuracion.estados.index')
-                ->with('error', 'No se puede eliminar el estado porque tiene clientes relacionados.');
+                ->with('error', 'No se puede eliminar el estado de cliente porque tiene registros relacionados.');
         }
     }
 
@@ -205,8 +202,8 @@ class ConfiguracionController extends Controller
                 ->with('error', 'No se seleccionaron registros para eliminar.');
         }
 
-        foreach ($selectedIds as $id) {
-            if ($redirect = $this->assertLockAvailable($request, 'configuracion.estados', (string) $id, 'estado de cliente', 'modules.configuracion.estados.index')) {
+        foreach ($selectedIds as $selectedId) {
+            if ($redirect = $this->assertLockAvailable($request, 'configuracion.estado_cliente', (string) $selectedId, 'estado de cliente', 'modules.configuracion.estados.index')) {
                 return $redirect;
             }
         }
@@ -215,9 +212,9 @@ class ConfiguracionController extends Controller
             DB::transaction(function () use ($selectedIds, $request) {
                 DB::table('estadocliente')->whereIn('idestadoCliente', $selectedIds)->delete();
 
-                foreach ($selectedIds as $id) {
-                    $this->publishResourceEvent('configuracion.estados', (string) $id, 'deleted');
-                    $this->releaseLockIfOwned($request, 'configuracion.estados', (string) $id);
+                foreach ($selectedIds as $selectedId) {
+                    $this->publishResourceEvent('configuracion.estado_cliente', (string) $selectedId, 'deleted');
+                    $this->releaseLockIfOwned($request, 'configuracion.estado_cliente', (string) $selectedId);
                 }
             });
 
@@ -225,10 +222,10 @@ class ConfiguracionController extends Controller
             return redirect()
                 ->route('modules.configuracion.estados.index')
                 ->with('success', "Se eliminaron {$count} registro(s) correctamente.");
-        } catch (QueryException $e) {
+        } catch (QueryException) {
             return redirect()
                 ->route('modules.configuracion.estados.index')
-                ->with('error', 'No se puede eliminar los registros seleccionados porque tienen clientes relacionados.');
+                ->with('error', 'No se pueden eliminar los estados de cliente porque tienen registros relacionados.');
         }
     }
 
@@ -240,6 +237,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('estadocliente');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -267,1296 +265,6 @@ class ConfiguracionController extends Controller
         }
 
         return $this->exportPdfResponse($rows, $columns, 'Listado de Estados de Cliente', $filename);
-    }
-
-    public function tiposContactoIndex(Request $request): View
-    {
-        $baseQuery = DB::table('tipocontacto');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idtipoContacto', 'like', $term)
-                    ->orWhere('detalle', 'like', $term);
-            });
-        }
-
-        $items = $baseQuery
-            ->orderBy('idtipoContacto')
-            ->paginate($this->resolvePerPage($request))
-            ->withQueryString();
-
-        return view('configuracion.tipocontacto.tipocontacto', [
-            'title' => 'Configuracion: Tipo de Contacto',
-            'singularTitle' => 'Tipo de Contacto',
-            'items' => $items,
-            'columns' => [
-                ['key' => 'idtipoContacto', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
-            ],
-            'exportRoutes' => [
-                'pdf' => route('modules.configuracion.tipos-contacto.export', ['format' => 'pdf']),
-                'xlsx' => route('modules.configuracion.tipos-contacto.export', ['format' => 'xlsx']),
-            ],
-            'stats' => [
-                ['label' => 'Total de tipos', 'value' => (clone $baseQuery)->count()],
-            ],
-            'filters' => [],
-            'createRoute' => route('modules.configuracion.tipos-contacto.create'),
-            'editRoute' => 'modules.configuracion.tipos-contacto.edit',
-            'showRoute' => 'modules.configuracion.tipos-contacto.edit',
-            'destroyRoute' => 'modules.configuracion.tipos-contacto.destroy',
-            'lockResource' => 'configuracion.tipo-contacto',
-            'identifierKey' => 'idtipoContacto',
-        ]);
-    }
-
-    public function tiposContactoCreate(): View
-    {
-        return view('configuracion.tipocontacto.tipocontacto-form', [
-            'title' => 'Nuevo Tipo de Contacto',
-            'moduleTitle' => 'Configuracion: Tipo de Contacto',
-            'mode' => 'create',
-            'formAction' => route('modules.configuracion.tipos-contacto.store'),
-            'backRoute' => route('modules.configuracion.tipos-contacto.index'),
-            'record' => null,
-            'fields' => [
-                [
-                    'name' => 'detalle',
-                    'type' => 'text',
-                    'label' => 'Detalle',
-                    'required' => true,
-                    'maxlength' => 50,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
-                ],
-            ],
-            'readOnly' => false,
-        ]);
-    }
-
-    public function tiposContactoStore(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            'detalle' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('tipocontacto', 'detalle')],
-        ], [
-            'detalle.unique' => 'Ya existe un tipo de contacto con ese detalle.',
-        ]);
-
-        $newId = DB::table('tipocontacto')->insertGetId($validated);
-        $this->publishResourceEvent('configuracion.tipo-contacto', (string) $newId, 'created');
-
-        return redirect()
-            ->route('modules.configuracion.tipos-contacto.index')
-            ->with('success', 'Tipo de contacto creado correctamente.');
-    }
-
-    public function tiposContactoEdit(int $id): View|RedirectResponse
-    {
-        $record = DB::table('tipocontacto')->where('idtipoContacto', $id)->first();
-        if (!$record) {
-            return redirect()
-                ->route('modules.configuracion.tipos-contacto.index')
-                ->with('error', 'No se encontro el tipo de contacto solicitado.');
-        }
-
-        return view('configuracion.tipocontacto.tipocontacto-form', [
-            'title' => 'Editar Tipo de Contacto',
-            'moduleTitle' => 'Configuracion: Tipo de Contacto',
-            'mode' => 'edit',
-            'formAction' => route('modules.configuracion.tipos-contacto.update', $id),
-            'backRoute' => route('modules.configuracion.tipos-contacto.index'),
-            'record' => $record,
-            'fields' => [
-                [
-                    'name' => 'detalle',
-                    'type' => 'text',
-                    'label' => 'Detalle',
-                    'required' => true,
-                    'maxlength' => 50,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
-                ],
-            ],
-            'readOnly' => true,
-        ] + $this->prepareLockViewData('configuracion.tipo-contacto', (string) $id));
-    }
-
-    public function tiposContactoUpdate(Request $request, int $id): RedirectResponse
-    {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.tipo-contacto', (string) $id, 'tipo de contacto', 'modules.configuracion.tipos-contacto.index')) {
-            return $redirect;
-        }
-
-        $exists = DB::table('tipocontacto')->where('idtipoContacto', $id)->exists();
-        if (!$exists) {
-            return redirect()
-                ->route('modules.configuracion.tipos-contacto.index')
-                ->with('error', 'No se encontro el tipo de contacto solicitado.');
-        }
-
-        $validated = $request->validate([
-            'detalle' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('tipocontacto', 'detalle')->ignore($id, 'idtipoContacto')],
-        ], [
-            'detalle.unique' => 'Ya existe un tipo de contacto con ese detalle.',
-        ]);
-
-        DB::table('tipocontacto')->where('idtipoContacto', $id)->update($validated);
-        $this->publishResourceEvent('configuracion.tipo-contacto', (string) $id, 'updated');
-
-        $this->releaseLockIfOwned($request, 'configuracion.tipo-contacto', (string) $id);
-
-        return redirect()
-            ->route('modules.configuracion.tipos-contacto.index')
-            ->with('success', 'Tipo de contacto actualizado correctamente.');
-    }
-
-    public function tiposContactoDestroy(Request $request, int $id): RedirectResponse
-    {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.tipo-contacto', (string) $id, 'tipo de contacto', 'modules.configuracion.tipos-contacto.index')) {
-            return $redirect;
-        }
-
-        try {
-            DB::table('tipocontacto')->where('idtipoContacto', $id)->delete();
-            $this->publishResourceEvent('configuracion.tipo-contacto', (string) $id, 'deleted');
-            $this->releaseLockIfOwned($request, 'configuracion.tipo-contacto', (string) $id);
-
-            return redirect()
-                ->route('modules.configuracion.tipos-contacto.index')
-                ->with('success', 'Tipo de contacto eliminado correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.tipos-contacto.index')
-                ->with('error', 'No se puede eliminar el tipo de contacto porque tiene registros relacionados.');
-        }
-    }
-
-    public function tiposContactoExport(Request $request, string $format)
-    {
-        $format = strtolower($format);
-        if (!in_array($format, ['pdf', 'xlsx'], true)) {
-            abort(404);
-        }
-
-        $baseQuery = DB::table('tipocontacto');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idtipoContacto', 'like', $term)
-                    ->orWhere('detalle', 'like', $term);
-            });
-        }
-
-        $rows = $baseQuery
-            ->orderBy('idtipoContacto')
-            ->get();
-
-        $columns = [
-            ['key' => 'idtipoContacto', 'label' => 'ID'],
-            ['key' => 'detalle', 'label' => 'Detalle'],
-        ];
-
-        $filename = 'tipo_contacto_export_' . now()->format('Ymd_His') . '.' . $format;
-
-        if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
-        }
-
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Contacto', $filename);
-    }
-
-    public function monedasIndex(Request $request): View
-    {
-        $baseQuery = DB::table('moneda');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idmoneda', 'like', $term)
-                    ->orWhere('detalle', 'like', $term)
-                    ->orWhere('simbolo', 'like', $term);
-            });
-        }
-
-        $items = $baseQuery
-            ->orderBy('idmoneda')
-            ->paginate($this->resolvePerPage($request))
-            ->withQueryString();
-
-        return view('configuracion.moneda.moneda', [
-            'title' => 'Configuracion: Moneda',
-            'singularTitle' => 'Moneda',
-            'items' => $items,
-            'columns' => [
-                ['key' => 'idmoneda', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
-                ['key' => 'simbolo', 'label' => 'Símbolo', 'type' => 'text'],
-            ],
-            'exportRoutes' => [
-                'pdf' => route('modules.configuracion.monedas.export', ['format' => 'pdf']),
-                'xlsx' => route('modules.configuracion.monedas.export', ['format' => 'xlsx']),
-            ],
-            'stats' => [
-                ['label' => 'Total de monedas', 'value' => (clone $baseQuery)->count()],
-            ],
-            'filters' => [],
-            'createRoute' => route('modules.configuracion.monedas.create'),
-            'editRoute' => 'modules.configuracion.monedas.edit',
-            'showRoute' => 'modules.configuracion.monedas.edit',
-            'destroyRoute' => 'modules.configuracion.monedas.destroy',
-            'identifierKey' => 'idmoneda',
-            'lockResource' => 'configuracion.moneda',
-        ]);
-    }
-
-    public function monedasCreate(): View
-    {
-        return view('configuracion.moneda.moneda-form', [
-            'title' => 'Nueva Moneda',
-            'moduleTitle' => 'Configuracion: Moneda',
-            'mode' => 'create',
-            'formAction' => route('modules.configuracion.monedas.store'),
-            'backRoute' => route('modules.configuracion.monedas.index'),
-            'record' => null,
-            'fields' => [
-                [
-                    'name' => 'detalle',
-                    'type' => 'text',
-                    'label' => 'Detalle',
-                    'required' => true,
-                    'maxlength' => 50,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
-                ],
-                [
-                    'name' => 'simbolo',
-                    'type' => 'text',
-                    'label' => 'Símbolo',
-                    'required' => true,
-                    'maxlength' => 3,
-                    'minlength' => 1,
-                    'helpText' => 'Símbolo de la moneda.',
-                ],
-            ],
-            'readOnly' => false,
-        ]);
-    }
-
-    public function monedasStore(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            'detalle' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('moneda', 'detalle')],
-            'simbolo' => ['required', 'string', 'min:1', 'max:3', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('moneda', 'simbolo')],
-        ], [
-            'detalle.unique' => 'Ya existe una moneda con ese nombre.',
-            'simbolo.unique' => 'Ya existe una moneda con ese símbolo.',
-        ]);
-
-        $newId = DB::table('moneda')->insertGetId($validated);
-        $this->publishResourceEvent('configuracion.moneda', (string) $newId, 'created');
-
-        return redirect()
-            ->route('modules.configuracion.monedas.index')
-            ->with('success', 'Moneda creada correctamente.');
-    }
-
-    public function monedasEdit(int $id): View|RedirectResponse
-    {
-        $record = DB::table('moneda')->where('idmoneda', $id)->first();
-        if (!$record) {
-            return redirect()
-                ->route('modules.configuracion.monedas.index')
-                ->with('error', 'No se encontro la moneda solicitada.');
-        }
-
-        return view('configuracion.moneda.moneda-form', [
-            'title' => 'Editar Moneda',
-            'moduleTitle' => 'Configuracion: Moneda',
-            'mode' => 'edit',
-            'formAction' => route('modules.configuracion.monedas.update', $id),
-            'backRoute' => route('modules.configuracion.monedas.index'),
-            'record' => $record,
-            'fields' => [
-                [
-                    'name' => 'detalle',
-                    'type' => 'text',
-                    'label' => 'Detalle',
-                    'required' => true,
-                    'maxlength' => 50,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
-                ],
-                [
-                    'name' => 'simbolo',
-                    'type' => 'text',
-                    'label' => 'Símbolo',
-                    'required' => true,
-                    'maxlength' => 3,
-                    'minlength' => 1,
-                    'helpText' => 'Símbolo de la moneda.',
-                ],
-            ],
-            'readOnly' => true,
-        ] + $this->prepareLockViewData('configuracion.moneda', (string) $id));
-    }
-
-    public function monedasUpdate(Request $request, int $id): RedirectResponse
-    {
-        $exists = DB::table('moneda')->where('idmoneda', $id)->exists();
-        if (!$exists) {
-            return redirect()
-                ->route('modules.configuracion.monedas.index')
-                ->with('error', 'No se encontro la moneda solicitada.');
-        }
-
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.moneda', (string) $id, 'moneda', 'modules.configuracion.monedas.index')) {
-            return $redirect;
-        }
-
-        $validated = $request->validate([
-            'detalle' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('moneda', 'detalle')->ignore($id, 'idmoneda')],
-            'simbolo' => ['required', 'string', 'min:1', 'max:3', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('moneda', 'simbolo')->ignore($id, 'idmoneda')],
-        ], [
-            'detalle.unique' => 'Ya existe una moneda con ese nombre.',
-            'simbolo.unique' => 'Ya existe una moneda con ese símbolo.',
-        ]);
-
-        DB::table('moneda')->where('idmoneda', $id)->update($validated);
-        $this->publishResourceEvent('configuracion.moneda', (string) $id, 'updated');
-
-        $this->releaseLockIfOwned($request, 'configuracion.moneda', (string) $id);
-
-        return redirect()
-            ->route('modules.configuracion.monedas.index')
-            ->with('success', 'Moneda actualizada correctamente.');
-    }
-
-    public function monedasDestroy(Request $request, int $id): RedirectResponse
-    {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.moneda', (string) $id, 'moneda', 'modules.configuracion.monedas.index')) {
-            return $redirect;
-        }
-
-        try {
-            DB::table('moneda')->where('idmoneda', $id)->delete();
-            $this->publishResourceEvent('configuracion.moneda', (string) $id, 'deleted');
-            $this->releaseLockIfOwned($request, 'configuracion.moneda', (string) $id);
-            return redirect()
-                ->route('modules.configuracion.monedas.index')
-                ->with('success', 'Moneda eliminada correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.monedas.index')
-                ->with('error', 'No se puede eliminar la moneda porque tiene registros relacionados.');
-        }
-    }
-
-    public function monedasExport(Request $request, string $format)
-    {
-        $format = strtolower($format);
-        if (!in_array($format, ['pdf', 'xlsx'], true)) {
-            abort(404);
-        }
-
-        $baseQuery = DB::table('moneda');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idmoneda', 'like', $term)
-                    ->orWhere('detalle', 'like', $term)
-                    ->orWhere('simbolo', 'like', $term);
-            });
-        }
-
-        $rows = $baseQuery
-            ->orderBy('idmoneda')
-            ->get();
-
-        $columns = [
-            ['key' => 'idmoneda', 'label' => 'ID'],
-            ['key' => 'detalle', 'label' => 'Detalle'],
-            ['key' => 'simbolo', 'label' => 'Símbolo'],
-        ];
-
-        $filename = 'moneda_export_' . now()->format('Ymd_His') . '.' . $format;
-
-        if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
-        }
-
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Monedas', $filename);
-    }
-
-    public function tributosIndex(Request $request): View
-    {
-        $baseQuery = DB::table('tributo');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idtributo', 'like', $term)
-                    ->orWhere('nombreTributo', 'like', $term)
-                    ->orWhere('tipo', 'like', $term);
-            });
-        }
-
-        $items = $baseQuery
-            ->orderBy('idtributo')
-            ->paginate($this->resolvePerPage($request))
-            ->withQueryString();
-
-        return view('configuracion.tributo.tributo', [
-            'title' => 'Configuracion: Tributo',
-            'singularTitle' => 'Tributo',
-            'items' => $items,
-            'columns' => [
-                ['key' => 'idtributo', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'nombreTributo', 'label' => 'Nombre', 'type' => 'text'],
-                ['key' => 'tipo', 'label' => 'Tipo', 'type' => 'text'],
-                ['key' => 'valor', 'label' => 'Valor', 'type' => 'text'],
-            ],
-            'exportRoutes' => [
-                'pdf' => route('modules.configuracion.tributos.export', ['format' => 'pdf']),
-                'xlsx' => route('modules.configuracion.tributos.export', ['format' => 'xlsx']),
-            ],
-            'stats' => [
-                ['label' => 'Total de tributos', 'value' => (clone $baseQuery)->count()],
-            ],
-            'filters' => [],
-            'createRoute' => route('modules.configuracion.tributos.create'),
-            'editRoute' => 'modules.configuracion.tributos.edit',
-            'showRoute' => 'modules.configuracion.tributos.edit',
-            'destroyRoute' => 'modules.configuracion.tributos.destroy',
-            'identifierKey' => 'idtributo',
-            'lockResource' => 'configuracion.tributo',
-        ]);
-    }
-
-    public function tributosCreate(): View
-    {
-        return view('configuracion.tributo.tributo-form', [
-            'title' => 'Nuevo Tributo',
-            'moduleTitle' => 'Configuracion: Tributo',
-            'mode' => 'create',
-            'formAction' => route('modules.configuracion.tributos.store'),
-            'backRoute' => route('modules.configuracion.tributos.index'),
-            'record' => null,
-            'fields' => [
-                [
-                    'name' => 'nombreTributo',
-                    'type' => 'text',
-                    'label' => 'Nombre',
-                    'required' => true,
-                    'maxlength' => 100,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
-                ],
-                [
-                    'name' => 'tipo',
-                    'type' => 'text',
-                    'label' => 'Tipo',
-                    'required' => true,
-                    'maxlength' => 45,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
-                ],
-                [
-                    'name' => 'valor',
-                    'type' => 'number',
-                    'label' => 'Valor',
-                    'required' => true,
-                    'min' => 0,
-                    'helpText' => 'Valor numérico del tributo.',
-                ],
-            ],
-            'readOnly' => false,
-        ]);
-    }
-
-    public function tributosStore(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            'nombreTributo' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('tributo', 'nombreTributo')],
-            'tipo' => ['required', 'string', 'min:2', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-            'valor' => ['required', 'integer', 'min:0'],
-        ], [
-            'nombreTributo.unique' => 'Ya existe un tributo con ese nombre.',
-        ]);
-
-        $newId = DB::table('tributo')->insertGetId($validated);
-        $this->publishResourceEvent('configuracion.tributo', (string) $newId, 'created');
-
-        return redirect()
-            ->route('modules.configuracion.tributos.index')
-            ->with('success', 'Tributo creado correctamente.');
-    }
-
-    public function tributosEdit(int $id): View|RedirectResponse
-    {
-        $record = DB::table('tributo')->where('idtributo', $id)->first();
-        if (!$record) {
-            return redirect()
-                ->route('modules.configuracion.tributos.index')
-                ->with('error', 'No se encontro el tributo solicitado.');
-        }
-
-        return view('configuracion.tributo.tributo-form', [
-            'title' => 'Editar Tributo',
-            'moduleTitle' => 'Configuracion: Tributo',
-            'mode' => 'edit',
-            'formAction' => route('modules.configuracion.tributos.update', $id),
-            'backRoute' => route('modules.configuracion.tributos.index'),
-            'record' => $record,
-            'fields' => [
-                [
-                    'name' => 'nombreTributo',
-                    'type' => 'text',
-                    'label' => 'Nombre',
-                    'required' => true,
-                    'maxlength' => 100,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
-                ],
-                [
-                    'name' => 'tipo',
-                    'type' => 'text',
-                    'label' => 'Tipo',
-                    'required' => true,
-                    'maxlength' => 45,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
-                ],
-                [
-                    'name' => 'valor',
-                    'type' => 'number',
-                    'label' => 'Valor',
-                    'required' => true,
-                    'min' => 0,
-                    'helpText' => 'Valor numérico del tributo.',
-                ],
-            ],
-            'readOnly' => true,
-        ] + $this->prepareLockViewData('configuracion.tributo', (string) $id));
-    }
-
-    public function tributosUpdate(Request $request, int $id): RedirectResponse
-    {
-        $exists = DB::table('tributo')->where('idtributo', $id)->exists();
-        if (!$exists) {
-            return redirect()
-                ->route('modules.configuracion.tributos.index')
-                ->with('error', 'No se encontro el tributo solicitado.');
-        }
-
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.tributo', (string) $id, 'tributo', 'modules.configuracion.tributos.index')) {
-            return $redirect;
-        }
-
-        $validated = $request->validate([
-            'nombreTributo' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('tributo', 'nombreTributo')->ignore($id, 'idtributo')],
-            'tipo' => ['required', 'string', 'min:2', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-            'valor' => ['required', 'integer', 'min:0'],
-        ], [
-            'nombreTributo.unique' => 'Ya existe un tributo con ese nombre.',
-        ]);
-
-        DB::table('tributo')->where('idtributo', $id)->update($validated);
-        $this->publishResourceEvent('configuracion.tributo', (string) $id, 'updated');
-
-        $this->releaseLockIfOwned($request, 'configuracion.tributo', (string) $id);
-
-        return redirect()
-            ->route('modules.configuracion.tributos.index')
-            ->with('success', 'Tributo actualizado correctamente.');
-    }
-
-    public function tributosDestroy(Request $request, int $id): RedirectResponse
-    {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.tributo', (string) $id, 'tributo', 'modules.configuracion.tributos.index')) {
-            return $redirect;
-        }
-
-        try {
-            DB::table('tributo')->where('idtributo', $id)->delete();
-            $this->publishResourceEvent('configuracion.tributo', (string) $id, 'deleted');
-            $this->releaseLockIfOwned($request, 'configuracion.tributo', (string) $id);
-            return redirect()
-                ->route('modules.configuracion.tributos.index')
-                ->with('success', 'Tributo eliminado correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.tributos.index')
-                ->with('error', 'No se puede eliminar el tributo porque tiene registros relacionados.');
-        }
-    }
-
-    public function tributosExport(Request $request, string $format)
-    {
-        $format = strtolower($format);
-        if (!in_array($format, ['pdf', 'xlsx'], true)) {
-            abort(404);
-        }
-
-        $baseQuery = DB::table('tributo');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idtributo', 'like', $term)
-                    ->orWhere('nombreTributo', 'like', $term)
-                    ->orWhere('tipo', 'like', $term);
-            });
-        }
-
-        $rows = $baseQuery
-            ->orderBy('idtributo')
-            ->get();
-
-        $columns = [
-            ['key' => 'idtributo', 'label' => 'ID'],
-            ['key' => 'nombreTributo', 'label' => 'Nombre'],
-            ['key' => 'tipo', 'label' => 'Tipo'],
-            ['key' => 'valor', 'label' => 'Valor'],
-        ];
-
-        $filename = 'tributo_export_' . now()->format('Ymd_His') . '.' . $format;
-
-        if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
-        }
-
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Tributos', $filename);
-    }
-
-    public function unidadMedidasIndex(Request $request): View
-    {
-        $baseQuery = DB::table('unidadmedida');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idunidadMedida', 'like', $term)
-                    ->orWhere('detalle', 'like', $term)
-                    ->orWhere('nomenclatura', 'like', $term);
-            });
-        }
-
-        $items = $baseQuery
-            ->orderBy('idunidadMedida')
-            ->paginate($this->resolvePerPage($request))
-            ->withQueryString();
-
-        return view('configuracion.unidadmedida.unidadmedida', [
-            'title' => 'Configuracion: Unidad de medida',
-            'singularTitle' => 'Unidad de medida',
-            'items' => $items,
-            'columns' => [
-                ['key' => 'idunidadMedida', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
-                ['key' => 'nomenclatura', 'label' => 'Nomenclatura', 'type' => 'text'],
-            ],
-            'exportRoutes' => [
-                'pdf' => route('modules.configuracion.unidad-medida.export', ['format' => 'pdf']),
-                'xlsx' => route('modules.configuracion.unidad-medida.export', ['format' => 'xlsx']),
-            ],
-            'stats' => [
-                ['label' => 'Total de unidades de medida', 'value' => (clone $baseQuery)->count()],
-            ],
-            'filters' => [],
-            'createRoute' => route('modules.configuracion.unidad-medida.create'),
-            'editRoute' => 'modules.configuracion.unidad-medida.edit',
-            'showRoute' => 'modules.configuracion.unidad-medida.edit',
-            'destroyRoute' => 'modules.configuracion.unidad-medida.destroy',
-            'identifierKey' => 'idunidadMedida',
-            'lockResource' => 'configuracion.unidad_medida',
-        ]);
-    }
-
-    public function unidadMedidasCreate(): View
-    {
-        return view('configuracion.unidadmedida.unidadmedida-form', [
-            'title' => 'Nueva Unidad de medida',
-            'moduleTitle' => 'Configuracion: Unidad de medida',
-            'mode' => 'create',
-            'formAction' => route('modules.configuracion.unidad-medida.store'),
-            'backRoute' => route('modules.configuracion.unidad-medida.index'),
-            'record' => null,
-            'fields' => [
-                [
-                    'name' => 'detalle',
-                    'type' => 'text',
-                    'label' => 'Detalle',
-                    'required' => true,
-                    'maxlength' => 30,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
-                ],
-                [
-                    'name' => 'nomenclatura',
-                    'type' => 'text',
-                    'label' => 'Nomenclatura',
-                    'required' => true,
-                    'maxlength' => 3,
-                    'minlength' => 1,
-                    'helpText' => 'Ej: KG, L, M.',
-                ],
-            ],
-            'readOnly' => false,
-        ]);
-    }
-
-    public function unidadMedidasStore(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            'detalle' => ['required', 'string', 'min:2', 'max:30', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('unidadmedida', 'detalle')],
-            'nomenclatura' => ['required', 'string', 'min:1', 'max:3', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('unidadmedida', 'nomenclatura')],
-        ], [
-            'detalle.unique' => 'Ya existe una unidad de medida con ese detalle.',
-            'nomenclatura.unique' => 'La nomenclatura ya está en uso.',
-        ]);
-
-        $newId = DB::table('unidadmedida')->insertGetId($validated);
-        $this->publishResourceEvent('configuracion.unidad_medida', (string) $newId, 'created');
-
-        return redirect()
-            ->route('modules.configuracion.unidad-medida.index')
-            ->with('success', 'Unidad de medida creada correctamente.');
-    }
-
-    public function unidadMedidasEdit(int $id): View|RedirectResponse
-    {
-        $record = DB::table('unidadmedida')->where('idunidadMedida', $id)->first();
-        if (!$record) {
-            return redirect()
-                ->route('modules.configuracion.unidad-medida.index')
-                ->with('error', 'No se encontro la unidad de medida solicitada.');
-        }
-
-        return view('configuracion.unidadmedida.unidadmedida-form', [
-            'title' => 'Editar Unidad de medida',
-            'moduleTitle' => 'Configuracion: Unidad de medida',
-            'mode' => 'edit',
-            'formAction' => route('modules.configuracion.unidad-medida.update', $id),
-            'backRoute' => route('modules.configuracion.unidad-medida.index'),
-            'record' => $record,
-            'fields' => [
-                [
-                    'name' => 'detalle',
-                    'type' => 'text',
-                    'label' => 'Detalle',
-                    'required' => true,
-                    'maxlength' => 30,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
-                ],
-                [
-                    'name' => 'nomenclatura',
-                    'type' => 'text',
-                    'label' => 'Nomenclatura',
-                    'required' => true,
-                    'maxlength' => 3,
-                    'minlength' => 1,
-                    'helpText' => 'Ej: KG, L, M.',
-                ],
-            ],
-            'readOnly' => true,
-        ] + $this->prepareLockViewData('configuracion.unidad_medida', (string) $id));
-    }
-
-    public function unidadMedidasUpdate(Request $request, int $id): RedirectResponse
-    {
-        $exists = DB::table('unidadmedida')->where('idunidadMedida', $id)->exists();
-        if (!$exists) {
-            return redirect()
-                ->route('modules.configuracion.unidad-medida.index')
-                ->with('error', 'No se encontro la unidad de medida solicitada.');
-        }
-
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.unidad_medida', (string) $id, 'unidad de medida', 'modules.configuracion.unidad-medida.index')) {
-            return $redirect;
-        }
-
-        $validated = $request->validate([
-            'detalle' => ['required', 'string', 'min:2', 'max:30', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('unidadmedida', 'detalle')->ignore($id, 'idunidadMedida')],
-            'nomenclatura' => ['required', 'string', 'min:1', 'max:3', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('unidadmedida', 'nomenclatura')->ignore($id, 'idunidadMedida')],
-        ], [
-            'detalle.unique' => 'Ya existe una unidad de medida con ese detalle.',
-            'nomenclatura.unique' => 'La nomenclatura ya está en uso.',
-        ]);
-
-        DB::table('unidadmedida')->where('idunidadMedida', $id)->update($validated);
-        $this->publishResourceEvent('configuracion.unidad_medida', (string) $id, 'updated');
-
-        $this->releaseLockIfOwned($request, 'configuracion.unidad_medida', (string) $id);
-
-        return redirect()
-            ->route('modules.configuracion.unidad-medida.index')
-            ->with('success', 'Unidad de medida actualizada correctamente.');
-    }
-
-    public function unidadMedidasDestroy(Request $request, int $id): RedirectResponse
-    {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.unidad_medida', (string) $id, 'unidad de medida', 'modules.configuracion.unidad-medida.index')) {
-            return $redirect;
-        }
-
-        try {
-            DB::table('unidadmedida')->where('idunidadMedida', $id)->delete();
-            $this->publishResourceEvent('configuracion.unidad_medida', (string) $id, 'deleted');
-            $this->releaseLockIfOwned($request, 'configuracion.unidad_medida', (string) $id);
-            return redirect()
-                ->route('modules.configuracion.unidad-medida.index')
-                ->with('success', 'Unidad de medida eliminada correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.unidad-medida.index')
-                ->with('error', 'No se puede eliminar la unidad de medida porque tiene registros relacionados.');
-        }
-    }
-
-    public function unidadMedidasExport(Request $request, string $format)
-    {
-        $format = strtolower($format);
-        if (!in_array($format, ['pdf', 'xlsx'], true)) {
-            abort(404);
-        }
-
-        $baseQuery = DB::table('unidadmedida');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idunidadMedida', 'like', $term)
-                    ->orWhere('detalle', 'like', $term)
-                    ->orWhere('nomenclatura', 'like', $term);
-            });
-        }
-
-        $rows = $baseQuery
-            ->orderBy('idunidadMedida')
-            ->get();
-
-        $columns = [
-            ['key' => 'idunidadMedida', 'label' => 'ID'],
-            ['key' => 'detalle', 'label' => 'Detalle'],
-            ['key' => 'nomenclatura', 'label' => 'Nomenclatura'],
-        ];
-
-        $filename = 'unidad_medida_export_' . now()->format('Ymd_His') . '.' . $format;
-
-        if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
-        }
-
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Unidades de Medida', $filename);
-    }
-
-    public function marcasIndex(Request $request): View
-    {
-        $baseQuery = DB::table('marca');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idmarca', 'like', $term)
-                    ->orWhere('nombreMarca', 'like', $term)
-                    ->orWhere('procedencia', 'like', $term);
-            });
-        }
-
-        $items = $baseQuery
-            ->orderBy('idmarca')
-            ->paginate($this->resolvePerPage($request))
-            ->withQueryString();
-
-        return view('configuracion.marca.marca', [
-            'title' => 'Configuracion: Marca',
-            'singularTitle' => 'Marca',
-            'items' => $items,
-            'columns' => [
-                ['key' => 'idmarca', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'nombreMarca', 'label' => 'Nombre', 'type' => 'text'],
-                ['key' => 'procedencia', 'label' => 'Procedencia', 'type' => 'text'],
-            ],
-            'exportRoutes' => [
-                'pdf' => route('modules.configuracion.marcas.export', ['format' => 'pdf']),
-                'xlsx' => route('modules.configuracion.marcas.export', ['format' => 'xlsx']),
-            ],
-            'stats' => [
-                ['label' => 'Total de marcas', 'value' => (clone $baseQuery)->count()],
-            ],
-            'filters' => [],
-            'createRoute' => route('modules.configuracion.marcas.create'),
-            'editRoute' => 'modules.configuracion.marcas.edit',
-            'showRoute' => 'modules.configuracion.marcas.edit',
-            'destroyRoute' => 'modules.configuracion.marcas.destroy',
-            'identifierKey' => 'idmarca',
-            'lockResource' => 'configuracion.marca',
-        ]);
-    }
-
-    public function marcasCreate(): View
-    {
-        return view('configuracion.marca.marca-form', [
-            'title' => 'Nueva Marca',
-            'moduleTitle' => 'Configuracion: Marca',
-            'mode' => 'create',
-            'formAction' => route('modules.configuracion.marcas.store'),
-            'backRoute' => route('modules.configuracion.marcas.index'),
-            'record' => null,
-            'fields' => [
-                [
-                    'name' => 'nombreMarca',
-                    'type' => 'text',
-                    'label' => 'Nombre',
-                    'required' => true,
-                    'maxlength' => 50,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
-                ],
-                [
-                    'name' => 'procedencia',
-                    'type' => 'text',
-                    'label' => 'Procedencia',
-                    'required' => false,
-                    'maxlength' => 45,
-                    'minlength' => 2,
-                    'helpText' => 'Origen o procedencia de la marca.',
-                ],
-            ],
-            'readOnly' => false,
-        ]);
-    }
-
-    public function marcasStore(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            'nombreMarca' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('marca', 'nombreMarca')],
-            'procedencia' => ['nullable', 'string', 'min:2', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-        ], [
-            'nombreMarca.unique' => 'Ya existe una marca con ese nombre.',
-        ]);
-
-        $newId = DB::table('marca')->insertGetId($validated);
-        $this->publishResourceEvent('configuracion.marca', (string) $newId, 'created');
-
-        return redirect()
-            ->route('modules.configuracion.marcas.index')
-            ->with('success', 'Marca creada correctamente.');
-    }
-
-    public function marcasEdit(int $id): View|RedirectResponse
-    {
-        $record = DB::table('marca')->where('idmarca', $id)->first();
-        if (!$record) {
-            return redirect()
-                ->route('modules.configuracion.marcas.index')
-                ->with('error', 'No se encontro la marca solicitada.');
-        }
-
-        return view('configuracion.marca.marca-form', [
-            'title' => 'Editar Marca',
-            'moduleTitle' => 'Configuracion: Marca',
-            'mode' => 'edit',
-            'formAction' => route('modules.configuracion.marcas.update', $id),
-            'backRoute' => route('modules.configuracion.marcas.index'),
-            'record' => $record,
-            'fields' => [
-                [
-                    'name' => 'nombreMarca',
-                    'type' => 'text',
-                    'label' => 'Nombre',
-                    'required' => true,
-                    'maxlength' => 50,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
-                ],
-                [
-                    'name' => 'procedencia',
-                    'type' => 'text',
-                    'label' => 'Procedencia',
-                    'required' => false,
-                    'maxlength' => 45,
-                    'minlength' => 2,
-                    'helpText' => 'Origen o procedencia de la marca.',
-                ],
-            ],
-            'readOnly' => true,
-        ] + $this->prepareLockViewData('configuracion.marca', (string) $id));
-    }
-
-    public function marcasUpdate(Request $request, int $id): RedirectResponse
-    {
-        $exists = DB::table('marca')->where('idmarca', $id)->exists();
-        if (!$exists) {
-            return redirect()
-                ->route('modules.configuracion.marcas.index')
-                ->with('error', 'No se encontro la marca solicitada.');
-        }
-
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.marca', (string) $id, 'marca', 'modules.configuracion.marcas.index')) {
-            return $redirect;
-        }
-
-        $validated = $request->validate([
-            'nombreMarca' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('marca', 'nombreMarca')->ignore($id, 'idmarca')],
-            'procedencia' => ['nullable', 'string', 'min:2', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-        ], [
-            'nombreMarca.unique' => 'Ya existe una marca con ese nombre.',
-        ]);
-
-        DB::table('marca')->where('idmarca', $id)->update($validated);
-        $this->publishResourceEvent('configuracion.marca', (string) $id, 'updated');
-
-        $this->releaseLockIfOwned($request, 'configuracion.marca', (string) $id);
-
-        return redirect()
-            ->route('modules.configuracion.marcas.index')
-            ->with('success', 'Marca actualizada correctamente.');
-    }
-
-    public function marcasDestroy(Request $request, int $id): RedirectResponse
-    {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.marca', (string) $id, 'marca', 'modules.configuracion.marcas.index')) {
-            return $redirect;
-        }
-
-        try {
-            DB::table('marca')->where('idmarca', $id)->delete();
-            $this->publishResourceEvent('configuracion.marca', (string) $id, 'deleted');
-            $this->releaseLockIfOwned($request, 'configuracion.marca', (string) $id);
-            return redirect()
-                ->route('modules.configuracion.marcas.index')
-                ->with('success', 'Marca eliminada correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.marcas.index')
-                ->with('error', 'No se puede eliminar la marca porque tiene registros relacionados.');
-        }
-    }
-
-    public function marcasExport(Request $request, string $format)
-    {
-        $format = strtolower($format);
-        if (!in_array($format, ['pdf', 'xlsx'], true)) {
-            abort(404);
-        }
-
-        $baseQuery = DB::table('marca');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idmarca', 'like', $term)
-                    ->orWhere('nombreMarca', 'like', $term)
-                    ->orWhere('procedencia', 'like', $term);
-            });
-        }
-
-        $rows = $baseQuery
-            ->orderBy('idmarca')
-            ->get();
-
-        $columns = [
-            ['key' => 'idmarca', 'label' => 'ID'],
-            ['key' => 'nombreMarca', 'label' => 'Nombre'],
-            ['key' => 'procedencia', 'label' => 'Procedencia'],
-        ];
-
-        $filename = 'marca_export_' . now()->format('Ymd_His') . '.' . $format;
-
-        if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
-        }
-
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Marcas', $filename);
-    }
-
-    public function tecnologiasIndex(Request $request): View
-    {
-        $baseQuery = DB::table('tecnologia');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idtecnologia', 'like', $term)
-                    ->orWhere('nombreTecnologia', 'like', $term);
-            });
-        }
-
-        $items = $baseQuery
-            ->orderBy('idtecnologia')
-            ->paginate($this->resolvePerPage($request))
-            ->withQueryString();
-
-        return view('configuracion.tecnologia.tecnologia', [
-            'title' => 'Configuracion: Tecnologia',
-            'singularTitle' => 'Tecnologia',
-            'items' => $items,
-            'columns' => [
-                ['key' => 'idtecnologia', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'nombreTecnologia', 'label' => 'Nombre', 'type' => 'text'],
-            ],
-            'exportRoutes' => [
-                'pdf' => route('modules.configuracion.tecnologias.export', ['format' => 'pdf']),
-                'xlsx' => route('modules.configuracion.tecnologias.export', ['format' => 'xlsx']),
-            ],
-            'stats' => [
-                ['label' => 'Total de tecnologias', 'value' => (clone $baseQuery)->count()],
-            ],
-            'filters' => [],
-            'createRoute' => route('modules.configuracion.tecnologias.create'),
-            'editRoute' => 'modules.configuracion.tecnologias.edit',
-            'showRoute' => 'modules.configuracion.tecnologias.edit',
-            'destroyRoute' => 'modules.configuracion.tecnologias.destroy',
-            'identifierKey' => 'idtecnologia',
-            'lockResource' => 'configuracion.tecnologia',
-        ]);
-    }
-
-    public function tecnologiasCreate(): View
-    {
-        return view('configuracion.tecnologia.tecnologia-form', [
-            'title' => 'Nueva Tecnologia',
-            'moduleTitle' => 'Configuracion: Tecnologia',
-            'mode' => 'create',
-            'formAction' => route('modules.configuracion.tecnologias.store'),
-            'backRoute' => route('modules.configuracion.tecnologias.index'),
-            'record' => null,
-            'fields' => [
-                [
-                    'name' => 'nombreTecnologia',
-                    'type' => 'text',
-                    'label' => 'Nombre',
-                    'required' => true,
-                    'maxlength' => 2,
-                    'minlength' => 1,
-                    'helpText' => 'Código o nombre corto de la tecnología.',
-                ],
-            ],
-            'readOnly' => false,
-        ]);
-    }
-
-    public function tecnologiasStore(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            'nombreTecnologia' => ['required', 'string', 'min:1', 'max:2', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('tecnologia', 'nombreTecnologia')],
-        ], [
-            'nombreTecnologia.unique' => 'Ya existe una tecnología con ese nombre.',
-        ]);
-
-        $newId = DB::table('tecnologia')->insertGetId($validated);
-        $this->publishResourceEvent('configuracion.tecnologia', (string) $newId, 'created');
-
-        return redirect()
-            ->route('modules.configuracion.tecnologias.index')
-            ->with('success', 'Tecnologia creada correctamente.');
-    }
-
-    public function tecnologiasEdit(int $id): View|RedirectResponse
-    {
-        $record = DB::table('tecnologia')->where('idtecnologia', $id)->first();
-        if (!$record) {
-            return redirect()
-                ->route('modules.configuracion.tecnologias.index')
-                ->with('error', 'No se encontro la tecnologia solicitada.');
-        }
-
-        return view('configuracion.tecnologia.tecnologia-form', [
-            'title' => 'Editar Tecnologia',
-            'moduleTitle' => 'Configuracion: Tecnologia',
-            'mode' => 'edit',
-            'formAction' => route('modules.configuracion.tecnologias.update', $id),
-            'backRoute' => route('modules.configuracion.tecnologias.index'),
-            'record' => $record,
-            'fields' => [
-                [
-                    'name' => 'nombreTecnologia',
-                    'type' => 'text',
-                    'label' => 'Nombre',
-                    'required' => true,
-                    'maxlength' => 2,
-                    'minlength' => 1,
-                    'helpText' => 'Código o nombre corto de la tecnología.',
-                ],
-            ],
-            'readOnly' => true,
-        ] + $this->prepareLockViewData('configuracion.tecnologia', (string) $id));
-    }
-
-    public function tecnologiasUpdate(Request $request, int $id): RedirectResponse
-    {
-        $exists = DB::table('tecnologia')->where('idtecnologia', $id)->exists();
-        if (!$exists) {
-            return redirect()
-                ->route('modules.configuracion.tecnologias.index')
-                ->with('error', 'No se encontro la tecnologia solicitada.');
-        }
-
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.tecnologia', (string) $id, 'tecnologia', 'modules.configuracion.tecnologias.index')) {
-            return $redirect;
-        }
-
-        $validated = $request->validate([
-            'nombreTecnologia' => ['required', 'string', 'min:1', 'max:2', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('tecnologia', 'nombreTecnologia')->ignore($id, 'idtecnologia')],
-        ], [
-            'nombreTecnologia.unique' => 'Ya existe una tecnología con ese nombre.',
-        ]);
-
-        DB::table('tecnologia')->where('idtecnologia', $id)->update($validated);
-        $this->publishResourceEvent('configuracion.tecnologia', (string) $id, 'updated');
-
-        $this->releaseLockIfOwned($request, 'configuracion.tecnologia', (string) $id);
-
-        return redirect()
-            ->route('modules.configuracion.tecnologias.index')
-            ->with('success', 'Tecnologia actualizada correctamente.');
-    }
-
-    public function tecnologiasDestroy(Request $request, int $id): RedirectResponse
-    {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.tecnologia', (string) $id, 'tecnologia', 'modules.configuracion.tecnologias.index')) {
-            return $redirect;
-        }
-
-        try {
-            DB::table('tecnologia')->where('idtecnologia', $id)->delete();
-            $this->publishResourceEvent('configuracion.tecnologia', (string) $id, 'deleted');
-            $this->releaseLockIfOwned($request, 'configuracion.tecnologia', (string) $id);
-            return redirect()
-                ->route('modules.configuracion.tecnologias.index')
-                ->with('success', 'Tecnologia eliminada correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.tecnologias.index')
-                ->with('error', 'No se puede eliminar la tecnologia porque tiene registros relacionados.');
-        }
     }
 
     public function tecnologiasExport(Request $request, string $format)
@@ -1599,6 +307,7 @@ class ConfiguracionController extends Controller
     public function tiposGastoIndex(Request $request): View
     {
         $baseQuery = DB::table('tipogasto');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -1630,7 +339,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de tipos de gasto', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.tipos-gasto.create'),
             'editRoute' => 'modules.configuracion.tipos-gasto.edit',
             'showRoute' => 'modules.configuracion.tipos-gasto.edit',
@@ -1764,6 +473,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('tipogasto');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -1793,9 +503,210 @@ class ConfiguracionController extends Controller
         return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Gasto', $filename);
     }
 
+    public function tiposContactoIndex(Request $request): View
+    {
+        $baseQuery = DB::table('tipocontacto');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idtipoContacto', 'like', $term)
+                    ->orWhere('detalle', 'like', $term);
+            });
+        }
+
+        $items = $baseQuery
+            ->orderBy('idtipoContacto')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
+
+        return view('configuracion.tipocontacto.tipocontacto', [
+            'title' => 'Configuracion: Tipo de Contacto',
+            'singularTitle' => 'Tipo de Contacto',
+            'items' => $items,
+            'columns' => [
+                ['key' => 'idtipoContacto', 'label' => 'ID', 'type' => 'text'],
+                ['key' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.configuracion.tipos-contacto.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.configuracion.tipos-contacto.export', ['format' => 'xlsx']),
+            ],
+            'stats' => [
+                ['label' => 'Total de tipos de contacto', 'value' => (clone $baseQuery)->count()],
+            ],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
+            'createRoute' => route('modules.configuracion.tipos-contacto.create'),
+            'editRoute' => 'modules.configuracion.tipos-contacto.edit',
+            'showRoute' => 'modules.configuracion.tipos-contacto.edit',
+            'destroyRoute' => 'modules.configuracion.tipos-contacto.destroy',
+            'identifierKey' => 'idtipoContacto',
+            'lockResource' => 'configuracion.tipo_contacto',
+        ]);
+    }
+
+    public function tiposContactoCreate(): View
+    {
+        return view('configuracion.tipocontacto.tipocontacto-form', [
+            'title' => 'Nuevo Tipo de Contacto',
+            'moduleTitle' => 'Configuracion: Tipo de Contacto',
+            'mode' => 'create',
+            'formAction' => route('modules.configuracion.tipos-contacto.store'),
+            'backRoute' => route('modules.configuracion.tipos-contacto.index'),
+            'record' => null,
+            'fields' => [
+                [
+                    'name' => 'detalle',
+                    'type' => 'text',
+                    'label' => 'Detalle',
+                    'required' => true,
+                    'maxlength' => 50,
+                    'minlength' => 2,
+                    'helpText' => 'Mínimo 2 caracteres.',
+                ],
+            ],
+            'readOnly' => false,
+        ]);
+    }
+
+    public function tiposContactoStore(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'detalle' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+        ]);
+
+        $newId = DB::table('tipocontacto')->insertGetId($validated);
+        $this->publishResourceEvent('configuracion.tipo_contacto', (string) $newId, 'created');
+
+        return redirect()
+            ->route('modules.configuracion.tipos-contacto.index')
+            ->with('success', 'Tipo de contacto creado correctamente.');
+    }
+
+    public function tiposContactoEdit(int $id): View|RedirectResponse
+    {
+        $record = DB::table('tipocontacto')->where('idtipoContacto', $id)->first();
+        if (!$record) {
+            return redirect()
+                ->route('modules.configuracion.tipos-contacto.index')
+                ->with('error', 'No se encontro el tipo de contacto solicitado.');
+        }
+
+        return view('configuracion.tipocontacto.tipocontacto-form', [
+            'title' => 'Editar Tipo de Contacto',
+            'moduleTitle' => 'Configuracion: Tipo de Contacto',
+            'mode' => 'edit',
+            'formAction' => route('modules.configuracion.tipos-contacto.update', $id),
+            'backRoute' => route('modules.configuracion.tipos-contacto.index'),
+            'record' => $record,
+            'fields' => [
+                [
+                    'name' => 'detalle',
+                    'type' => 'text',
+                    'label' => 'Detalle',
+                    'required' => true,
+                    'maxlength' => 50,
+                    'minlength' => 2,
+                    'helpText' => 'Mínimo 2 caracteres.',
+                ],
+            ],
+            'readOnly' => true,
+        ] + $this->prepareLockViewData('configuracion.tipo_contacto', (string) $id));
+    }
+
+    public function tiposContactoUpdate(Request $request, int $id): RedirectResponse
+    {
+        $exists = DB::table('tipocontacto')->where('idtipoContacto', $id)->exists();
+        if (!$exists) {
+            return redirect()
+                ->route('modules.configuracion.tipos-contacto.index')
+                ->with('error', 'No se encontro el tipo de contacto solicitado.');
+        }
+
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.tipo_contacto', (string) $id, 'tipo de contacto', 'modules.configuracion.tipos-contacto.index')) {
+            return $redirect;
+        }
+
+        $validated = $request->validate([
+            'detalle' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+        ]);
+
+        DB::table('tipocontacto')->where('idtipoContacto', $id)->update($validated);
+        $this->publishResourceEvent('configuracion.tipo_contacto', (string) $id, 'updated');
+
+        $this->releaseLockIfOwned($request, 'configuracion.tipo_contacto', (string) $id);
+
+        return redirect()
+            ->route('modules.configuracion.tipos-contacto.index')
+            ->with('success', 'Tipo de contacto actualizado correctamente.');
+    }
+
+    public function tiposContactoDestroy(Request $request, int $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.tipo_contacto', (string) $id, 'tipo de contacto', 'modules.configuracion.tipos-contacto.index')) {
+            return $redirect;
+        }
+
+        try {
+            DB::table('tipocontacto')->where('idtipoContacto', $id)->delete();
+            $this->publishResourceEvent('configuracion.tipo_contacto', (string) $id, 'deleted');
+            $this->releaseLockIfOwned($request, 'configuracion.tipo_contacto', (string) $id);
+
+            return redirect()
+                ->route('modules.configuracion.tipos-contacto.index')
+                ->with('success', 'Tipo de contacto eliminado correctamente.');
+        } catch (QueryException) {
+            return redirect()
+                ->route('modules.configuracion.tipos-contacto.index')
+                ->with('error', 'No se puede eliminar el tipo de contacto porque tiene registros relacionados.');
+        }
+    }
+
+    public function tiposContactoExport(Request $request, string $format)
+    {
+        $format = strtolower($format);
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            abort(404);
+        }
+
+        $baseQuery = DB::table('tipocontacto');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idtipoContacto', 'like', $term)
+                    ->orWhere('detalle', 'like', $term);
+            });
+        }
+
+        $rows = $baseQuery
+            ->orderBy('idtipoContacto')
+            ->get();
+
+        $columns = [
+            ['key' => 'idtipoContacto', 'label' => 'ID'],
+            ['key' => 'detalle', 'label' => 'Detalle'],
+        ];
+
+        $filename = 'tipo_contacto_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if ($format === 'xlsx') {
+            return $this->exportXlsxResponse($rows, $columns, $filename);
+        }
+
+        return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Contacto', $filename);
+    }
+
     public function tiposCobroIndex(Request $request): View
     {
         $baseQuery = DB::table('tipocobro');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -1831,7 +742,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de tipos de cobro', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.tipos-cobro.create'),
             'editRoute' => 'modules.configuracion.tipos-cobro.edit',
             'showRoute' => 'modules.configuracion.tipos-cobro.edit',
@@ -2003,6 +914,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('tipocobro');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -2036,9 +948,1650 @@ class ConfiguracionController extends Controller
         return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Cobro', $filename);
     }
 
+    public function unidadMedidasIndex(Request $request): View
+    {
+        $baseQuery = DB::table('unidadmedida');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idunidadMedida', 'like', $term)
+                    ->orWhere('detalle', 'like', $term)
+                    ->orWhere('nomenclatura', 'like', $term);
+            });
+        }
+
+        $items = $baseQuery
+            ->orderBy('idunidadMedida')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
+
+        return view('configuracion.unidadmedida.unidadmedida', [
+            'title' => 'Configuracion: Unidad de medida',
+            'singularTitle' => 'Unidad de medida',
+            'items' => $items,
+            'columns' => [
+                ['key' => 'idunidadMedida', 'label' => 'ID', 'type' => 'text'],
+                ['key' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+                ['key' => 'nomenclatura', 'label' => 'Nomenclatura', 'type' => 'text'],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.configuracion.unidad-medida.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.configuracion.unidad-medida.export', ['format' => 'xlsx']),
+            ],
+            'stats' => [
+                ['label' => 'Total de unidades de medida', 'value' => (clone $baseQuery)->count()],
+            ],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
+            'createRoute' => route('modules.configuracion.unidad-medida.create'),
+            'editRoute' => 'modules.configuracion.unidad-medida.edit',
+            'showRoute' => 'modules.configuracion.unidad-medida.edit',
+            'destroyRoute' => 'modules.configuracion.unidad-medida.destroy',
+            'identifierKey' => 'idunidadMedida',
+            'lockResource' => 'configuracion.unidad_medida',
+        ]);
+    }
+
+    public function unidadMedidasCreate(): View
+    {
+        return view('configuracion.unidadmedida.unidadmedida-form', [
+            'title' => 'Nueva Unidad de medida',
+            'moduleTitle' => 'Configuracion: Unidad de medida',
+            'mode' => 'create',
+            'formAction' => route('modules.configuracion.unidad-medida.store'),
+            'backRoute' => route('modules.configuracion.unidad-medida.index'),
+            'record' => null,
+            'fields' => [
+                [
+                    'name' => 'detalle',
+                    'type' => 'text',
+                    'label' => 'Detalle',
+                    'required' => true,
+                    'maxlength' => 30,
+                    'minlength' => 2,
+                    'helpText' => 'Mínimo 2 caracteres.',
+                ],
+                [
+                    'name' => 'nomenclatura',
+                    'type' => 'text',
+                    'label' => 'Nomenclatura',
+                    'required' => true,
+                    'maxlength' => 3,
+                    'minlength' => 1,
+                    'helpText' => 'Mínimo 1 carácter.',
+                ],
+            ],
+            'readOnly' => false,
+        ]);
+    }
+
+    public function unidadMedidasStore(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'detalle' => ['required', 'string', 'min:2', 'max:30', 'regex:' . self::SAFE_TEXT_REGEX],
+            'nomenclatura' => ['required', 'string', 'min:1', 'max:3', 'regex:' . self::SAFE_TEXT_REGEX],
+        ]);
+
+        $newId = DB::table('unidadmedida')->insertGetId($validated);
+        $this->publishResourceEvent('configuracion.unidad_medida', (string) $newId, 'created');
+
+        return redirect()
+            ->route('modules.configuracion.unidad-medida.index')
+            ->with('success', 'Unidad de medida creada correctamente.');
+    }
+
+    public function unidadMedidasEdit(int $id): View|RedirectResponse
+    {
+        $record = DB::table('unidadmedida')->where('idunidadMedida', $id)->first();
+        if (!$record) {
+            return redirect()
+                ->route('modules.configuracion.unidad-medida.index')
+                ->with('error', 'No se encontro la unidad de medida solicitada.');
+        }
+
+        return view('configuracion.unidadmedida.unidadmedida-form', [
+            'title' => 'Editar Unidad de medida',
+            'moduleTitle' => 'Configuracion: Unidad de medida',
+            'mode' => 'edit',
+            'formAction' => route('modules.configuracion.unidad-medida.update', $id),
+            'backRoute' => route('modules.configuracion.unidad-medida.index'),
+            'record' => $record,
+            'fields' => [
+                [
+                    'name' => 'detalle',
+                    'type' => 'text',
+                    'label' => 'Detalle',
+                    'required' => true,
+                    'maxlength' => 30,
+                    'minlength' => 2,
+                    'helpText' => 'Mínimo 2 caracteres.',
+                ],
+                [
+                    'name' => 'nomenclatura',
+                    'type' => 'text',
+                    'label' => 'Nomenclatura',
+                    'required' => true,
+                    'maxlength' => 3,
+                    'minlength' => 1,
+                    'helpText' => 'Mínimo 1 carácter.',
+                ],
+            ],
+            'readOnly' => true,
+        ] + $this->prepareLockViewData('configuracion.unidad_medida', (string) $id));
+    }
+
+    public function unidadMedidasUpdate(Request $request, int $id): RedirectResponse
+    {
+        $exists = DB::table('unidadmedida')->where('idunidadMedida', $id)->exists();
+        if (!$exists) {
+            return redirect()
+                ->route('modules.configuracion.unidad-medida.index')
+                ->with('error', 'No se encontro la unidad de medida solicitada.');
+        }
+
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.unidad_medida', (string) $id, 'unidad de medida', 'modules.configuracion.unidad-medida.index')) {
+            return $redirect;
+        }
+
+        $validated = $request->validate([
+            'detalle' => ['required', 'string', 'min:2', 'max:30', 'regex:' . self::SAFE_TEXT_REGEX],
+            'nomenclatura' => ['required', 'string', 'min:1', 'max:3', 'regex:' . self::SAFE_TEXT_REGEX],
+        ]);
+
+        DB::table('unidadmedida')->where('idunidadMedida', $id)->update($validated);
+        $this->publishResourceEvent('configuracion.unidad_medida', (string) $id, 'updated');
+
+        $this->releaseLockIfOwned($request, 'configuracion.unidad_medida', (string) $id);
+
+        return redirect()
+            ->route('modules.configuracion.unidad-medida.index')
+            ->with('success', 'Unidad de medida actualizada correctamente.');
+    }
+
+    public function unidadMedidasDestroy(Request $request, int $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.unidad_medida', (string) $id, 'unidad de medida', 'modules.configuracion.unidad-medida.index')) {
+            return $redirect;
+        }
+
+        try {
+            DB::table('unidadmedida')->where('idunidadMedida', $id)->delete();
+            $this->publishResourceEvent('configuracion.unidad_medida', (string) $id, 'deleted');
+            $this->releaseLockIfOwned($request, 'configuracion.unidad_medida', (string) $id);
+            return redirect()
+                ->route('modules.configuracion.unidad-medida.index')
+                ->with('success', 'Unidad de medida eliminada correctamente.');
+        } catch (QueryException) {
+            return redirect()
+                ->route('modules.configuracion.unidad-medida.index')
+                ->with('error', 'No se puede eliminar la unidad de medida porque tiene registros relacionados.');
+        }
+    }
+
+    public function unidadMedidasExport(Request $request, string $format)
+    {
+        $format = strtolower($format);
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            abort(404);
+        }
+
+        $baseQuery = DB::table('unidadmedida');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idunidadMedida', 'like', $term)
+                    ->orWhere('detalle', 'like', $term)
+                    ->orWhere('nomenclatura', 'like', $term);
+            });
+        }
+
+        $rows = $baseQuery
+            ->orderBy('idunidadMedida')
+            ->get();
+
+        $columns = [
+            ['key' => 'idunidadMedida', 'label' => 'ID'],
+            ['key' => 'detalle', 'label' => 'Detalle'],
+            ['key' => 'nomenclatura', 'label' => 'Nomenclatura'],
+        ];
+
+        $filename = 'unidad_medida_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if ($format === 'xlsx') {
+            return $this->exportXlsxResponse($rows, $columns, $filename);
+        }
+
+        return $this->exportPdfResponse($rows, $columns, 'Listado de Unidades de Medida', $filename);
+    }
+
+    public function monedasIndex(Request $request): View
+    {
+        $baseQuery = DB::table('moneda');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idmoneda', 'like', $term)
+                    ->orWhere('detalle', 'like', $term)
+                    ->orWhere('simbolo', 'like', $term);
+            });
+        }
+
+        $items = $baseQuery
+            ->orderBy('idmoneda')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
+
+        return view('configuracion.moneda.moneda', [
+            'title' => 'Configuracion: Moneda',
+            'singularTitle' => 'Moneda',
+            'items' => $items,
+            'columns' => [
+                ['key' => 'idmoneda', 'label' => 'ID', 'type' => 'text'],
+                ['key' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+                ['key' => 'simbolo', 'label' => 'Símbolo', 'type' => 'text'],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.configuracion.monedas.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.configuracion.monedas.export', ['format' => 'xlsx']),
+            ],
+            'stats' => [
+                ['label' => 'Total de monedas', 'value' => (clone $baseQuery)->count()],
+            ],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
+            'createRoute' => route('modules.configuracion.monedas.create'),
+            'editRoute' => 'modules.configuracion.monedas.edit',
+            'showRoute' => 'modules.configuracion.monedas.edit',
+            'destroyRoute' => 'modules.configuracion.monedas.destroy',
+            'identifierKey' => 'idmoneda',
+            'lockResource' => 'configuracion.moneda',
+        ]);
+    }
+
+    public function monedasCreate(): View
+    {
+        return view('configuracion.moneda.moneda-form', [
+            'title' => 'Nueva Moneda',
+            'moduleTitle' => 'Configuracion: Moneda',
+            'mode' => 'create',
+            'formAction' => route('modules.configuracion.monedas.store'),
+            'backRoute' => route('modules.configuracion.monedas.index'),
+            'record' => null,
+            'fields' => [
+                [
+                    'name' => 'detalle',
+                    'type' => 'text',
+                    'label' => 'Detalle',
+                    'required' => true,
+                    'maxlength' => 50,
+                    'minlength' => 2,
+                    'helpText' => 'Mínimo 2 caracteres.',
+                ],
+                [
+                    'name' => 'simbolo',
+                    'type' => 'text',
+                    'label' => 'Símbolo',
+                    'required' => true,
+                    'maxlength' => 3,
+                    'minlength' => 1,
+                    'helpText' => 'Mínimo 1 carácter.',
+                ],
+            ],
+            'readOnly' => false,
+        ]);
+    }
+
+    public function monedasStore(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'detalle' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'simbolo' => ['required', 'string', 'min:1', 'max:3', 'regex:' . self::SAFE_TEXT_REGEX],
+        ]);
+
+        $newId = DB::table('moneda')->insertGetId($validated);
+        $this->publishResourceEvent('configuracion.moneda', (string) $newId, 'created');
+
+        return redirect()
+            ->route('modules.configuracion.monedas.index')
+            ->with('success', 'Moneda creada correctamente.');
+    }
+
+    public function monedasEdit(int $id): View|RedirectResponse
+    {
+        $record = DB::table('moneda')->where('idmoneda', $id)->first();
+        if (!$record) {
+            return redirect()
+                ->route('modules.configuracion.monedas.index')
+                ->with('error', 'No se encontro la moneda solicitada.');
+        }
+
+        return view('configuracion.moneda.moneda-form', [
+            'title' => 'Editar Moneda',
+            'moduleTitle' => 'Configuracion: Moneda',
+            'mode' => 'edit',
+            'formAction' => route('modules.configuracion.monedas.update', $id),
+            'backRoute' => route('modules.configuracion.monedas.index'),
+            'record' => $record,
+            'fields' => [
+                [
+                    'name' => 'detalle',
+                    'type' => 'text',
+                    'label' => 'Detalle',
+                    'required' => true,
+                    'maxlength' => 50,
+                    'minlength' => 2,
+                    'helpText' => 'Mínimo 2 caracteres.',
+                ],
+                [
+                    'name' => 'simbolo',
+                    'type' => 'text',
+                    'label' => 'Símbolo',
+                    'required' => true,
+                    'maxlength' => 3,
+                    'minlength' => 1,
+                    'helpText' => 'Mínimo 1 carácter.',
+                ],
+            ],
+            'readOnly' => true,
+        ] + $this->prepareLockViewData('configuracion.moneda', (string) $id));
+    }
+
+    public function monedasUpdate(Request $request, int $id): RedirectResponse
+    {
+        $exists = DB::table('moneda')->where('idmoneda', $id)->exists();
+        if (!$exists) {
+            return redirect()
+                ->route('modules.configuracion.monedas.index')
+                ->with('error', 'No se encontro la moneda solicitada.');
+        }
+
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.moneda', (string) $id, 'moneda', 'modules.configuracion.monedas.index')) {
+            return $redirect;
+        }
+
+        $validated = $request->validate([
+            'detalle' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'simbolo' => ['required', 'string', 'min:1', 'max:3', 'regex:' . self::SAFE_TEXT_REGEX],
+        ]);
+
+        DB::table('moneda')->where('idmoneda', $id)->update($validated);
+        $this->publishResourceEvent('configuracion.moneda', (string) $id, 'updated');
+
+        $this->releaseLockIfOwned($request, 'configuracion.moneda', (string) $id);
+
+        return redirect()
+            ->route('modules.configuracion.monedas.index')
+            ->with('success', 'Moneda actualizada correctamente.');
+    }
+
+    public function monedasDestroy(Request $request, int $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.moneda', (string) $id, 'moneda', 'modules.configuracion.monedas.index')) {
+            return $redirect;
+        }
+
+        try {
+            DB::table('moneda')->where('idmoneda', $id)->delete();
+            $this->publishResourceEvent('configuracion.moneda', (string) $id, 'deleted');
+            $this->releaseLockIfOwned($request, 'configuracion.moneda', (string) $id);
+            return redirect()
+                ->route('modules.configuracion.monedas.index')
+                ->with('success', 'Moneda eliminada correctamente.');
+        } catch (QueryException) {
+            return redirect()
+                ->route('modules.configuracion.monedas.index')
+                ->with('error', 'No se puede eliminar la moneda porque tiene registros relacionados.');
+        }
+    }
+
+    public function monedasExport(Request $request, string $format)
+    {
+        $format = strtolower($format);
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            abort(404);
+        }
+
+        $baseQuery = DB::table('moneda');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idmoneda', 'like', $term)
+                    ->orWhere('detalle', 'like', $term)
+                    ->orWhere('simbolo', 'like', $term);
+            });
+        }
+
+        $rows = $baseQuery
+            ->orderBy('idmoneda')
+            ->get();
+
+        $columns = [
+            ['key' => 'idmoneda', 'label' => 'ID'],
+            ['key' => 'detalle', 'label' => 'Detalle'],
+            ['key' => 'simbolo', 'label' => 'Símbolo'],
+        ];
+
+        $filename = 'moneda_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if ($format === 'xlsx') {
+            return $this->exportXlsxResponse($rows, $columns, $filename);
+        }
+
+        return $this->exportPdfResponse($rows, $columns, 'Listado de Monedas', $filename);
+    }
+
+    public function marcasIndex(Request $request): View
+    {
+        $baseQuery = DB::table('marca');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idmarca', 'like', $term)
+                    ->orWhere('nombreMarca', 'like', $term)
+                    ->orWhere('procedencia', 'like', $term);
+            });
+        }
+
+        $items = $baseQuery
+            ->orderBy('idmarca')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
+
+        return view('configuracion.marca.marca', [
+            'title' => 'Configuracion: Marca',
+            'singularTitle' => 'Marca',
+            'items' => $items,
+            'columns' => [
+                ['key' => 'idmarca', 'label' => 'ID', 'type' => 'text'],
+                ['key' => 'nombreMarca', 'label' => 'Nombre', 'type' => 'text'],
+                ['key' => 'procedencia', 'label' => 'Procedencia', 'type' => 'text'],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.configuracion.marcas.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.configuracion.marcas.export', ['format' => 'xlsx']),
+            ],
+            'stats' => [
+                ['label' => 'Total de marcas', 'value' => (clone $baseQuery)->count()],
+            ],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
+            'createRoute' => route('modules.configuracion.marcas.create'),
+            'editRoute' => 'modules.configuracion.marcas.edit',
+            'showRoute' => 'modules.configuracion.marcas.edit',
+            'destroyRoute' => 'modules.configuracion.marcas.destroy',
+            'identifierKey' => 'idmarca',
+            'lockResource' => 'configuracion.marca',
+        ]);
+    }
+
+    public function marcasCreate(): View
+    {
+        return view('configuracion.marca.marca-form', [
+            'title' => 'Nueva Marca',
+            'moduleTitle' => 'Configuracion: Marca',
+            'mode' => 'create',
+            'formAction' => route('modules.configuracion.marcas.store'),
+            'backRoute' => route('modules.configuracion.marcas.index'),
+            'record' => null,
+            'fields' => [
+                [
+                    'name' => 'nombreMarca',
+                    'type' => 'text',
+                    'label' => 'Nombre',
+                    'required' => true,
+                    'maxlength' => 50,
+                    'minlength' => 2,
+                    'helpText' => 'Mínimo 2 caracteres. Entrega el nombre de la marca.',
+                ],
+                [
+                    'name' => 'procedencia',
+                    'type' => 'text',
+                    'label' => 'Procedencia',
+                    'required' => false,
+                    'maxlength' => 45,
+                    'minlength' => 1,
+                    'helpText' => 'Opcional.',
+                ],
+            ],
+            'readOnly' => false,
+        ]);
+    }
+
+    public function marcasStore(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'nombreMarca' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'procedencia' => ['nullable', 'string', 'min:1', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+        ]);
+
+        $newId = DB::table('marca')->insertGetId($validated);
+        $this->publishResourceEvent('configuracion.marca', (string) $newId, 'created');
+
+        return redirect()
+            ->route('modules.configuracion.marcas.index')
+            ->with('success', 'Marca creada correctamente.');
+    }
+
+    public function marcasEdit(int $id): View|RedirectResponse
+    {
+        $record = DB::table('marca')->where('idmarca', $id)->first();
+        if (!$record) {
+            return redirect()
+                ->route('modules.configuracion.marcas.index')
+                ->with('error', 'No se encontro la marca solicitada.');
+        }
+
+        return view('configuracion.marca.marca-form', [
+            'title' => 'Editar Marca',
+            'moduleTitle' => 'Configuracion: Marca',
+            'mode' => 'edit',
+            'formAction' => route('modules.configuracion.marcas.update', $id),
+            'backRoute' => route('modules.configuracion.marcas.index'),
+            'record' => $record,
+            'fields' => [
+                [
+                    'name' => 'nombreMarca',
+                    'type' => 'text',
+                    'label' => 'Nombre',
+                    'required' => true,
+                    'maxlength' => 50,
+                    'minlength' => 2,
+                    'helpText' => 'Mínimo 2 caracteres. Entrega el nombre de la marca.',
+                ],
+                [
+                    'name' => 'procedencia',
+                    'type' => 'text',
+                    'label' => 'Procedencia',
+                    'required' => false,
+                    'maxlength' => 45,
+                    'minlength' => 1,
+                    'helpText' => 'Opcional.',
+                ],
+            ],
+            'readOnly' => true,
+        ] + $this->prepareLockViewData('configuracion.marca', (string) $id));
+    }
+
+    public function marcasUpdate(Request $request, int $id): RedirectResponse
+    {
+        $exists = DB::table('marca')->where('idmarca', $id)->exists();
+        if (!$exists) {
+            return redirect()
+                ->route('modules.configuracion.marcas.index')
+                ->with('error', 'No se encontro la marca solicitada.');
+        }
+
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.marca', (string) $id, 'marca', 'modules.configuracion.marcas.index')) {
+            return $redirect;
+        }
+
+        $validated = $request->validate([
+            'nombreMarca' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'procedencia' => ['nullable', 'string', 'min:1', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+        ]);
+
+        DB::table('marca')->where('idmarca', $id)->update($validated);
+        $this->publishResourceEvent('configuracion.marca', (string) $id, 'updated');
+
+        $this->releaseLockIfOwned($request, 'configuracion.marca', (string) $id);
+
+        return redirect()
+            ->route('modules.configuracion.marcas.index')
+            ->with('success', 'Marca actualizada correctamente.');
+    }
+
+    public function marcasDestroy(Request $request, int $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.marca', (string) $id, 'marca', 'modules.configuracion.marcas.index')) {
+            return $redirect;
+        }
+
+        try {
+            DB::table('marca')->where('idmarca', $id)->delete();
+            $this->publishResourceEvent('configuracion.marca', (string) $id, 'deleted');
+            $this->releaseLockIfOwned($request, 'configuracion.marca', (string) $id);
+            return redirect()
+                ->route('modules.configuracion.marcas.index')
+                ->with('success', 'Marca eliminada correctamente.');
+        } catch (QueryException) {
+            return redirect()
+                ->route('modules.configuracion.marcas.index')
+                ->with('error', 'No se puede eliminar la marca porque tiene registros relacionados.');
+        }
+    }
+
+    public function marcasExport(Request $request, string $format)
+    {
+        $format = strtolower($format);
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            abort(404);
+        }
+
+        $baseQuery = DB::table('marca');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idmarca', 'like', $term)
+                    ->orWhere('nombreMarca', 'like', $term)
+                    ->orWhere('procedencia', 'like', $term);
+            });
+        }
+
+        $rows = $baseQuery
+            ->orderBy('idmarca')
+            ->get();
+
+        $columns = [
+            ['key' => 'idmarca', 'label' => 'ID'],
+            ['key' => 'nombreMarca', 'label' => 'Nombre'],
+            ['key' => 'procedencia', 'label' => 'Procedencia'],
+        ];
+
+        $filename = 'marca_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if ($format === 'xlsx') {
+            return $this->exportXlsxResponse($rows, $columns, $filename);
+        }
+
+        return $this->exportPdfResponse($rows, $columns, 'Listado de Marcas', $filename);
+    }
+
+    public function empresapropietariaIndex(Request $request): View
+    {
+        $baseQuery = DB::table('empresapropietaria as ep')
+            ->leftJoin('ubigeo as u', 'ep.ubigeo_idubigeo', '=', 'u.idubigeo')
+            ->select('ep.*', DB::raw("CONCAT_WS(' - ', u.departamento, u.provincia, u.distrito) as ubigeo_label"));
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('ep.RUC', 'like', $term)
+                    ->orWhere('ep.razonSocial', 'like', $term)
+                    ->orWhere('ep.rubro', 'like', $term)
+                    ->orWhere('ep.direccionFiscal', 'like', $term)
+                    ->orWhere('u.departamento', 'like', $term)
+                    ->orWhere('u.provincia', 'like', $term)
+                    ->orWhere('u.distrito', 'like', $term);
+            });
+        }
+
+        $items = $baseQuery
+            ->orderBy('ep.razonSocial')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
+
+        return view('configuracion.empresapropietaria.empresapropietaria', [
+            'title' => 'Configuracion: Empresa Propietaria',
+            'singularTitle' => 'Empresa Propietaria',
+            'items' => $items,
+            'columns' => [
+                ['key' => 'RUC', 'label' => 'RUC', 'type' => 'text'],
+                ['key' => 'razonSocial', 'label' => 'Razón social', 'type' => 'text'],
+                ['key' => 'rubro', 'label' => 'Rubro', 'type' => 'text'],
+                ['key' => 'direccionFiscal', 'label' => 'Dirección fiscal', 'type' => 'text'],
+                ['key' => 'ubigeo_label', 'label' => 'Ubigeo', 'type' => 'text'],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.configuracion.empresapropietaria.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.configuracion.empresapropietaria.export', ['format' => 'xlsx']),
+            ],
+            'stats' => [
+                ['label' => 'Total de empresas propietarias', 'value' => (clone $baseQuery)->count()],
+            ],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
+            'createRoute' => route('modules.configuracion.empresapropietaria.create'),
+            'editRoute' => 'modules.configuracion.empresapropietaria.edit',
+            'showRoute' => 'modules.configuracion.empresapropietaria.edit',
+            'destroyRoute' => 'modules.configuracion.empresapropietaria.destroy',
+            'bulkDestroyRoute' => route('modules.configuracion.empresapropietaria.bulk-destroy'),
+            'identifierKey' => 'RUC',
+            'lockResource' => 'configuracion.empresapropietaria',
+        ]);
+    }
+
+    public function empresapropietariaCreate(): View
+    {
+        $ubigeos = DB::table('ubigeo')
+            ->select('idubigeo', DB::raw("CONCAT_WS(' - ', departamento, provincia, distrito) as ubigeo_label"))
+            ->orderBy('departamento')
+            ->orderBy('provincia')
+            ->orderBy('distrito')
+            ->get();
+
+        return view('configuracion.empresapropietaria.empresapropietaria-form', [
+            'title' => 'Nueva Empresa Propietaria',
+            'moduleTitle' => 'Configuracion: Empresa Propietaria',
+            'mode' => 'create',
+            'formAction' => route('modules.configuracion.empresapropietaria.store'),
+            'backRoute' => route('modules.configuracion.empresapropietaria.index'),
+            'record' => null,
+            'fields' => [
+                [
+                    'name' => 'RUC',
+                    'type' => 'text',
+                    'label' => 'RUC',
+                    'required' => true,
+                    'maxlength' => 10,
+                    'minlength' => 10,
+                    'helpText' => 'Identificador fiscal. Solo números',
+                ],
+                [
+                    'name' => 'razonSocial',
+                    'type' => 'text',
+                    'label' => 'Razón social',
+                    'required' => true,
+                    'maxlength' => 200,
+                    'minlength' => 2,
+                    'helpText' => 'Nombre legal de la empresa. Mínimo 2 caracteres.',
+                ],
+                [
+                    'name' => 'rubro',
+                    'type' => 'text',
+                    'label' => 'Rubro',
+                    'required' => false,
+                    'maxlength' => 50,
+                    'minlength' => 1,
+                    'helpText' => 'Opcional.',
+                ],
+                [
+                    'name' => 'direccionFiscal',
+                    'type' => 'text',
+                    'label' => 'Dirección fiscal',
+                    'required' => false,
+                    'maxlength' => 300,
+                    'minlength' => 1,
+                    'helpText' => 'Opcional.',
+                ],
+                [
+                    'name' => 'ubigeo_idubigeo',
+                    'type' => 'select',
+                    'label' => 'Ubigeo',
+                    'required' => true,
+                    'optionsData' => $ubigeos,
+                    'optionKey' => 'idubigeo',
+                    'optionLabel' => 'ubigeo_label',
+                    'tomSelect' => true,
+                    'helpText' => 'Selecciona la ubicación fiscal.',
+                ],
+            ],
+            'readOnly' => false,
+        ]);
+    }
+
+    public function empresapropietariaStore(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'RUC' => ['required', 'integer'],
+            'razonSocial' => ['required', 'string', 'min:2', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
+            'rubro' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'direccionFiscal' => ['nullable', 'string', 'max:300', 'regex:' . self::SAFE_TEXT_REGEX],
+            'ubigeo_idubigeo' => ['required', 'integer', 'exists:ubigeo,idubigeo'],
+        ], [
+            'RUC.integer' => 'El RUC debe ser un número entero.',
+        ]
+        );
+
+        $validated['RUC'] = (int) $validated['RUC'];
+        $validated['ubigeo_idubigeo'] = (int) $validated['ubigeo_idubigeo'];
+
+        DB::table('empresapropietaria')->insert($validated);
+        $this->publishResourceEvent('configuracion.empresapropietaria', (string) $validated['RUC'], 'created');
+
+        return redirect()
+            ->route('modules.configuracion.empresapropietaria.index')
+            ->with('success', 'Empresa propietaria creada correctamente.');
+    }
+
+    public function empresapropietariaEdit(int $id): View|RedirectResponse
+    {
+        $record = DB::table('empresapropietaria')->where('RUC', $id)->first();
+        if (!$record) {
+            return redirect()
+                ->route('modules.configuracion.empresapropietaria.index')
+                ->with('error', 'No se encontro la empresa propietaria solicitada.');
+        }
+
+        $ubigeos = DB::table('ubigeo')
+            ->select('idubigeo', DB::raw("CONCAT_WS(' - ', departamento, provincia, distrito) as ubigeo_label"))
+            ->orderBy('departamento')
+            ->orderBy('provincia')
+            ->orderBy('distrito')
+            ->get();
+
+        return view('configuracion.empresapropietaria.empresapropietaria-form', [
+            'title' => 'Editar Empresa Propietaria',
+            'moduleTitle' => 'Configuracion: Empresa Propietaria',
+            'mode' => 'edit',
+            'formAction' => route('modules.configuracion.empresapropietaria.update', $id),
+            'backRoute' => route('modules.configuracion.empresapropietaria.index'),
+            'record' => $record,
+            'fields' => [
+                [
+                    'name' => 'RUC',
+                    'type' => 'text',
+                    'label' => 'RUC',
+                    'required' => true,
+                    'maxlength' => 10,
+                    'minlength' => 10,
+                    'helpText' => 'Identificador fiscal. Solo números',
+                ],
+                [
+                    'name' => 'razonSocial',
+                    'type' => 'text',
+                    'label' => 'Razón social',
+                    'required' => true,
+                    'maxlength' => 200,
+                    'minlength' => 2,
+                    'helpText' => 'Nombre legal de la empresa.',
+                ],
+                [
+                    'name' => 'rubro',
+                    'type' => 'text',
+                    'label' => 'Rubro',
+                    'required' => false,
+                    'maxlength' => 50,
+                    'minlength' => 1,
+                    'helpText' => 'Opcional.',
+                ],
+                [
+                    'name' => 'direccionFiscal',
+                    'type' => 'text',
+                    'label' => 'Dirección fiscal',
+                    'required' => false,
+                    'maxlength' => 300,
+                    'minlength' => 1,
+                    'helpText' => 'Opcional.',
+                ],
+                [
+                    'name' => 'ubigeo_idubigeo',
+                    'type' => 'select',
+                    'label' => 'Ubigeo',
+                    'required' => true,
+                    'optionsData' => $ubigeos,
+                    'optionKey' => 'idubigeo',
+                    'optionLabel' => 'ubigeo_label',
+                    'tomSelect' => true,
+                    'helpText' => 'Selecciona la ubicación fiscal.',
+                ],
+            ],
+            'readOnly' => true,
+        ] + $this->prepareLockViewData('configuracion.empresapropietaria', (string) $id));
+    }
+
+    public function empresapropietariaUpdate(Request $request, int $id): RedirectResponse
+    {
+        $exists = DB::table('empresapropietaria')->where('RUC', $id)->exists();
+        if (!$exists) {
+            return redirect()
+                ->route('modules.configuracion.empresapropietaria.index')
+                ->with('error', 'No se encontro la empresa propietaria solicitada.');
+        }
+
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.empresapropietaria', (string) $id, 'empresa propietaria', 'modules.configuracion.empresapropietaria.index')) {
+            return $redirect;
+        }
+
+        $validated = $request->validate([
+            'RUC' => ['required', 'integer'],
+            'razonSocial' => ['required', 'string', 'min:2', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
+            'rubro' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'direccionFiscal' => ['nullable', 'string', 'max:300', 'regex:' . self::SAFE_TEXT_REGEX],
+            'ubigeo_idubigeo' => ['required', 'integer', 'exists:ubigeo,idubigeo'],
+        ]);
+
+        $validated['RUC'] = (int) $validated['RUC'];
+        $validated['ubigeo_idubigeo'] = (int) $validated['ubigeo_idubigeo'];
+
+        DB::table('empresapropietaria')->where('RUC', $id)->update($validated);
+        $this->publishResourceEvent('configuracion.empresapropietaria', (string) $id, 'updated');
+
+        $this->releaseLockIfOwned($request, 'configuracion.empresapropietaria', (string) $id);
+
+        return redirect()
+            ->route('modules.configuracion.empresapropietaria.index')
+            ->with('success', 'Empresa propietaria actualizada correctamente.');
+    }
+
+    public function empresapropietariaDestroy(Request $request, int $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.empresapropietaria', (string) $id, 'empresa propietaria', 'modules.configuracion.empresapropietaria.index')) {
+            return $redirect;
+        }
+
+        try {
+            DB::table('empresapropietaria')->where('RUC', $id)->delete();
+            $this->publishResourceEvent('configuracion.empresapropietaria', (string) $id, 'deleted');
+            $this->releaseLockIfOwned($request, 'configuracion.empresapropietaria', (string) $id);
+            return redirect()
+                ->route('modules.configuracion.empresapropietaria.index')
+                ->with('success', 'Empresa propietaria eliminada correctamente.');
+        } catch (QueryException) {
+            return redirect()
+                ->route('modules.configuracion.empresapropietaria.index')
+                ->with('error', 'No se puede eliminar la empresa propietaria porque tiene registros relacionados.');
+        }
+    }
+
+    public function empresapropietariaExport(Request $request, string $format)
+    {
+        $format = strtolower($format);
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            abort(404);
+        }
+
+        $baseQuery = DB::table('empresapropietaria as ep')
+            ->leftJoin('ubigeo as u', 'ep.ubigeo_idubigeo', '=', 'u.idubigeo')
+            ->select('ep.*', DB::raw("CONCAT_WS(' - ', u.departamento, u.provincia, u.distrito) as ubigeo_label"));
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('ep.RUC', 'like', $term)
+                    ->orWhere('ep.razonSocial', 'like', $term)
+                    ->orWhere('ep.rubro', 'like', $term)
+                    ->orWhere('ep.direccionFiscal', 'like', $term)
+                    ->orWhere('u.departamento', 'like', $term)
+                    ->orWhere('u.provincia', 'like', $term)
+                    ->orWhere('u.distrito', 'like', $term);
+            });
+        }
+
+        $rows = $baseQuery
+            ->orderBy('ep.razonSocial')
+            ->get();
+
+        $columns = [
+            ['key' => 'RUC', 'label' => 'RUC'],
+            ['key' => 'razonSocial', 'label' => 'Razón social'],
+            ['key' => 'rubro', 'label' => 'Rubro'],
+            ['key' => 'direccionFiscal', 'label' => 'Dirección fiscal'],
+            ['key' => 'ubigeo_label', 'label' => 'Ubigeo'],
+        ];
+
+        $filename = 'empresa_propietaria_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if ($format === 'xlsx') {
+            return $this->exportXlsxResponse($rows, $columns, $filename);
+        }
+
+        return $this->exportPdfResponse($rows, $columns, 'Listado de Empresas Propietarias', $filename);
+    }
+
+    public function modeloIndex(Request $request): View
+    {
+        $baseQuery = DB::table('modelo as m')
+            ->leftJoin('marca as ma', 'm.marca_idmarca', '=', 'ma.idmarca')
+            ->select('m.*', 'ma.nombreMarca as marca_label');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('m.idmodelo', 'like', $term)
+                    ->orWhere('m.nombreModelo', 'like', $term)
+                    ->orWhere('ma.nombreMarca', 'like', $term);
+            });
+        }
+
+        $items = $baseQuery
+            ->orderBy('m.idmodelo')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
+
+        return view('configuracion.modelo.modelo', [
+            'title' => 'Configuracion: Modelo',
+            'singularTitle' => 'Modelo',
+            'items' => $items,
+            'columns' => [
+                ['key' => 'idmodelo', 'label' => 'ID', 'type' => 'text'],
+                ['key' => 'nombreModelo', 'label' => 'Nombre', 'type' => 'text'],
+                ['key' => 'marca_label', 'label' => 'Marca', 'type' => 'text'],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.configuracion.modelo.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.configuracion.modelo.export', ['format' => 'xlsx']),
+            ],
+            'stats' => [
+                ['label' => 'Total de modelos', 'value' => (clone $baseQuery)->count()],
+            ],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
+            'createRoute' => route('modules.configuracion.modelo.create'),
+            'editRoute' => 'modules.configuracion.modelo.edit',
+            'showRoute' => 'modules.configuracion.modelo.edit',
+            'destroyRoute' => 'modules.configuracion.modelo.destroy',
+            'identifierKey' => 'idmodelo',
+            'lockResource' => 'configuracion.modelo',
+        ]);
+    }
+
+    public function modeloCreate(): View
+    {
+        $marcas = DB::table('marca')->orderBy('nombreMarca')->get();
+
+        return view('configuracion.modelo.modelo-form', [
+            'title' => 'Nuevo Modelo',
+            'moduleTitle' => 'Configuracion: Modelo',
+            'mode' => 'create',
+            'formAction' => route('modules.configuracion.modelo.store'),
+            'backRoute' => route('modules.configuracion.modelo.index'),
+            'record' => null,
+            'fields' => [
+                [
+                    'name' => 'nombreModelo',
+                    'type' => 'text',
+                    'label' => 'Nombre',
+                    'required' => true,
+                    'maxlength' => 100,
+                    'minlength' => 2,
+                    'helpText' => 'Nombre del modelo.',
+                ],
+                [
+                    'name' => 'marca_idmarca',
+                    'type' => 'select',
+                    'label' => 'Marca',
+                    'required' => true,
+                    'optionsData' => $marcas,
+                    'optionKey' => 'idmarca',
+                    'optionLabel' => 'nombreMarca',
+                    'tomSelect' => true,
+                    'helpText' => 'Selecciona la marca asociada.',
+                ],
+            ],
+            'readOnly' => false,
+        ]);
+    }
+
+    public function modeloStore(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'nombreModelo' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
+            'marca_idmarca' => ['required', 'integer', 'exists:marca,idmarca'],
+        ]);
+
+        $validated['marca_idmarca'] = (int) $validated['marca_idmarca'];
+
+        $newId = DB::table('modelo')->insertGetId($validated);
+        $this->publishResourceEvent('configuracion.modelo', (string) $newId, 'created');
+
+        return redirect()
+            ->route('modules.configuracion.modelo.index')
+            ->with('success', 'Modelo creado correctamente.');
+    }
+
+    public function modeloEdit(int $id): View|RedirectResponse
+    {
+        $record = DB::table('modelo')->where('idmodelo', $id)->first();
+        if (!$record) {
+            return redirect()
+                ->route('modules.configuracion.modelo.index')
+                ->with('error', 'No se encontro el modelo solicitado.');
+        }
+
+        $marcas = DB::table('marca')->orderBy('nombreMarca')->get();
+
+        return view('configuracion.modelo.modelo-form', [
+            'title' => 'Editar Modelo',
+            'moduleTitle' => 'Configuracion: Modelo',
+            'mode' => 'edit',
+            'formAction' => route('modules.configuracion.modelo.update', $id),
+            'backRoute' => route('modules.configuracion.modelo.index'),
+            'record' => $record,
+            'fields' => [
+                [
+                    'name' => 'nombreModelo',
+                    'type' => 'text',
+                    'label' => 'Nombre',
+                    'required' => true,
+                    'maxlength' => 100,
+                    'minlength' => 2,
+                    'helpText' => 'Nombre del modelo.',
+                ],
+                [
+                    'name' => 'marca_idmarca',
+                    'type' => 'select',
+                    'label' => 'Marca',
+                    'required' => true,
+                    'optionsData' => $marcas,
+                    'optionKey' => 'idmarca',
+                    'optionLabel' => 'nombreMarca',
+                    'tomSelect' => true,
+                    'helpText' => 'Selecciona la marca asociada.',
+                ],
+            ],
+            'readOnly' => true,
+        ] + $this->prepareLockViewData('configuracion.modelo', (string) $id));
+    }
+
+    public function modeloUpdate(Request $request, int $id): RedirectResponse
+    {
+        $exists = DB::table('modelo')->where('idmodelo', $id)->exists();
+        if (!$exists) {
+            return redirect()
+                ->route('modules.configuracion.modelo.index')
+                ->with('error', 'No se encontro el modelo solicitado.');
+        }
+
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.modelo', (string) $id, 'modelo', 'modules.configuracion.modelo.index')) {
+            return $redirect;
+        }
+
+        $validated = $request->validate([
+            'nombreModelo' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
+            'marca_idmarca' => ['required', 'integer', 'exists:marca,idmarca'],
+        ]);
+
+        $validated['marca_idmarca'] = (int) $validated['marca_idmarca'];
+
+        DB::table('modelo')->where('idmodelo', $id)->update($validated);
+        $this->publishResourceEvent('configuracion.modelo', (string) $id, 'updated');
+
+        $this->releaseLockIfOwned($request, 'configuracion.modelo', (string) $id);
+
+        return redirect()
+            ->route('modules.configuracion.modelo.index')
+            ->with('success', 'Modelo actualizado correctamente.');
+    }
+
+    public function modeloDestroy(Request $request, int $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.modelo', (string) $id, 'modelo', 'modules.configuracion.modelo.index')) {
+            return $redirect;
+        }
+
+        try {
+            DB::table('modelo')->where('idmodelo', $id)->delete();
+            $this->publishResourceEvent('configuracion.modelo', (string) $id, 'deleted');
+            $this->releaseLockIfOwned($request, 'configuracion.modelo', (string) $id);
+            return redirect()
+                ->route('modules.configuracion.modelo.index')
+                ->with('success', 'Modelo eliminado correctamente.');
+        } catch (QueryException) {
+            return redirect()
+                ->route('modules.configuracion.modelo.index')
+                ->with('error', 'No se puede eliminar el modelo porque tiene registros relacionados.');
+        }
+    }
+
+    public function modeloExport(Request $request, string $format)
+    {
+        $format = strtolower($format);
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            abort(404);
+        }
+
+        $baseQuery = DB::table('modelo as m')
+            ->leftJoin('marca as ma', 'm.marca_idmarca', '=', 'ma.idmarca')
+            ->select('m.*', 'ma.nombreMarca as marca_label');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('m.idmodelo', 'like', $term)
+                    ->orWhere('m.nombreModelo', 'like', $term)
+                    ->orWhere('ma.nombreMarca', 'like', $term);
+            });
+        }
+
+        $rows = $baseQuery
+            ->orderBy('m.idmodelo')
+            ->get();
+
+        $columns = [
+            ['key' => 'idmodelo', 'label' => 'ID'],
+            ['key' => 'nombreModelo', 'label' => 'Nombre'],
+            ['key' => 'marca_label', 'label' => 'Marca'],
+        ];
+
+        $filename = 'modelo_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if ($format === 'xlsx') {
+            return $this->exportXlsxResponse($rows, $columns, $filename);
+        }
+
+        return $this->exportPdfResponse($rows, $columns, 'Listado de Modelos', $filename);
+    }
+
+    public function tributosIndex(Request $request): View
+    {
+        $baseQuery = DB::table('tributo');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idtributo', 'like', $term)
+                    ->orWhere('nombreTributo', 'like', $term)
+                    ->orWhere('tipo', 'like', $term)
+                    ->orWhere('valor', 'like', $term);
+            });
+        }
+
+        $items = $baseQuery
+            ->orderBy('idtributo')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
+
+        return view('configuracion.tributo.tributo', [
+            'title' => 'Configuracion: Tributo',
+            'singularTitle' => 'Tributo',
+            'items' => $items,
+            'columns' => [
+                ['key' => 'idtributo', 'label' => 'ID', 'type' => 'text'],
+                ['key' => 'nombreTributo', 'label' => 'Nombre', 'type' => 'text'],
+                ['key' => 'tipo', 'label' => 'Tipo', 'type' => 'text'],
+                ['key' => 'valor', 'label' => 'Valor', 'type' => 'text'],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.configuracion.tributos.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.configuracion.tributos.export', ['format' => 'xlsx']),
+            ],
+            'stats' => [
+                ['label' => 'Total de tributos', 'value' => (clone $baseQuery)->count()],
+            ],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
+            'createRoute' => route('modules.configuracion.tributos.create'),
+            'editRoute' => 'modules.configuracion.tributos.edit',
+            'showRoute' => 'modules.configuracion.tributos.edit',
+            'destroyRoute' => 'modules.configuracion.tributos.destroy',
+            'identifierKey' => 'idtributo',
+            'lockResource' => 'configuracion.tributo',
+        ]);
+    }
+
+    public function tributosCreate(): View
+    {
+        return view('configuracion.tributo.tributo-form', [
+            'title' => 'Nuevo Tributo',
+            'moduleTitle' => 'Configuracion: Tributo',
+            'mode' => 'create',
+            'formAction' => route('modules.configuracion.tributos.store'),
+            'backRoute' => route('modules.configuracion.tributos.index'),
+            'record' => null,
+            'fields' => [
+                [
+                    'name' => 'nombreTributo',
+                    'type' => 'text',
+                    'label' => 'Nombre',
+                    'required' => true,
+                    'maxlength' => 100,
+                    'minlength' => 2,
+                    'helpText' => 'Mínimo 2 caracteres.',
+                ],
+                [
+                    'name' => 'tipo',
+                    'type' => 'text',
+                    'label' => 'Tipo',
+                    'required' => false,
+                    'maxlength' => 45,
+                    'minlength' => 1,
+                    'helpText' => 'Opcional.',
+                ],
+                [
+                    'name' => 'valor',
+                    'type' => 'number',
+                    'label' => 'Valor',
+                    'required' => false,
+                    'min' => 0,
+                    'helpText' => 'Opcional.',
+                ],
+            ],
+            'readOnly' => false,
+        ]);
+    }
+
+    public function tributosStore(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'nombreTributo' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
+            'tipo' => ['nullable', 'string', 'min:1', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+            'valor' => ['nullable', 'integer', 'min:0'],
+        ]);
+
+        $newId = DB::table('tributo')->insertGetId($validated);
+        $this->publishResourceEvent('configuracion.tributo', (string) $newId, 'created');
+
+        return redirect()
+            ->route('modules.configuracion.tributos.index')
+            ->with('success', 'Tributo creado correctamente.');
+    }
+
+    public function tributosEdit(int $id): View|RedirectResponse
+    {
+        $record = DB::table('tributo')->where('idtributo', $id)->first();
+        if (!$record) {
+            return redirect()
+                ->route('modules.configuracion.tributos.index')
+                ->with('error', 'No se encontro el tributo solicitado.');
+        }
+
+        return view('configuracion.tributo.tributo-form', [
+            'title' => 'Editar Tributo',
+            'moduleTitle' => 'Configuracion: Tributo',
+            'mode' => 'edit',
+            'formAction' => route('modules.configuracion.tributos.update', $id),
+            'backRoute' => route('modules.configuracion.tributos.index'),
+            'record' => $record,
+            'fields' => [
+                [
+                    'name' => 'nombreTributo',
+                    'type' => 'text',
+                    'label' => 'Nombre',
+                    'required' => true,
+                    'maxlength' => 100,
+                    'minlength' => 2,
+                    'helpText' => 'Mínimo 2 caracteres.',
+                ],
+                [
+                    'name' => 'tipo',
+                    'type' => 'text',
+                    'label' => 'Tipo',
+                    'required' => false,
+                    'maxlength' => 45,
+                    'minlength' => 1,
+                    'helpText' => 'Opcional.',
+                ],
+                [
+                    'name' => 'valor',
+                    'type' => 'number',
+                    'label' => 'Valor',
+                    'required' => false,
+                    'min' => 0,
+                    'helpText' => 'Opcional.',
+                ],
+            ],
+            'readOnly' => true,
+        ] + $this->prepareLockViewData('configuracion.tributo', (string) $id));
+    }
+
+    public function tributosUpdate(Request $request, int $id): RedirectResponse
+    {
+        $exists = DB::table('tributo')->where('idtributo', $id)->exists();
+        if (!$exists) {
+            return redirect()
+                ->route('modules.configuracion.tributos.index')
+                ->with('error', 'No se encontro el tributo solicitado.');
+        }
+
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.tributo', (string) $id, 'tributo', 'modules.configuracion.tributos.index')) {
+            return $redirect;
+        }
+
+        $validated = $request->validate([
+            'nombreTributo' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
+            'tipo' => ['nullable', 'string', 'min:1', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+            'valor' => ['nullable', 'integer', 'min:0'],
+        ]);
+
+        DB::table('tributo')->where('idtributo', $id)->update($validated);
+        $this->publishResourceEvent('configuracion.tributo', (string) $id, 'updated');
+
+        $this->releaseLockIfOwned($request, 'configuracion.tributo', (string) $id);
+
+        return redirect()
+            ->route('modules.configuracion.tributos.index')
+            ->with('success', 'Tributo actualizado correctamente.');
+    }
+
+    public function tributosDestroy(Request $request, int $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.tributo', (string) $id, 'tributo', 'modules.configuracion.tributos.index')) {
+            return $redirect;
+        }
+
+        try {
+            DB::table('tributo')->where('idtributo', $id)->delete();
+            $this->publishResourceEvent('configuracion.tributo', (string) $id, 'deleted');
+            $this->releaseLockIfOwned($request, 'configuracion.tributo', (string) $id);
+            return redirect()
+                ->route('modules.configuracion.tributos.index')
+                ->with('success', 'Tributo eliminado correctamente.');
+        } catch (QueryException) {
+            return redirect()
+                ->route('modules.configuracion.tributos.index')
+                ->with('error', 'No se puede eliminar el tributo porque tiene registros relacionados.');
+        }
+    }
+
+    public function tributosExport(Request $request, string $format)
+    {
+        $format = strtolower($format);
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            abort(404);
+        }
+
+        $baseQuery = DB::table('tributo');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idtributo', 'like', $term)
+                    ->orWhere('nombreTributo', 'like', $term)
+                    ->orWhere('tipo', 'like', $term)
+                    ->orWhere('valor', 'like', $term);
+            });
+        }
+
+        $rows = $baseQuery
+            ->orderBy('idtributo')
+            ->get();
+
+        $columns = [
+            ['key' => 'idtributo', 'label' => 'ID'],
+            ['key' => 'nombreTributo', 'label' => 'Nombre'],
+            ['key' => 'tipo', 'label' => 'Tipo'],
+            ['key' => 'valor', 'label' => 'Valor'],
+        ];
+
+        $filename = 'tributo_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if ($format === 'xlsx') {
+            return $this->exportXlsxResponse($rows, $columns, $filename);
+        }
+
+        return $this->exportPdfResponse($rows, $columns, 'Listado de Tributos', $filename);
+    }
+
+    public function tecnologiasIndex(Request $request): View
+    {
+        $baseQuery = DB::table('tecnologia');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idtecnologia', 'like', $term)
+                    ->orWhere('nombreTecnologia', 'like', $term);
+            });
+        }
+
+        $items = $baseQuery
+            ->orderBy('idtecnologia')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
+
+        return view('configuracion.tecnologia.tecnologia', [
+            'title' => 'Configuracion: Tecnología',
+            'singularTitle' => 'Tecnología',
+            'items' => $items,
+            'columns' => [
+                ['key' => 'idtecnologia', 'label' => 'ID', 'type' => 'text'],
+                ['key' => 'nombreTecnologia', 'label' => 'Nombre', 'type' => 'text'],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.configuracion.tecnologias.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.configuracion.tecnologias.export', ['format' => 'xlsx']),
+            ],
+            'stats' => [
+                ['label' => 'Total de tecnologías', 'value' => (clone $baseQuery)->count()],
+            ],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
+            'createRoute' => route('modules.configuracion.tecnologias.create'),
+            'editRoute' => 'modules.configuracion.tecnologias.edit',
+            'showRoute' => 'modules.configuracion.tecnologias.edit',
+            'destroyRoute' => 'modules.configuracion.tecnologias.destroy',
+            'identifierKey' => 'idtecnologia',
+            'lockResource' => 'configuracion.tecnologia',
+        ]);
+    }
+
+    public function tecnologiasCreate(): View
+    {
+        return view('configuracion.tecnologia.tecnologia-form', [
+            'title' => 'Nueva Tecnología',
+            'mode' => 'create',
+            'formAction' => route('modules.configuracion.tecnologias.store'),
+            'backRoute' => route('modules.configuracion.tecnologias.index'),
+            'record' => null,
+            'fields' => [
+                [
+                    'name' => 'nombreTecnologia',
+                    'type' => 'text',
+                    'label' => 'Nombre',
+                    'required' => true,
+                    'maxlength' => 2,
+                    'minlength' => 1,
+                    'helpText' => 'Mínimo 1 carácter.',
+                ],
+            ],
+            'readOnly' => false,
+        ]);
+    }
+
+    public function tecnologiasStore(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'nombreTecnologia' => ['required', 'string', 'min:1', 'max:2', 'regex:' . self::SAFE_TEXT_REGEX],
+        ]);
+
+        $newId = DB::table('tecnologia')->insertGetId($validated);
+        $this->publishResourceEvent('configuracion.tecnologia', (string) $newId, 'created');
+
+        return redirect()
+            ->route('modules.configuracion.tecnologias.index')
+            ->with('success', 'Tecnología creada correctamente.');
+    }
+
+    public function tecnologiasEdit(int $id): View|RedirectResponse
+    {
+        $record = DB::table('tecnologia')->where('idtecnologia', $id)->first();
+        if (!$record) {
+            return redirect()
+                ->route('modules.configuracion.tecnologias.index')
+                ->with('error', 'No se encontro la tecnología solicitada.');
+        }
+
+        return view('configuracion.tecnologia.tecnologia-form', [
+            'title' => 'Editar Tecnología',
+            'moduleTitle' => 'Configuracion: Tecnología',
+            'mode' => 'edit',
+            'formAction' => route('modules.configuracion.tecnologias.update', $id),
+            'backRoute' => route('modules.configuracion.tecnologias.index'),
+            'record' => $record,
+            'fields' => [
+                [
+                    'name' => 'nombreTecnologia',
+                    'type' => 'text',
+                    'label' => 'Nombre',
+                    'required' => true,
+                    'maxlength' => 2,
+                    'minlength' => 1,
+                    'helpText' => 'Mínimo 1 carácter.',
+                ],
+            ],
+            'readOnly' => true,
+        ] + $this->prepareLockViewData('configuracion.tecnologia', (string) $id));
+    }
+
+    public function tecnologiasUpdate(Request $request, int $id): RedirectResponse
+    {
+        $exists = DB::table('tecnologia')->where('idtecnologia', $id)->exists();
+        if (!$exists) {
+            return redirect()
+                ->route('modules.configuracion.tecnologias.index')
+                ->with('error', 'No se encontro la tecnología solicitada.');
+        }
+
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.tecnologia', (string) $id, 'tecnología', 'modules.configuracion.tecnologias.index')) {
+            return $redirect;
+        }
+
+        $validated = $request->validate([
+            'nombreTecnologia' => ['required', 'string', 'min:1', 'max:2', 'regex:' . self::SAFE_TEXT_REGEX],
+        ]);
+
+        DB::table('tecnologia')->where('idtecnologia', $id)->update($validated);
+        $this->publishResourceEvent('configuracion.tecnologia', (string) $id, 'updated');
+
+        $this->releaseLockIfOwned($request, 'configuracion.tecnologia', (string) $id);
+
+        return redirect()
+            ->route('modules.configuracion.tecnologias.index')
+            ->with('success', 'Tecnología actualizada correctamente.');
+    }
+
+    public function tecnologiasDestroy(Request $request, int $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.tecnologia', (string) $id, 'tecnología', 'modules.configuracion.tecnologias.index')) {
+            return $redirect;
+        }
+
+        try {
+            DB::table('tecnologia')->where('idtecnologia', $id)->delete();
+            $this->publishResourceEvent('configuracion.tecnologia', (string) $id, 'deleted');
+            $this->releaseLockIfOwned($request, 'configuracion.tecnologia', (string) $id);
+            return redirect()
+                ->route('modules.configuracion.tecnologias.index')
+                ->with('success', 'Tecnología eliminada correctamente.');
+        } catch (QueryException) {
+            return redirect()
+                ->route('modules.configuracion.tecnologias.index')
+                ->with('error', 'No se puede eliminar la tecnología porque tiene registros relacionados.');
+        }
+    }
+
     public function tiposPlataformaIndex(Request $request): View
     {
         $baseQuery = DB::table('tipoplataforma');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -2070,7 +2623,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de tipos de plataforma', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.tipos-plataforma.create'),
             'editRoute' => 'modules.configuracion.tipos-plataforma.edit',
             'showRoute' => 'modules.configuracion.tipos-plataforma.edit',
@@ -2204,6 +2757,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('tipoplataforma');
+    $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -2238,6 +2792,7 @@ class ConfiguracionController extends Controller
         $baseQuery = DB::table('plataforma')
             ->leftJoin('tipoplataforma', 'plataforma.tipoPlataforma_idtipoPlataforma', '=', 'tipoplataforma.idtipoPlataforma')
             ->select('plataforma.*', 'tipoplataforma.descripcion as tipoPlataforma');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -2271,7 +2826,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de plataformas', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.plataforma.create'),
             'editRoute' => 'modules.configuracion.plataforma.edit',
             'showRoute' => 'modules.configuracion.plataforma.edit',
@@ -2310,6 +2865,7 @@ class ConfiguracionController extends Controller
                     'optionsData' => $tiposPlataforma,
                     'optionKey' => 'idtipoPlataforma',
                     'optionLabel' => 'descripcion',
+                    'tomSelect' => true,
                     'helpText' => 'Selecciona el tipo de plataforma.',
                 ],
             ],
@@ -2368,6 +2924,7 @@ class ConfiguracionController extends Controller
                     'optionsData' => $tiposPlataforma,
                     'optionKey' => 'idtipoPlataforma',
                     'optionLabel' => 'descripcion',
+                    'tomSelect' => true,
                     'helpText' => 'Selecciona el tipo de plataforma.',
                 ],
             ],
@@ -2433,6 +2990,7 @@ class ConfiguracionController extends Controller
         $baseQuery = DB::table('plataforma')
             ->leftJoin('tipoplataforma', 'plataforma.tipoPlataforma_idtipoPlataforma', '=', 'tipoplataforma.idtipoPlataforma')
             ->select('plataforma.*', 'tipoplataforma.descripcion as tipoPlataforma');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -2469,6 +3027,7 @@ class ConfiguracionController extends Controller
         $baseQuery = DB::table('tipoelemento')
             ->leftJoin('plataforma', 'tipoelemento.plataforma_idplataforma', '=', 'plataforma.idplataforma')
             ->select('tipoelemento.*', 'plataforma.nombrePlataforma as plataforma');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -2504,7 +3063,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de tipos de elemento', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.tipos-elemento.create'),
             'editRoute' => 'modules.configuracion.tipos-elemento.edit',
             'showRoute' => 'modules.configuracion.tipos-elemento.edit',
@@ -2545,20 +3104,13 @@ class ConfiguracionController extends Controller
                     'helpText' => 'Detalle del tipo de elemento.',
                 ],
                 [
-                    'name' => 'renovacion',
-                    'type' => 'number',
-                    'label' => 'Renovación',
-                    'required' => false,
-                    'min' => 0,
-                    'helpText' => 'Período de renovación en días.',
-                ],
-                [
                     'name' => 'plataforma_idplataforma',
                     'type' => 'select',
                     'label' => 'Plataforma',
                     'required' => true,
                     'optionsData' => $plataformas,
                     'optionKey' => 'idplataforma',
+                    'tomSelect' => true,
                     'optionLabel' => 'nombrePlataforma',
                     'helpText' => 'Selecciona la plataforma asociada.',
                 ],
@@ -2622,14 +3174,6 @@ class ConfiguracionController extends Controller
                     'helpText' => 'Detalle del tipo de elemento.',
                 ],
                 [
-                    'name' => 'renovacion',
-                    'type' => 'number',
-                    'label' => 'Renovación',
-                    'required' => false,
-                    'min' => 0,
-                    'helpText' => 'Período de renovación en días.',
-                ],
-                [
                     'name' => 'plataforma_idplataforma',
                     'type' => 'select',
                     'label' => 'Plataforma',
@@ -2637,6 +3181,7 @@ class ConfiguracionController extends Controller
                     'optionsData' => $plataformas,
                     'optionKey' => 'idplataforma',
                     'optionLabel' => 'nombrePlataforma',
+                    'tomSelect' => true,
                     'helpText' => 'Selecciona la plataforma asociada.',
                 ],
             ],
@@ -2704,6 +3249,7 @@ class ConfiguracionController extends Controller
         $baseQuery = DB::table('tipoelemento')
             ->leftJoin('plataforma', 'tipoelemento.plataforma_idplataforma', '=', 'plataforma.idplataforma')
             ->select('tipoelemento.*', 'plataforma.nombrePlataforma as plataforma');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -2740,6 +3286,7 @@ class ConfiguracionController extends Controller
     public function tiposDocumentoIndex(Request $request): View
     {
         $baseQuery = DB::table('tipodocumento');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -2777,7 +3324,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de tipos de documento', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.tipos-documento.create'),
             'editRoute' => 'modules.configuracion.tipos-documento.edit',
             'showRoute' => 'modules.configuracion.tipos-documento.edit',
@@ -2963,6 +3510,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('tipodocumento');
+    $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -3001,6 +3549,7 @@ class ConfiguracionController extends Controller
     public function formasPagoIndex(Request $request): View
     {
         $baseQuery = DB::table('formapago');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -3034,7 +3583,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de formas de pago', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.formas-pago.create'),
             'editRoute' => 'modules.configuracion.formas-pago.edit',
             'showRoute' => 'modules.configuracion.formas-pago.edit',
@@ -3186,6 +3735,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('formapago');
+    $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -3220,6 +3770,7 @@ class ConfiguracionController extends Controller
     public function entidadesBancariasIndex(Request $request): View
     {
         $baseQuery = DB::table('entidadbancaria');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -3255,7 +3806,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de entidades bancarias', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.entidades-bancarias.create'),
             'editRoute' => 'modules.configuracion.entidades-bancarias.edit',
             'showRoute' => 'modules.configuracion.entidades-bancarias.edit',
@@ -3429,6 +3980,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('entidadbancaria');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -3465,6 +4017,7 @@ class ConfiguracionController extends Controller
     public function operadoresIndex(Request $request): View
     {
         $baseQuery = DB::table('operador');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -3496,7 +4049,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de operadores', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.operadores.create'),
             'editRoute' => 'modules.configuracion.operadores.edit',
             'showRoute' => 'modules.configuracion.operadores.edit',
@@ -3630,6 +4183,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('operador');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -3662,6 +4216,7 @@ class ConfiguracionController extends Controller
     public function tiposVehiculoIndex(Request $request): View
     {
         $baseQuery = DB::table('tipovehiculo');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -3693,7 +4248,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de tipos de vehículo', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.tipos-vehiculo.create'),
             'editRoute' => 'modules.configuracion.tipos-vehiculo.edit',
             'showRoute' => 'modules.configuracion.tipos-vehiculo.edit',
@@ -3827,6 +4382,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('tipovehiculo');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -3860,6 +4416,7 @@ class ConfiguracionController extends Controller
     public function tiposOperacionIndex(Request $request): View
     {
         $baseQuery = DB::table('tipooperacion');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -3893,7 +4450,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de tipos de operación', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.tipos-operacion.create'),
             'editRoute' => 'modules.configuracion.tipos-operacion.edit',
             'showRoute' => 'modules.configuracion.tipos-operacion.edit',
@@ -4047,6 +4604,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('tipooperacion');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -4081,6 +4639,7 @@ class ConfiguracionController extends Controller
     public function listaprecioIndex(Request $request): View
     {
         $baseQuery = DB::table('listaprecio');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -4112,7 +4671,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de listas de precio', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.listas-precio.create'),
             'editRoute' => 'modules.configuracion.listas-precio.edit',
             'showRoute' => 'modules.configuracion.listas-precio.edit',
@@ -4246,6 +4805,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('listaprecio');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -4275,9 +4835,633 @@ class ConfiguracionController extends Controller
         return $this->exportPdfResponse($rows, $columns, 'Listado de Listas de Precio', $filename);
     }
 
+    public function detalleListaPrecioIndex(Request $request): View
+    {
+        $baseQuery = DB::table('detallelistaprecio as d')
+            ->leftJoin('almacen as a', 'a.idalmacen', '=', 'd.almacen_idalmacen')
+            ->leftJoin('listaprecio as lp', 'lp.idListaPrecio', '=', 'd.ListaPrecio_idListaPrecio')
+            ->select([
+                'd.iddetalleListaPrecio',
+                'd.almacen_idalmacen',
+                'd.ListaPrecio_idListaPrecio',
+                'd.precio',
+                DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
+                DB::raw('COALESCE(lp.nombreLista, "") as listaprecio_nombre'),
+            ]);
+            $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('d.iddetalleListaPrecio', 'like', $term)
+                    ->orWhere('d.almacen_idalmacen', 'like', $term)
+                    ->orWhere('d.ListaPrecio_idListaPrecio', 'like', $term)
+                    ->orWhere('a.detalle', 'like', $term)
+                    ->orWhere('lp.nombreLista', 'like', $term)
+                    ->orWhere('d.precio', 'like', $term);
+            });
+        }
+
+        $items = $baseQuery
+            ->orderBy('d.iddetalleListaPrecio')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
+
+        return view('configuracion.detallelistaprecio.detallelistaprecio', [
+            'title' => 'Configuracion: Detalle Lista de Precio',
+            'singularTitle' => 'Detalle Lista de Precio',
+            'items' => $items,
+            'columns' => [
+                ['key' => 'iddetalleListaPrecio', 'label' => 'ID', 'type' => 'text'],
+                ['key' => 'almacen_detalle', 'label' => 'Almacén', 'type' => 'text'],
+                ['key' => 'listaprecio_nombre', 'label' => 'Lista de precio', 'type' => 'text'],
+                ['key' => 'precio', 'label' => 'Precio', 'type' => 'text'],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.configuracion.detalle-lista-precio.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.configuracion.detalle-lista-precio.export', ['format' => 'xlsx']),
+            ],
+            'stats' => [
+                ['label' => 'Total de detalles de lista de precio', 'value' => (clone $baseQuery)->count('d.iddetalleListaPrecio')],
+            ],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
+            'createRoute' => route('modules.configuracion.detalle-lista-precio.create'),
+            'editRoute' => 'modules.configuracion.detalle-lista-precio.edit',
+            'showRoute' => 'modules.configuracion.detalle-lista-precio.edit',
+            'destroyRoute' => 'modules.configuracion.detalle-lista-precio.destroy',
+            'bulkDestroyRoute' => route('modules.configuracion.detalle-lista-precio.bulk-destroy'),
+            'identifierKey' => 'iddetalleListaPrecio',
+            'lockResource' => 'configuracion.detalle_lista_precio',
+        ]);
+    }
+
+    public function detalleListaPrecioCreate(): View
+    {
+        return view('configuracion.detallelistaprecio.detallelistaprecio-form', [
+            'title' => 'Nuevo Detalle Lista de Precio',
+            'moduleTitle' => 'Configuracion: Detalle Lista de Precio',
+            'mode' => 'create',
+            'formAction' => route('modules.configuracion.detalle-lista-precio.store'),
+            'backRoute' => route('modules.configuracion.detalle-lista-precio.index'),
+            'record' => null,
+            'fields' => [
+                [
+                    'name' => 'almacen_idalmacen',
+                    'type' => 'select',
+                    'label' => 'Almacén',
+                    'required' => true,
+                    'tomSelect' => true,
+                    'placeholder' => 'Selecciona un almacén',
+                    'optionsData' => $this->almacenOptions(),
+                    'optionKey' => 'idalmacen',
+                    'optionLabel' => 'detalle',
+                ],
+                [
+                    'name' => 'ListaPrecio_idListaPrecio',
+                    'type' => 'select',
+                    'label' => 'Lista de precio',
+                    'required' => true,
+                    'tomSelect' => true,
+                    'placeholder' => 'Selecciona una lista de precio',
+                    'optionsData' => $this->listaprecioOptions(),
+                    'optionKey' => 'idListaPrecio',
+                    'optionLabel' => 'nombreLista',
+                ],
+                [
+                    'name' => 'precio',
+                    'type' => 'number',
+                    'label' => 'Precio',
+                    'required' => true,
+                    'step' => '0.01',
+                    'min' => 0,
+                    'helpText' => 'Precio unitario para el almacén y la lista seleccionados.',
+                ],
+            ],
+            'readOnly' => false,
+        ]);
+    }
+
+    public function detalleListaPrecioStore(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'almacen_idalmacen' => ['required', 'integer', 'exists:almacen,idalmacen'],
+            'ListaPrecio_idListaPrecio' => ['required', 'integer', 'exists:listaprecio,idListaPrecio'],
+            'precio' => ['required', 'numeric', 'min:0'],
+        ]);
+
+        $newId = DB::table('detallelistaprecio')->insertGetId($validated);
+        $this->publishResourceEvent('configuracion.detalle_lista_precio', (string) $newId, 'created');
+
+        return redirect()
+            ->route('modules.configuracion.detalle-lista-precio.index')
+            ->with('success', 'Detalle de lista de precio creado correctamente.');
+    }
+
+    public function detalleListaPrecioEdit(int $id): View|RedirectResponse
+    {
+        $record = DB::table('detallelistaprecio')->where('iddetalleListaPrecio', $id)->first();
+        if (!$record) {
+            return redirect()
+                ->route('modules.configuracion.detalle-lista-precio.index')
+                ->with('error', 'No se encontro el detalle de lista de precio solicitado.');
+        }
+
+        return view('configuracion.detallelistaprecio.detallelistaprecio-form', [
+            'title' => 'Editar Detalle Lista de Precio',
+            'moduleTitle' => 'Configuracion: Detalle Lista de Precio',
+            'mode' => 'edit',
+            'formAction' => route('modules.configuracion.detalle-lista-precio.update', $id),
+            'backRoute' => route('modules.configuracion.detalle-lista-precio.index'),
+            'record' => $record,
+            'fields' => [
+                [
+                    'name' => 'almacen_idalmacen',
+                    'type' => 'select',
+                    'label' => 'Almacén',
+                    'required' => true,
+                    'tomSelect' => true,
+                    'placeholder' => 'Selecciona un almacén',
+                    'optionsData' => $this->almacenOptions(),
+                    'optionKey' => 'idalmacen',
+                    'optionLabel' => 'detalle',
+                ],
+                [
+                    'name' => 'ListaPrecio_idListaPrecio',
+                    'type' => 'select',
+                    'label' => 'Lista de precio',
+                    'required' => true,
+                    'tomSelect' => true,
+                    'placeholder' => 'Selecciona una lista de precio',
+                    'optionsData' => $this->listaprecioOptions(),
+                    'optionKey' => 'idListaPrecio',
+                    'optionLabel' => 'nombreLista',
+                ],
+                [
+                    'name' => 'precio',
+                    'type' => 'number',
+                    'label' => 'Precio',
+                    'required' => true,
+                    'step' => '0.01',
+                    'min' => 0,
+                    'helpText' => 'Precio unitario para el almacén y la lista seleccionados.',
+                ],
+            ],
+            'readOnly' => true,
+        ] + $this->prepareLockViewData('configuracion.detalle_lista_precio', (string) $id));
+    }
+
+    public function detalleListaPrecioUpdate(Request $request, int $id): RedirectResponse
+    {
+        $exists = DB::table('detallelistaprecio')->where('iddetalleListaPrecio', $id)->exists();
+        if (!$exists) {
+            return redirect()
+                ->route('modules.configuracion.detalle-lista-precio.index')
+                ->with('error', 'No se encontro el detalle de lista de precio solicitado.');
+        }
+
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.detalle_lista_precio', (string) $id, 'detalle de lista de precio', 'modules.configuracion.detalle-lista-precio.index')) {
+            return $redirect;
+        }
+
+        $validated = $request->validate([
+            'almacen_idalmacen' => ['required', 'integer', 'exists:almacen,idalmacen'],
+            'ListaPrecio_idListaPrecio' => ['required', 'integer', 'exists:listaprecio,idListaPrecio'],
+            'precio' => ['nullable', 'numeric', 'min:0'],
+        ]);
+
+        DB::table('detallelistaprecio')->where('iddetalleListaPrecio', $id)->update($validated);
+        $this->publishResourceEvent('configuracion.detalle_lista_precio', (string) $id, 'updated');
+
+        $this->releaseLockIfOwned($request, 'configuracion.detalle_lista_precio', (string) $id);
+
+        return redirect()
+            ->route('modules.configuracion.detalle-lista-precio.index')
+            ->with('success', 'Detalle de lista de precio actualizado correctamente.');
+    }
+
+    public function detalleListaPrecioDestroy(Request $request, int $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.detalle_lista_precio', (string) $id, 'detalle de lista de precio', 'modules.configuracion.detalle-lista-precio.index')) {
+            return $redirect;
+        }
+
+        try {
+            DB::table('detallelistaprecio')->where('iddetalleListaPrecio', $id)->delete();
+            $this->publishResourceEvent('configuracion.detalle_lista_precio', (string) $id, 'deleted');
+            $this->releaseLockIfOwned($request, 'configuracion.detalle_lista_precio', (string) $id);
+            return redirect()
+                ->route('modules.configuracion.detalle-lista-precio.index')
+                ->with('success', 'Detalle de lista de precio eliminado correctamente.');
+        } catch (QueryException) {
+            return redirect()
+                ->route('modules.configuracion.detalle-lista-precio.index')
+                ->with('error', 'No se puede eliminar el detalle de lista de precio porque tiene registros relacionados.');
+        }
+    }
+
+    public function detalleListaPrecioExport(Request $request, string $format)
+    {
+        $format = strtolower($format);
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            abort(404);
+        }
+
+        $baseQuery = DB::table('detallelistaprecio as d')
+            ->leftJoin('almacen as a', 'a.idalmacen', '=', 'd.almacen_idalmacen')
+            ->leftJoin('listaprecio as lp', 'lp.idListaPrecio', '=', 'd.ListaPrecio_idListaPrecio')
+            ->select([
+                'd.iddetalleListaPrecio',
+                'd.almacen_idalmacen',
+                'd.ListaPrecio_idListaPrecio',
+                'd.precio',
+                DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
+                DB::raw('COALESCE(lp.nombreLista, "") as listaprecio_nombre'),
+            ]);
+            $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('d.iddetalleListaPrecio', 'like', $term)
+                    ->orWhere('d.almacen_idalmacen', 'like', $term)
+                    ->orWhere('d.ListaPrecio_idListaPrecio', 'like', $term)
+                    ->orWhere('a.detalle', 'like', $term)
+                    ->orWhere('lp.nombreLista', 'like', $term)
+                    ->orWhere('d.precio', 'like', $term);
+            });
+        }
+
+        $rows = $baseQuery
+            ->orderBy('d.iddetalleListaPrecio')
+            ->get();
+
+        $columns = [
+            ['key' => 'iddetalleListaPrecio', 'label' => 'ID'],
+            ['key' => 'almacen_detalle', 'label' => 'Almacén'],
+            ['key' => 'listaprecio_nombre', 'label' => 'Lista de precio'],
+            ['key' => 'precio', 'label' => 'Precio'],
+        ];
+
+        $filename = 'detalle_lista_precio_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if ($format === 'xlsx') {
+            return $this->exportXlsxResponse($rows, $columns, $filename);
+        }
+
+        return $this->exportPdfResponse($rows, $columns, 'Listado de Detalles de Lista de Precio', $filename);
+    }
+
+    public function elementoAlmacenIndex(Request $request): View
+    {
+        $baseQuery = DB::table('elementoalmacen as e')
+            ->leftJoin('almacen as a', 'a.idalmacen', '=', 'e.dispositivo_iddispositivo')
+            ->select([
+                'e.imei',
+                'e.dispositivo_iddispositivo',
+                'e.fechaIngreso',
+                'e.estado',
+                'e.idAuxiliar',
+                DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
+                DB::raw('CASE WHEN e.estado = 1 THEN "Activo" ELSE "Inactivo" END as estado_label'),
+            ]);
+            $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('e.imei', 'like', $term)
+                    ->orWhere('e.dispositivo_iddispositivo', 'like', $term)
+                    ->orWhere('a.detalle', 'like', $term)
+                    ->orWhere('e.fechaIngreso', 'like', $term)
+                    ->orWhere('e.estado', 'like', $term)
+                    ->orWhere('e.idAuxiliar', 'like', $term);
+            });
+        }
+
+        $items = $baseQuery
+            ->orderBy('e.imei')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
+
+        return view('configuracion.elementoalmacen.elementoalmacen', [
+            'title' => 'Configuracion: Elemento Almacén',
+            'singularTitle' => 'Elemento Almacén',
+            'items' => $items,
+            'columns' => [
+                ['key' => 'imei', 'label' => 'IMEI', 'type' => 'text'],
+                ['key' => 'almacen_detalle', 'label' => 'Dispositivo', 'type' => 'text'],
+                ['key' => 'fechaIngreso', 'label' => 'Fecha ingreso', 'type' => 'date'],
+                ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
+                ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar', 'type' => 'text'],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.configuracion.elemento-almacen.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.configuracion.elemento-almacen.export', ['format' => 'xlsx']),
+            ],
+            'stats' => [
+                ['label' => 'Total de elementos de almacén', 'value' => (clone $baseQuery)->count()],
+            ],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
+            'createRoute' => route('modules.configuracion.elemento-almacen.create'),
+            'editRoute' => 'modules.configuracion.elemento-almacen.edit',
+            'showRoute' => 'modules.configuracion.elemento-almacen.edit',
+            'destroyRoute' => 'modules.configuracion.elemento-almacen.destroy',
+            'bulkDestroyRoute' => route('modules.configuracion.elemento-almacen.bulk-destroy'),
+            'identifierKey' => 'imei',
+            'lockResource' => 'configuracion.elemento_almacen',
+        ]);
+    }
+
+    public function elementoAlmacenCreate(): View
+    {
+        return view('configuracion.elementoalmacen.elementoalmacen-form', [
+            'title' => 'Nuevo Elemento Almacén',
+            'moduleTitle' => 'Configuracion: Elemento Almacén',
+            'mode' => 'create',
+            'formAction' => route('modules.configuracion.elemento-almacen.store'),
+            'backRoute' => route('modules.configuracion.elemento-almacen.index'),
+            'record' => null,
+            'fields' => [
+                [
+                    'name' => 'imei',
+                    'type' => 'text',
+                    'label' => 'IMEI',
+                    'required' => true,
+                    'maxlength' => 30,
+                    'minlength' => 1,
+                    'pattern' => '^[0-9]+$',
+                    'inputmode' => 'numeric',
+                    'helpText' => 'Solo números, hasta 30 caracteres.',
+                ],
+                [
+                    'name' => 'dispositivo_iddispositivo',
+                    'type' => 'select',
+                    'label' => 'Dispositivo (Almacén)',
+                    'required' => true,
+                    'tomSelect' => true,
+                    'placeholder' => 'Selecciona un dispositivo de Almacén',
+                    'optionsData' => $this->almacenOptions(),
+                    'optionKey' => 'idalmacen',
+                    'optionLabel' => 'detalle',
+                ],
+                [
+                    'name' => 'estado',
+                    'type' => 'select',
+                    'label' => 'Estado',
+                    'required' => true,
+                    'placeholder' => 'Selecciona un estado',
+                    'options' => [
+                        '1' => 'Activo',
+                        '0' => 'Inactivo',                  
+                    ],
+                ],
+                [
+                    'name' => 'idAuxiliar',
+                    'type' => 'text',
+                    'label' => 'ID Auxiliar',
+                    'required' => false,
+                    'maxlength' => 30,
+                    'helpText' => 'Identificador auxiliar opcional.',
+                ],
+            ],
+            'readOnly' => false,
+        ]);
+    }
+
+    public function elementoAlmacenStore(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'imei' => ['required', 'string', 'max:30', 'regex:/^[0-9]+$/'],
+            'dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
+            'fechaIngreso' => ['nullable', 'date'],
+            'estado' => ['nullable', 'integer', 'in:0,1'],
+            'idAuxiliar' => ['nullable', 'string', 'max:30'],
+        ]);
+
+        $payload = $validated;
+        $payload['estado'] = (int) ($payload['estado'] ?? 0);
+        $payload['fechaIngreso'] = now()->format('Y-m-d H:i:s');
+
+        DB::table('elementoalmacen')->insert($payload);
+        $this->publishResourceEvent('configuracion.elemento_almacen', (string) $payload['imei'], 'created');
+
+        return redirect()
+            ->route('modules.configuracion.elemento-almacen.index')
+            ->with('success', 'Elemento de almacén creado correctamente.');
+    }
+
+    public function elementoAlmacenEdit(string $id): View|RedirectResponse
+    {
+        $record = DB::table('elementoalmacen')->where('imei', $id)->first();
+        if (!$record) {
+            return redirect()
+                ->route('modules.configuracion.elemento-almacen.index')
+                ->with('error', 'No se encontro el elemento de almacén solicitado.');
+        }
+
+        return view('configuracion.elementoalmacen.elementoalmacen-form', [
+            'title' => 'Editar Elemento Almacén',
+            'moduleTitle' => 'Configuracion: Elemento Almacén',
+            'mode' => 'edit',
+            'formAction' => route('modules.configuracion.elemento-almacen.update', $id),
+            'backRoute' => route('modules.configuracion.elemento-almacen.index'),
+            'record' => $record,
+            'fields' => [
+                [
+                    'name' => 'imei',
+                    'type' => 'text',
+                    'label' => 'IMEI',
+                    'required' => true,
+                    'maxlength' => 30,
+                    'minlength' => 1,
+                    'pattern' => '^[0-9]+$',
+                    'inputmode' => 'numeric',
+                    'helpText' => 'Solo números, hasta 30 caracteres.',
+                ],
+                [
+                    'name' => 'dispositivo_iddispositivo',
+                    'type' => 'select',
+                    'label' => 'Dispositivo (Almacén)',
+                    'required' => true,
+                    'tomSelect' => true,
+                    'placeholder' => 'Selecciona un dispositivo de almacén',
+                    'optionsData' => $this->almacenOptions(),
+                    'optionKey' => 'idalmacen',
+                    'optionLabel' => 'detalle',
+                ],
+                [
+                    'name' => 'estado',
+                    'type' => 'select',
+                    'label' => 'Estado',
+                    'required' => false,
+                    'placeholder' => 'Selecciona un estado',
+                    'options' => [
+                        '0' => 'Inactivo',
+                        '1' => 'Activo',
+                    ],
+                ],
+                [
+                    'name' => 'idAuxiliar',
+                    'type' => 'text',
+                    'label' => 'ID Auxiliar',
+                    'required' => false,
+                    'maxlength' => 30,
+                    'helpText' => 'Identificador auxiliar opcional.',
+                ],
+            ],
+            'readOnly' => true,
+        ] + $this->prepareLockViewData('configuracion.elemento_almacen', $id));
+    }
+
+    public function elementoAlmacenUpdate(Request $request, string $id): RedirectResponse
+    {
+        $exists = DB::table('elementoalmacen')->where('imei', $id)->exists();
+        if (!$exists) {
+            return redirect()
+                ->route('modules.configuracion.elemento-almacen.index')
+                ->with('error', 'No se encontro el elemento de almacén solicitado.');
+        }
+
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.elemento_almacen', $id, 'elemento de almacén', 'modules.configuracion.elemento-almacen.index')) {
+            return $redirect;
+        }
+
+        $validated = $request->validate([
+            'imei' => ['required', 'string', 'max:30', 'regex:/^[0-9]+$/'],
+            'dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
+            'fechaIngreso' => ['nullable', 'date'],
+            'estado' => ['nullable', 'integer', 'in:0,1'],
+            'idAuxiliar' => ['nullable', 'string', 'max:30'],
+        ]);
+
+        $payload = $validated;
+        $payload['estado'] = (int) ($payload['estado'] ?? 0);
+        unset($payload['fechaIngreso']);
+
+        DB::table('elementoalmacen')->where('imei', $id)->update($payload);
+        $this->publishResourceEvent('configuracion.elemento_almacen', $id, 'updated');
+
+        $this->releaseLockIfOwned($request, 'configuracion.elemento_almacen', $id);
+
+        return redirect()
+            ->route('modules.configuracion.elemento-almacen.index')
+            ->with('success', 'Elemento de almacén actualizado correctamente.');
+    }
+
+    public function elementoAlmacenDestroy(Request $request, string $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.elemento_almacen', $id, 'elemento de almacén', 'modules.configuracion.elemento-almacen.index')) {
+            return $redirect;
+        }
+
+        try {
+            DB::table('elementoalmacen')->where('imei', $id)->delete();
+            $this->publishResourceEvent('configuracion.elemento_almacen', $id, 'deleted');
+            $this->releaseLockIfOwned($request, 'configuracion.elemento_almacen', $id);
+            return redirect()
+                ->route('modules.configuracion.elemento-almacen.index')
+                ->with('success', 'Elemento de almacén eliminado correctamente.');
+        } catch (QueryException) {
+            return redirect()
+                ->route('modules.configuracion.elemento-almacen.index')
+                ->with('error', 'No se puede eliminar el elemento de almacén porque tiene registros relacionados.');
+        }
+    }
+
+    public function elementoAlmacenExport(Request $request, string $format)
+    {
+        $format = strtolower($format);
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            abort(404);
+        }
+
+        $baseQuery = DB::table('elementoalmacen as e')
+            ->leftJoin('almacen as a', 'a.idalmacen', '=', 'e.dispositivo_iddispositivo')
+            ->select([
+                'e.imei',
+                'e.dispositivo_iddispositivo',
+                'e.fechaIngreso',
+                'e.estado',
+                'e.idAuxiliar',
+                DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
+                DB::raw('CASE WHEN e.estado = 1 THEN "Activo" ELSE "Inactivo" END as estado_label'),
+            ]);
+            $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('e.imei', 'like', $term)
+                    ->orWhere('e.dispositivo_iddispositivo', 'like', $term)
+                    ->orWhere('a.detalle', 'like', $term)
+                    ->orWhere('e.fechaIngreso', 'like', $term)
+                    ->orWhere('e.estado', 'like', $term)
+                    ->orWhere('e.idAuxiliar', 'like', $term);
+            });
+        }
+
+        $rows = $baseQuery
+            ->orderBy('e.imei')
+            ->get();
+
+        $columns = [
+            ['key' => 'imei', 'label' => 'IMEI'],
+            ['key' => 'almacen_detalle', 'label' => 'Almacén'],
+            ['key' => 'fechaIngreso', 'label' => 'Fecha ingreso'],
+            ['key' => 'estado_label', 'label' => 'Estado'],
+            ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar'],
+        ];
+
+        $filename = 'elemento_almacen_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if ($format === 'xlsx') {
+            return $this->exportXlsxResponse($rows, $columns, $filename);
+        }
+
+        return $this->exportPdfResponse($rows, $columns, 'Listado de Elementos de Almacén', $filename);
+    }
+
+    private function almacenOptions()
+    {
+        return DB::table('almacen')
+            ->select(['idalmacen', 'detalle'])
+            ->orderBy('detalle')
+            ->get();
+    }
+
+    private function listaprecioOptions()
+    {
+        return DB::table('listaprecio')
+            ->select(['idListaPrecio', 'nombreLista'])
+            ->orderBy('nombreLista')
+            ->get();
+    }
+
+    private function formatDateTimeForFormValue($value): ?string
+    {
+        if ($value === null || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value)->format('Y-m-d\TH:i');
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     public function tipopedidoIndex(Request $request): View
     {
         $baseQuery = DB::table('tipopedido');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -4311,7 +5495,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de tipos de pedido', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.tipos-pedido.create'),
             'editRoute' => 'modules.configuracion.tipos-pedido.edit',
             'showRoute' => 'modules.configuracion.tipos-pedido.edit',
@@ -4465,6 +5649,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('tipopedido');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -4499,6 +5684,7 @@ class ConfiguracionController extends Controller
     public function proveedorIndex(Request $request): View
     {
         $baseQuery = DB::table('proveedor');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -4532,7 +5718,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de proveedores', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.proveedores.create'),
             'editRoute' => 'modules.configuracion.proveedores.edit',
             'showRoute' => 'modules.configuracion.proveedores.edit',
@@ -4587,13 +5773,26 @@ class ConfiguracionController extends Controller
     public function proveedorStore(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'idproveedor' => ['required', 'string', 'min:1', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX],
+            'idproveedor' => ['required', 'string', 'min:1', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('proveedor', 'idproveedor')],
             'razonSocial' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
             'tipoProveedor' => ['required', 'string', 'min:2', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+        ], [
+            'idproveedor.unique' => 'El ID del proveedor ya existe.',
         ]);
 
-        DB::table('proveedor')->insert($validated);
-        $this->publishResourceEvent('configuracion.proveedor', $validated['idproveedor'] ?? '', 'created');
+        try {
+            DB::table('proveedor')->insert($validated);
+            $this->publishResourceEvent('configuracion.proveedor', $validated['idproveedor'] ?? '', 'created');
+        } catch (QueryException $exception) {
+            if ($this->isDuplicateKeyException($exception)) {
+                return redirect()
+                    ->back()
+                    ->withInput()
+                    ->with('error', 'El ID del proveedor ya existe.');
+            }
+
+            throw $exception;
+        }
 
         return redirect()
             ->route('modules.configuracion.proveedores.index')
@@ -4625,7 +5824,7 @@ class ConfiguracionController extends Controller
                     'maxlength' => 15,
                     'minlength' => 1,
                     'helpText' => 'Identificador único del proveedor.',
-                    'disabled' => true,
+                    'editable' => true,
                 ],
                 [
                     'name' => 'razonSocial',
@@ -4664,12 +5863,26 @@ class ConfiguracionController extends Controller
         }
 
         $validated = $request->validate([
+            'idproveedor' => ['required', 'string', 'min:1', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('proveedor', 'idproveedor')->ignore($id, 'idproveedor')],
             'razonSocial' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
             'tipoProveedor' => ['required', 'string', 'min:2', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+        ], [
+            'idproveedor.unique' => 'El ID del proveedor ya existe.',
         ]);
 
-        DB::table('proveedor')->where('idproveedor', $id)->update($validated);
-        $this->publishResourceEvent('configuracion.proveedor', $id, 'updated');
+        try {
+            DB::table('proveedor')->where('idproveedor', $id)->update($validated);
+            $this->publishResourceEvent('configuracion.proveedor', $validated['idproveedor'] ?? $id, 'updated');
+        } catch (QueryException $exception) {
+            if ($this->isDuplicateKeyException($exception)) {
+                return redirect()
+                    ->back()
+                    ->withInput()
+                    ->with('error', 'El ID del proveedor ya existe.');
+            }
+
+            throw $exception;
+        }
 
         $this->releaseLockIfOwned($request, 'configuracion.proveedor', $id);
 
@@ -4685,7 +5898,7 @@ class ConfiguracionController extends Controller
         }
 
         try {
-            DB::table('proveedor')->where('idproveveedor', $id)->delete();
+            DB::table('proveedor')->where('idproveedor', $id)->delete();
             $this->publishResourceEvent('configuracion.proveedor', $id, 'deleted');
             $this->releaseLockIfOwned($request, 'configuracion.proveedor', $id);
             return redirect()
@@ -4698,6 +5911,13 @@ class ConfiguracionController extends Controller
         }
     }
 
+    private function isDuplicateKeyException(QueryException $exception): bool
+    {
+        $message = $exception->getMessage();
+        return (string) $exception->getCode() === '23000'
+            && (str_contains($message, 'Duplicate entry') || str_contains($message, '1062'));
+    }
+
     public function proveedorExport(Request $request, string $format)
     {
         $format = strtolower($format);
@@ -4706,6 +5926,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('proveedor');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -4740,6 +5961,7 @@ class ConfiguracionController extends Controller
     public function vigenciaofertaIndex(Request $request): View
     {
         $baseQuery = DB::table('vigenciaoferta');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -4773,7 +5995,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de vigencias de oferta', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.vigencias-oferta.create'),
             'editRoute' => 'modules.configuracion.vigencias-oferta.edit',
             'showRoute' => 'modules.configuracion.vigencias-oferta.edit',
@@ -4925,6 +6147,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('vigenciaoferta');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -4959,6 +6182,7 @@ class ConfiguracionController extends Controller
     public function certificadosUnatIndex(Request $request): View
     {
         $baseQuery = DB::table('certificadosunat');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -5010,7 +6234,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de certificados SUNAT', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.certificados-sunat.create'),
             'editRoute' => 'modules.configuracion.certificados-sunat.edit',
             'showRoute' => 'modules.configuracion.certificados-sunat.edit',
@@ -5327,6 +6551,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('certificadosunat');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -5399,6 +6624,7 @@ class ConfiguracionController extends Controller
     public function ubigeosIndex(Request $request): View
     {
         $baseQuery = DB::table('ubigeo');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -5436,7 +6662,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de ubigeos', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.ubigeos.create'),
             'editRoute' => 'modules.configuracion.ubigeos.edit',
             'showRoute' => 'modules.configuracion.ubigeos.edit',
@@ -5630,6 +6856,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('ubigeo');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -5669,6 +6896,7 @@ class ConfiguracionController extends Controller
     public function cargosIndex(Request $request): View|RedirectResponse
     {
         $baseQuery = DB::table('cargopersonal');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -5709,7 +6937,7 @@ class ConfiguracionController extends Controller
             'stats' => [
                 ['label' => 'Total de cargos', 'value' => (clone $baseQuery)->count()],
             ],
-            'filters' => [],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
             'createRoute' => route('modules.configuracion.cargos.create'),
             'editRoute' => 'modules.configuracion.cargos.edit',
             'lockResource' => self::cargoLockResource(),
@@ -5823,6 +7051,16 @@ class ConfiguracionController extends Controller
             return $redirect;
         }
 
+        $hasRelatedPersonal = DB::table('personal')
+            ->where('cargoPersonal_idcargoPersonal', $id)
+            ->exists();
+
+        if ($hasRelatedPersonal) {
+            return redirect()
+                ->route('modules.configuracion.cargos.index')
+                ->with('error', 'No se puede eliminar este cargo porque está relacionado con uno o más registros de personal.');
+        }
+
         try {
             DB::table('cargopersonal')->where('idcargoPersonal', $id)->delete();
             $this->publishResourceEvent(self::cargoLockResource(), (string) $id, 'deleted');
@@ -5846,6 +7084,7 @@ class ConfiguracionController extends Controller
         }
 
         $baseQuery = DB::table('cargopersonal');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -5996,1531 +7235,6 @@ class ConfiguracionController extends Controller
         return $this->exportPdfResponse($rows, $columns, 'Listado de Auditoría', $filename);
     }
 
-    public function vistasIndex(Request $request): View
-    {
-        $baseQuery = DB::table('vista');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idvista', 'like', $term)
-                    ->orWhere('nombre', 'like', $term)
-                    ->orWhere('detalle', 'like', $term)
-                    ->orWhere('estado', 'like', $term)
-                    ->orWhere('fechacreacion', 'like', $term);
-            });
-        }
-
-        $items = $baseQuery
-            ->orderBy('idvista')
-            ->paginate($this->resolvePerPage($request))
-            ->withQueryString();
-
-        $items->through(function ($row) {
-            if (isset($row->fechacreacion)) {
-                $row->fechacreacion = self::formatDateTimeForList((string) $row->fechacreacion);
-            }
-
-            return $row;
-        });
-
-        return view('configuracion.vista.vista', [
-            'title' => 'Configuracion: Vista',
-            'singularTitle' => 'Vista',
-            'items' => $items,
-            'columns' => [
-                ['key' => 'idvista', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'nombre', 'label' => 'Nombre', 'type' => 'text'],
-                ['key' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
-                ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
-                ['key' => 'fechacreacion', 'label' => 'Fecha creación', 'type' => 'text'],
-            ],
-            'exportRoutes' => [
-                'pdf' => route('modules.configuracion.vistas.export', ['format' => 'pdf']),
-                'xlsx' => route('modules.configuracion.vistas.export', ['format' => 'xlsx']),
-            ],
-            'stats' => [
-                ['label' => 'Total de vistas', 'value' => (clone $baseQuery)->count()],
-            ],
-            'filters' => [],
-            'createRoute' => route('modules.configuracion.vistas.create'),
-            'editRoute' => 'modules.configuracion.vistas.edit',
-            'showRoute' => 'modules.configuracion.vistas.edit',
-            'destroyRoute' => 'modules.configuracion.vistas.destroy',
-            'bulkDestroyRoute' => route('modules.configuracion.vistas.bulk-destroy'),
-            'identifierKey' => 'idvista',
-            'lockResource' => 'configuracion.vista',
-        ]);
-    }
-
-    public function vistasCreate(): View
-    {
-        return view('configuracion.vista.vista-form', [
-            'title' => 'Nueva Vista',
-            'moduleTitle' => 'Configuracion: Vista',
-            'mode' => 'create',
-            'formAction' => route('modules.configuracion.vistas.store'),
-            'backRoute' => route('modules.configuracion.vistas.index'),
-            'record' => null,
-            'fields' => [
-                [
-                    'name' => 'nombre',
-                    'type' => 'text',
-                    'label' => 'Nombre',
-                    'required' => true,
-                    'maxlength' => 45,
-                    'minlength' => 2,
-                    'helpText' => 'Nombre de la vista.',
-                ],
-                [
-                    'name' => 'detalle',
-                    'type' => 'text',
-                    'label' => 'Detalle',
-                    'required' => true,
-                    'maxlength' => 45,
-                    'minlength' => 2,
-                    'helpText' => 'Detalle descriptivo de la vista.',
-                ],
-                [
-                    'name' => 'estado',
-                    'type' => 'select',
-                    'label' => 'Estado',
-                    'required' => true,
-                    'value' => old('estado', 'Activo'),
-                    'options' => [
-                        'Activo' => 'Activo',
-                        'Inactivo' => 'Inactivo',
-                    ],
-                    'helpText' => 'Selecciona el estado de la vista.',
-                ],
-                [
-                    'name' => 'fechacreacion',
-                    'type' => 'datetime-local',
-                    'label' => 'Fecha creación',
-                    'required' => false,
-                    'value' => now()->format('Y-m-d\TH:i'),
-                    'helpText' => 'Se usa como fecha y hora de creación.',
-                ],
-            ],
-            'readOnly' => false,
-        ]);
-    }
-
-    public function vistasStore(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            'nombre' => ['required', 'string', 'min:2', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-            'detalle' => ['required', 'string', 'min:2', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-            'estado' => ['required', 'in:Activo,Inactivo'],
-            'fechacreacion' => ['nullable', 'date_format:Y-m-d\TH:i'],
-        ]);
-
-        $validated['fechacreacion'] = self::normalizeDateTimeInput($validated['fechacreacion'] ?? null) ?? now()->format('Y-m-d H:i:s');
-
-        $newId = DB::table('vista')->insertGetId($validated);
-        $this->publishResourceEvent('configuracion.vista', (string) $newId, 'created');
-
-        return redirect()
-            ->route('modules.configuracion.vistas.index')
-            ->with('success', 'Vista creada correctamente.');
-    }
-
-    public function vistasEdit(int $id): View|RedirectResponse
-    {
-        $record = DB::table('vista')->where('idvista', $id)->first();
-        if (!$record) {
-            return redirect()
-                ->route('modules.configuracion.vistas.index')
-                ->with('error', 'No se encontro la vista solicitada.');
-        }
-
-        return view('configuracion.vista.vista-form', [
-            'title' => 'Editar Vista',
-            'moduleTitle' => 'Configuracion: Vista',
-            'mode' => 'edit',
-            'formAction' => route('modules.configuracion.vistas.update', $id),
-            'backRoute' => route('modules.configuracion.vistas.index'),
-            'record' => $record,
-            'fields' => [
-                [
-                    'name' => 'nombre',
-                    'type' => 'text',
-                    'label' => 'Nombre',
-                    'required' => true,
-                    'maxlength' => 45,
-                    'minlength' => 2,
-                    'helpText' => 'Nombre de la vista.',
-                ],
-                [
-                    'name' => 'detalle',
-                    'type' => 'text',
-                    'label' => 'Detalle',
-                    'required' => true,
-                    'maxlength' => 45,
-                    'minlength' => 2,
-                    'helpText' => 'Detalle descriptivo de la vista.',
-                ],
-                [
-                    'name' => 'estado',
-                    'type' => 'select',
-                    'label' => 'Estado',
-                    'required' => true,
-                    'value' => $record->estado ?? 'Activo',
-                    'options' => [
-                        'Activo' => 'Activo',
-                        'Inactivo' => 'Inactivo',
-                    ],
-                    'helpText' => 'Selecciona el estado de la vista.',
-                ],
-                [
-                    'name' => 'fechacreacion',
-                    'type' => 'datetime-local',
-                    'label' => 'Fecha creación',
-                    'required' => false,
-                    'value' => self::formatDateTimeForForm((string) ($record->fechacreacion ?? '')),
-                    'helpText' => 'Se usa como fecha y hora de creación.',
-                ],
-            ],
-            'readOnly' => true,
-        ] + $this->prepareLockViewData('configuracion.vista', (string) $id));
-    }
-
-    public function vistasUpdate(Request $request, int $id): RedirectResponse
-    {
-        $exists = DB::table('vista')->where('idvista', $id)->exists();
-        if (!$exists) {
-            return redirect()
-                ->route('modules.configuracion.vistas.index')
-                ->with('error', 'No se encontro la vista solicitada.');
-        }
-
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.vista', (string) $id, 'vista', 'modules.configuracion.vistas.index')) {
-            return $redirect;
-        }
-
-        $validated = $request->validate([
-            'nombre' => ['required', 'string', 'min:2', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-            'detalle' => ['required', 'string', 'min:2', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-            'estado' => ['required', 'in:Activo,Inactivo'],
-            'fechacreacion' => ['nullable', 'date_format:Y-m-d\TH:i'],
-        ]);
-
-        $validated['fechacreacion'] = self::normalizeDateTimeInput($validated['fechacreacion'] ?? null) ?? DB::table('vista')->where('idvista', $id)->value('fechacreacion');
-
-        DB::table('vista')->where('idvista', $id)->update($validated);
-        $this->publishResourceEvent('configuracion.vista', (string) $id, 'updated');
-
-        $this->releaseLockIfOwned($request, 'configuracion.vista', (string) $id);
-
-        return redirect()
-            ->route('modules.configuracion.vistas.index')
-            ->with('success', 'Vista actualizada correctamente.');
-    }
-
-    public function vistasDestroy(Request $request, int $id): RedirectResponse
-    {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.vista', (string) $id, 'vista', 'modules.configuracion.vistas.index')) {
-            return $redirect;
-        }
-
-        try {
-            DB::table('vista')->where('idvista', $id)->delete();
-            $this->publishResourceEvent('configuracion.vista', (string) $id, 'deleted');
-            $this->releaseLockIfOwned($request, 'configuracion.vista', (string) $id);
-
-            return redirect()
-                ->route('modules.configuracion.vistas.index')
-                ->with('success', 'Vista eliminada correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.vistas.index')
-                ->with('error', 'No se puede eliminar la vista porque tiene registros relacionados.');
-        }
-    }
-
-    public function vistasBulkDestroy(Request $request): RedirectResponse
-    {
-        $selectedIds = $request->input('selectedIds', []);
-        if (!is_array($selectedIds)) {
-            $selectedIds = [];
-        }
-
-        $selectedIds = array_filter(array_map('intval', $selectedIds), fn ($id) => $id > 0);
-        if (empty($selectedIds)) {
-            return redirect()
-                ->route('modules.configuracion.vistas.index')
-                ->with('error', 'No se seleccionaron registros para eliminar.');
-        }
-
-        foreach ($selectedIds as $selectedId) {
-            if ($redirect = $this->assertLockAvailable($request, 'configuracion.vista', (string) $selectedId, 'vista', 'modules.configuracion.vistas.index')) {
-                return $redirect;
-            }
-        }
-
-        try {
-            DB::transaction(function () use ($selectedIds, $request) {
-                DB::table('vista')->whereIn('idvista', $selectedIds)->delete();
-
-                foreach ($selectedIds as $selectedId) {
-                    $this->publishResourceEvent('configuracion.vista', (string) $selectedId, 'deleted');
-                    $this->releaseLockIfOwned($request, 'configuracion.vista', (string) $selectedId);
-                }
-            });
-
-            return redirect()
-                ->route('modules.configuracion.vistas.index')
-                ->with('success', 'Vistas eliminadas correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.vistas.index')
-                ->with('error', 'No se pueden eliminar las vistas porque tienen registros relacionados.');
-        }
-    }
-
-    public function vistasExport(Request $request, string $format)
-    {
-        $format = strtolower($format);
-        if (!in_array($format, ['pdf', 'xlsx'], true)) {
-            abort(404);
-        }
-
-        $baseQuery = DB::table('vista');
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('idvista', 'like', $term)
-                    ->orWhere('nombre', 'like', $term)
-                    ->orWhere('detalle', 'like', $term)
-                    ->orWhere('estado', 'like', $term)
-                    ->orWhere('fechacreacion', 'like', $term);
-            });
-        }
-
-        $rows = $baseQuery
-            ->orderBy('idvista')
-            ->get()
-            ->map(function ($row) {
-                if (isset($row->fechacreacion)) {
-                    $row->fechacreacion = self::formatDateTimeForList((string) $row->fechacreacion);
-                }
-
-                return $row;
-            });
-
-        $columns = [
-            ['key' => 'idvista', 'label' => 'ID'],
-            ['key' => 'nombre', 'label' => 'Nombre'],
-            ['key' => 'detalle', 'label' => 'Detalle'],
-            ['key' => 'estado', 'label' => 'Estado'],
-            ['key' => 'fechacreacion', 'label' => 'Fecha creación'],
-        ];
-
-        $filename = 'vista_export_' . now()->format('Ymd_His') . '.' . $format;
-
-        if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
-        }
-
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Vistas', $filename);
-    }
-
-    public function flujosIndex(Request $request): View
-    {
-        $baseQuery = DB::table('flujo')
-            ->leftJoin('tipooperacion', 'flujo.tipoOperacion_idtipoOperacion', '=', 'tipooperacion.idtipoOperacion')
-            ->select('flujo.*', DB::raw("COALESCE(CONCAT(tipooperacion.nomenclatura, ' - ', tipooperacion.detalle), 'Sin tipo de operación') as tipoOperacion"));
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('flujo.idflujo', 'like', $term)
-                    ->orWhere('flujo.nombre', 'like', $term)
-                    ->orWhere('flujo.descripcion', 'like', $term)
-                    ->orWhere('flujo.fechacreacion', 'like', $term)
-                    ->orWhere('tipooperacion.nomenclatura', 'like', $term)
-                    ->orWhere('tipooperacion.detalle', 'like', $term);
-            });
-        }
-
-        $items = $baseQuery
-            ->orderBy('flujo.idflujo')
-            ->paginate($this->resolvePerPage($request))
-            ->withQueryString();
-
-        $items->through(function ($row) {
-            if (isset($row->fechacreacion)) {
-                $row->fechacreacion = self::formatDateTimeForList((string) $row->fechacreacion);
-            }
-
-            return $row;
-        });
-
-        return view('configuracion.flujo.flujo', [
-            'title' => 'Configuracion: Flujo',
-            'singularTitle' => 'Flujo',
-            'items' => $items,
-            'columns' => [
-                ['key' => 'idflujo', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'tipoOperacion', 'label' => 'Tipo de operación', 'type' => 'text'],
-                ['key' => 'nombre', 'label' => 'Nombre', 'type' => 'text'],
-                ['key' => 'descripcion', 'label' => 'Descripción', 'type' => 'text'],
-                ['key' => 'fechacreacion', 'label' => 'Fecha creación', 'type' => 'text'],
-            ],
-            'exportRoutes' => [
-                'pdf' => route('modules.configuracion.flujos.export', ['format' => 'pdf']),
-                'xlsx' => route('modules.configuracion.flujos.export', ['format' => 'xlsx']),
-            ],
-            'stats' => [
-                ['label' => 'Total de flujos', 'value' => (clone $baseQuery)->count()],
-            ],
-            'filters' => [],
-            'createRoute' => route('modules.configuracion.flujos.create'),
-            'editRoute' => 'modules.configuracion.flujos.edit',
-            'showRoute' => 'modules.configuracion.flujos.edit',
-            'destroyRoute' => 'modules.configuracion.flujos.destroy',
-            'bulkDestroyRoute' => route('modules.configuracion.flujos.bulk-destroy'),
-            'identifierKey' => 'idflujo',
-            'lockResource' => 'configuracion.flujo',
-        ]);
-    }
-
-    public function flujosCreate(): View
-    {
-        $tiposOperacion = DB::table('tipooperacion')
-            ->orderBy('detalle')
-            ->select('idtipoOperacion', DB::raw("CONCAT(nomenclatura, ' - ', detalle) as label"))
-            ->get();
-
-        return view('configuracion.flujo.flujo-form', [
-            'title' => 'Nuevo Flujo',
-            'moduleTitle' => 'Configuracion: Flujo',
-            'mode' => 'create',
-            'formAction' => route('modules.configuracion.flujos.store'),
-            'backRoute' => route('modules.configuracion.flujos.index'),
-            'record' => null,
-            'fields' => [
-                [
-                    'name' => 'tipoOperacion_idtipoOperacion',
-                    'type' => 'select',
-                    'label' => 'Tipo de operación',
-                    'required' => true,
-                    'optionsData' => $tiposOperacion,
-                    'optionKey' => 'idtipoOperacion',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona el tipo de operación.',
-                ],
-                [
-                    'name' => 'nombre',
-                    'type' => 'text',
-                    'label' => 'Nombre',
-                    'required' => true,
-                    'maxlength' => 100,
-                    'minlength' => 2,
-                    'helpText' => 'Nombre del flujo.',
-                ],
-                [
-                    'name' => 'descripcion',
-                    'type' => 'text',
-                    'label' => 'Descripción',
-                    'required' => true,
-                    'maxlength' => 100,
-                    'minlength' => 2,
-                    'helpText' => 'Descripción del flujo.',
-                ],
-                [
-                    'name' => 'fechacreacion',
-                    'type' => 'datetime-local',
-                    'label' => 'Fecha creación',
-                    'required' => false,
-                    'value' => now()->format('Y-m-d\TH:i'),
-                    'helpText' => 'Se usa como fecha y hora de creación.',
-                ],
-            ],
-            'readOnly' => false,
-        ]);
-    }
-
-    public function flujosStore(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            'tipoOperacion_idtipoOperacion' => ['required', 'integer', 'exists:tipooperacion,idtipoOperacion'],
-            'nombre' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
-            'descripcion' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
-            'fechacreacion' => ['nullable', 'date_format:Y-m-d\TH:i'],
-        ]);
-
-        $validated['fechacreacion'] = self::normalizeDateTimeInput($validated['fechacreacion'] ?? null) ?? now()->format('Y-m-d H:i:s');
-
-        $newId = DB::table('flujo')->insertGetId($validated);
-        $this->publishResourceEvent('configuracion.flujo', (string) $newId, 'created');
-
-        return redirect()
-            ->route('modules.configuracion.flujos.index')
-            ->with('success', 'Flujo creado correctamente.');
-    }
-
-    public function flujosEdit(int $id): View|RedirectResponse
-    {
-        $record = DB::table('flujo')->where('idflujo', $id)->first();
-        if (!$record) {
-            return redirect()
-                ->route('modules.configuracion.flujos.index')
-                ->with('error', 'No se encontro el flujo solicitado.');
-        }
-
-        $tiposOperacion = DB::table('tipooperacion')
-            ->orderBy('detalle')
-            ->select('idtipoOperacion', DB::raw("CONCAT(nomenclatura, ' - ', detalle) as label"))
-            ->get();
-
-        return view('configuracion.flujo.flujo-form', [
-            'title' => 'Editar Flujo',
-            'moduleTitle' => 'Configuracion: Flujo',
-            'mode' => 'edit',
-            'formAction' => route('modules.configuracion.flujos.update', $id),
-            'backRoute' => route('modules.configuracion.flujos.index'),
-            'record' => $record,
-            'fields' => [
-                [
-                    'name' => 'tipoOperacion_idtipoOperacion',
-                    'type' => 'select',
-                    'label' => 'Tipo de operación',
-                    'required' => true,
-                    'optionsData' => $tiposOperacion,
-                    'optionKey' => 'idtipoOperacion',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona el tipo de operación.',
-                ],
-                [
-                    'name' => 'nombre',
-                    'type' => 'text',
-                    'label' => 'Nombre',
-                    'required' => true,
-                    'maxlength' => 100,
-                    'minlength' => 2,
-                    'helpText' => 'Nombre del flujo.',
-                ],
-                [
-                    'name' => 'descripcion',
-                    'type' => 'text',
-                    'label' => 'Descripción',
-                    'required' => true,
-                    'maxlength' => 100,
-                    'minlength' => 2,
-                    'helpText' => 'Descripción del flujo.',
-                ],
-                [
-                    'name' => 'fechacreacion',
-                    'type' => 'datetime-local',
-                    'label' => 'Fecha creación',
-                    'required' => false,
-                    'value' => self::formatDateTimeForForm((string) ($record->fechacreacion ?? '')),
-                    'helpText' => 'Se usa como fecha y hora de creación.',
-                ],
-            ],
-            'readOnly' => true,
-        ] + $this->prepareLockViewData('configuracion.flujo', (string) $id));
-    }
-
-    public function flujosUpdate(Request $request, int $id): RedirectResponse
-    {
-        $exists = DB::table('flujo')->where('idflujo', $id)->exists();
-        if (!$exists) {
-            return redirect()
-                ->route('modules.configuracion.flujos.index')
-                ->with('error', 'No se encontro el flujo solicitado.');
-        }
-
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.flujo', (string) $id, 'flujo', 'modules.configuracion.flujos.index')) {
-            return $redirect;
-        }
-
-        $validated = $request->validate([
-            'tipoOperacion_idtipoOperacion' => ['required', 'integer', 'exists:tipooperacion,idtipoOperacion'],
-            'nombre' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
-            'descripcion' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
-            'fechacreacion' => ['nullable', 'date_format:Y-m-d\TH:i'],
-        ]);
-
-        $validated['fechacreacion'] = self::normalizeDateTimeInput($validated['fechacreacion'] ?? null) ?? DB::table('flujo')->where('idflujo', $id)->value('fechacreacion');
-
-        DB::table('flujo')->where('idflujo', $id)->update($validated);
-        $this->publishResourceEvent('configuracion.flujo', (string) $id, 'updated');
-
-        $this->releaseLockIfOwned($request, 'configuracion.flujo', (string) $id);
-
-        return redirect()
-            ->route('modules.configuracion.flujos.index')
-            ->with('success', 'Flujo actualizado correctamente.');
-    }
-
-    public function flujosDestroy(Request $request, int $id): RedirectResponse
-    {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.flujo', (string) $id, 'flujo', 'modules.configuracion.flujos.index')) {
-            return $redirect;
-        }
-
-        try {
-            DB::table('flujo')->where('idflujo', $id)->delete();
-            $this->publishResourceEvent('configuracion.flujo', (string) $id, 'deleted');
-            $this->releaseLockIfOwned($request, 'configuracion.flujo', (string) $id);
-
-            return redirect()
-                ->route('modules.configuracion.flujos.index')
-                ->with('success', 'Flujo eliminado correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.flujos.index')
-                ->with('error', 'No se puede eliminar el flujo porque tiene registros relacionados.');
-        }
-    }
-
-    public function flujosBulkDestroy(Request $request): RedirectResponse
-    {
-        $selectedIds = $request->input('selectedIds', []);
-        if (!is_array($selectedIds)) {
-            $selectedIds = [];
-        }
-
-        $selectedIds = array_filter(array_map('intval', $selectedIds), fn ($id) => $id > 0);
-        if (empty($selectedIds)) {
-            return redirect()
-                ->route('modules.configuracion.flujos.index')
-                ->with('error', 'No se seleccionaron registros para eliminar.');
-        }
-
-        foreach ($selectedIds as $selectedId) {
-            if ($redirect = $this->assertLockAvailable($request, 'configuracion.flujo', (string) $selectedId, 'flujo', 'modules.configuracion.flujos.index')) {
-                return $redirect;
-            }
-        }
-
-        try {
-            DB::transaction(function () use ($selectedIds, $request) {
-                DB::table('flujo')->whereIn('idflujo', $selectedIds)->delete();
-
-                foreach ($selectedIds as $selectedId) {
-                    $this->publishResourceEvent('configuracion.flujo', (string) $selectedId, 'deleted');
-                    $this->releaseLockIfOwned($request, 'configuracion.flujo', (string) $selectedId);
-                }
-            });
-
-            return redirect()
-                ->route('modules.configuracion.flujos.index')
-                ->with('success', 'Flujos eliminados correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.flujos.index')
-                ->with('error', 'No se pueden eliminar los flujos porque tienen registros relacionados.');
-        }
-    }
-
-    public function flujosExport(Request $request, string $format)
-    {
-        $format = strtolower($format);
-        if (!in_array($format, ['pdf', 'xlsx'], true)) {
-            abort(404);
-        }
-
-        $baseQuery = DB::table('flujo')
-            ->leftJoin('tipooperacion', 'flujo.tipoOperacion_idtipoOperacion', '=', 'tipooperacion.idtipoOperacion')
-            ->select('flujo.*', DB::raw("COALESCE(CONCAT(tipooperacion.nomenclatura, ' - ', tipooperacion.detalle), 'Sin tipo de operación') as tipoOperacion"));
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('flujo.idflujo', 'like', $term)
-                    ->orWhere('flujo.nombre', 'like', $term)
-                    ->orWhere('flujo.descripcion', 'like', $term)
-                    ->orWhere('flujo.fechacreacion', 'like', $term)
-                    ->orWhere('tipooperacion.nomenclatura', 'like', $term)
-                    ->orWhere('tipooperacion.detalle', 'like', $term);
-            });
-        }
-
-        $rows = $baseQuery
-            ->orderBy('flujo.idflujo')
-            ->get()
-            ->map(function ($row) {
-                if (isset($row->fechacreacion)) {
-                    $row->fechacreacion = self::formatDateTimeForList((string) $row->fechacreacion);
-                }
-
-                return $row;
-            });
-
-        $columns = [
-            ['key' => 'idflujo', 'label' => 'ID'],
-            ['key' => 'tipoOperacion', 'label' => 'Tipo de operación'],
-            ['key' => 'nombre', 'label' => 'Nombre'],
-            ['key' => 'descripcion', 'label' => 'Descripción'],
-            ['key' => 'fechacreacion', 'label' => 'Fecha creación'],
-        ];
-
-        $filename = 'flujo_export_' . now()->format('Ymd_His') . '.' . $format;
-
-        if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
-        }
-
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Flujos', $filename);
-    }
-
-    public function flujoReglasIndex(Request $request): View
-    {
-        $baseQuery = DB::table('flujoregla')
-            ->leftJoin('flujo', 'flujoregla.flujo_idflujo', '=', 'flujo.idflujo')
-            ->leftJoin('vista', 'flujoregla.vista_idvista', '=', 'vista.idvista')
-            ->select(
-                'flujoregla.*',
-                DB::raw("COALESCE(CONCAT(flujo.idflujo, ' - ', flujo.nombre), 'Sin flujo') as flujo"),
-                DB::raw("COALESCE(CONCAT(vista.idvista, ' - ', vista.nombre), 'Sin vista') as vista")
-            );
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('flujoregla.idflujoregla', 'like', $term)
-                    ->orWhere('flujoregla.orden', 'like', $term)
-                    ->orWhere('flujoregla.estado', 'like', $term)
-                    ->orWhere('flujoregla.condicion', 'like', $term)
-                    ->orWhere('flujo.nombre', 'like', $term)
-                    ->orWhere('vista.nombre', 'like', $term);
-            });
-        }
-
-        $items = $baseQuery
-            ->orderBy('flujoregla.idflujoregla')
-            ->paginate($this->resolvePerPage($request))
-            ->withQueryString();
-
-        return view('configuracion.flujoregla.flujoregla', [
-            'title' => 'Configuracion: Flujo Regla',
-            'singularTitle' => 'Flujo Regla',
-            'items' => $items,
-            'columns' => [
-                ['key' => 'idflujoregla', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'flujo', 'label' => 'Flujo', 'type' => 'text'],
-                ['key' => 'vista', 'label' => 'Vista', 'type' => 'text'],
-                ['key' => 'orden', 'label' => 'Orden', 'type' => 'text'],
-                ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
-                ['key' => 'condicion', 'label' => 'Condición', 'type' => 'text'],
-            ],
-            'exportRoutes' => [
-                'pdf' => route('modules.configuracion.flujo-reglas.export', ['format' => 'pdf']),
-                'xlsx' => route('modules.configuracion.flujo-reglas.export', ['format' => 'xlsx']),
-            ],
-            'stats' => [
-                ['label' => 'Total de reglas de flujo', 'value' => (clone $baseQuery)->count()],
-            ],
-            'filters' => [],
-            'createRoute' => route('modules.configuracion.flujo-reglas.create'),
-            'editRoute' => 'modules.configuracion.flujo-reglas.edit',
-            'showRoute' => 'modules.configuracion.flujo-reglas.edit',
-            'destroyRoute' => 'modules.configuracion.flujo-reglas.destroy',
-            'bulkDestroyRoute' => route('modules.configuracion.flujo-reglas.bulk-destroy'),
-            'identifierKey' => 'idflujoregla',
-            'lockResource' => 'configuracion.flujoregla',
-        ]);
-    }
-
-    public function flujoReglasCreate(): View
-    {
-        $flujos = DB::table('flujo')
-            ->orderBy('nombre')
-            ->select('idflujo', DB::raw("CONCAT(idflujo, ' - ', nombre) as label"))
-            ->get();
-        $vistas = DB::table('vista')
-            ->orderBy('nombre')
-            ->select('idvista', DB::raw("CONCAT(idvista, ' - ', nombre) as label"))
-            ->get();
-
-        return view('configuracion.flujoregla.flujoregla-form', [
-            'title' => 'Nueva Flujo Regla',
-            'moduleTitle' => 'Configuracion: Flujo Regla',
-            'mode' => 'create',
-            'formAction' => route('modules.configuracion.flujo-reglas.store'),
-            'backRoute' => route('modules.configuracion.flujo-reglas.index'),
-            'record' => null,
-            'fields' => [
-                [
-                    'name' => 'flujo_idflujo',
-                    'type' => 'select',
-                    'label' => 'Flujo',
-                    'required' => true,
-                    'optionsData' => $flujos,
-                    'optionKey' => 'idflujo',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona el flujo relacionado.',
-                ],
-                [
-                    'name' => 'vista_idvista',
-                    'type' => 'select',
-                    'label' => 'Vista',
-                    'required' => true,
-                    'optionsData' => $vistas,
-                    'optionKey' => 'idvista',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona la vista relacionada.',
-                ],
-                [
-                    'name' => 'orden',
-                    'type' => 'number',
-                    'label' => 'Orden',
-                    'required' => true,
-                    'min' => 1,
-                    'helpText' => 'Orden de ejecución de la regla.',
-                ],
-                [
-                    'name' => 'estado',
-                    'type' => 'select',
-                    'label' => 'Estado',
-                    'required' => true,
-                    'value' => old('estado', '1'),
-                    'options' => [
-                        '1' => 'Activo',
-                        '0' => 'Inactivo',
-                    ],
-                    'helpText' => 'Selecciona el estado de la regla.',
-                ],
-                [
-                    'name' => 'condicion',
-                    'type' => 'text',
-                    'label' => 'Condición',
-                    'required' => false,
-                    'maxlength' => 45,
-                    'minlength' => 0,
-                    'helpText' => 'Condición opcional de la regla.',
-                ],
-            ],
-            'readOnly' => false,
-        ]);
-    }
-
-    public function flujoReglasStore(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            'flujo_idflujo' => ['required', 'integer', 'exists:flujo,idflujo'],
-            'vista_idvista' => ['required', 'integer', 'exists:vista,idvista'],
-            'orden' => ['required', 'integer', 'min:1'],
-            'estado' => ['required', 'in:0,1'],
-            'condicion' => ['nullable', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-        ]);
-
-        $newId = DB::table('flujoregla')->insertGetId($validated);
-        $this->publishResourceEvent('configuracion.flujoregla', (string) $newId, 'created');
-
-        return redirect()
-            ->route('modules.configuracion.flujo-reglas.index')
-            ->with('success', 'Flujo regla creada correctamente.');
-    }
-
-    public function flujoReglasEdit(int $id): View|RedirectResponse
-    {
-        $record = DB::table('flujoregla')->where('idflujoregla', $id)->first();
-        if (!$record) {
-            return redirect()
-                ->route('modules.configuracion.flujo-reglas.index')
-                ->with('error', 'No se encontro la regla de flujo solicitada.');
-        }
-
-        $flujos = DB::table('flujo')
-            ->orderBy('nombre')
-            ->select('idflujo', DB::raw("CONCAT(idflujo, ' - ', nombre) as label"))
-            ->get();
-        $vistas = DB::table('vista')
-            ->orderBy('nombre')
-            ->select('idvista', DB::raw("CONCAT(idvista, ' - ', nombre) as label"))
-            ->get();
-
-        return view('configuracion.flujoregla.flujoregla-form', [
-            'title' => 'Editar Flujo Regla',
-            'moduleTitle' => 'Configuracion: Flujo Regla',
-            'mode' => 'edit',
-            'formAction' => route('modules.configuracion.flujo-reglas.update', $id),
-            'backRoute' => route('modules.configuracion.flujo-reglas.index'),
-            'record' => $record,
-            'fields' => [
-                [
-                    'name' => 'flujo_idflujo',
-                    'type' => 'select',
-                    'label' => 'Flujo',
-                    'required' => true,
-                    'optionsData' => $flujos,
-                    'optionKey' => 'idflujo',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona el flujo relacionado.',
-                ],
-                [
-                    'name' => 'vista_idvista',
-                    'type' => 'select',
-                    'label' => 'Vista',
-                    'required' => true,
-                    'optionsData' => $vistas,
-                    'optionKey' => 'idvista',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona la vista relacionada.',
-                ],
-                [
-                    'name' => 'orden',
-                    'type' => 'number',
-                    'label' => 'Orden',
-                    'required' => true,
-                    'min' => 1,
-                    'helpText' => 'Orden de ejecución de la regla.',
-                ],
-                [
-                    'name' => 'estado',
-                    'type' => 'select',
-                    'label' => 'Estado',
-                    'required' => true,
-                    'value' => $record->estado ?? '1',
-                    'options' => [
-                        '1' => 'Activo',
-                        '0' => 'Inactivo',
-                    ],
-                    'helpText' => 'Selecciona el estado de la regla.',
-                ],
-                [
-                    'name' => 'condicion',
-                    'type' => 'text',
-                    'label' => 'Condición',
-                    'required' => false,
-                    'maxlength' => 45,
-                    'minlength' => 0,
-                    'helpText' => 'Condición opcional de la regla.',
-                ],
-            ],
-            'readOnly' => true,
-        ] + $this->prepareLockViewData('configuracion.flujoregla', (string) $id));
-    }
-
-    public function flujoReglasUpdate(Request $request, int $id): RedirectResponse
-    {
-        $exists = DB::table('flujoregla')->where('idflujoregla', $id)->exists();
-        if (!$exists) {
-            return redirect()
-                ->route('modules.configuracion.flujo-reglas.index')
-                ->with('error', 'No se encontro la regla de flujo solicitada.');
-        }
-
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.flujoregla', (string) $id, 'flujo regla', 'modules.configuracion.flujo-reglas.index')) {
-            return $redirect;
-        }
-
-        $validated = $request->validate([
-            'flujo_idflujo' => ['required', 'integer', 'exists:flujo,idflujo'],
-            'vista_idvista' => ['required', 'integer', 'exists:vista,idvista'],
-            'orden' => ['required', 'integer', 'min:1'],
-            'estado' => ['required', 'in:0,1'],
-            'condicion' => ['nullable', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-        ]);
-
-        DB::table('flujoregla')->where('idflujoregla', $id)->update($validated);
-        $this->publishResourceEvent('configuracion.flujoregla', (string) $id, 'updated');
-
-        $this->releaseLockIfOwned($request, 'configuracion.flujoregla', (string) $id);
-
-        return redirect()
-            ->route('modules.configuracion.flujo-reglas.index')
-            ->with('success', 'Flujo regla actualizada correctamente.');
-    }
-
-    public function flujoReglasDestroy(Request $request, int $id): RedirectResponse
-    {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.flujoregla', (string) $id, 'flujo regla', 'modules.configuracion.flujo-reglas.index')) {
-            return $redirect;
-        }
-
-        try {
-            DB::table('flujoregla')->where('idflujoregla', $id)->delete();
-            $this->publishResourceEvent('configuracion.flujoregla', (string) $id, 'deleted');
-            $this->releaseLockIfOwned($request, 'configuracion.flujoregla', (string) $id);
-
-            return redirect()
-                ->route('modules.configuracion.flujo-reglas.index')
-                ->with('success', 'Flujo regla eliminada correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.flujo-reglas.index')
-                ->with('error', 'No se puede eliminar la regla porque tiene registros relacionados.');
-        }
-    }
-
-    public function flujoReglasBulkDestroy(Request $request): RedirectResponse
-    {
-        $selectedIds = $request->input('selectedIds', []);
-        if (!is_array($selectedIds)) {
-            $selectedIds = [];
-        }
-
-        $selectedIds = array_filter(array_map('intval', $selectedIds), fn ($id) => $id > 0);
-        if (empty($selectedIds)) {
-            return redirect()
-                ->route('modules.configuracion.flujo-reglas.index')
-                ->with('error', 'No se seleccionaron registros para eliminar.');
-        }
-
-        foreach ($selectedIds as $selectedId) {
-            if ($redirect = $this->assertLockAvailable($request, 'configuracion.flujoregla', (string) $selectedId, 'flujo regla', 'modules.configuracion.flujo-reglas.index')) {
-                return $redirect;
-            }
-        }
-
-        try {
-            DB::transaction(function () use ($selectedIds, $request) {
-                DB::table('flujoregla')->whereIn('idflujoregla', $selectedIds)->delete();
-
-                foreach ($selectedIds as $selectedId) {
-                    $this->publishResourceEvent('configuracion.flujoregla', (string) $selectedId, 'deleted');
-                    $this->releaseLockIfOwned($request, 'configuracion.flujoregla', (string) $selectedId);
-                }
-            });
-
-            return redirect()
-                ->route('modules.configuracion.flujo-reglas.index')
-                ->with('success', 'Reglas de flujo eliminadas correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.flujo-reglas.index')
-                ->with('error', 'No se pueden eliminar las reglas porque tienen registros relacionados.');
-        }
-    }
-
-    public function flujoReglasExport(Request $request, string $format)
-    {
-        $format = strtolower($format);
-        if (!in_array($format, ['pdf', 'xlsx'], true)) {
-            abort(404);
-        }
-
-        $baseQuery = DB::table('flujoregla')
-            ->leftJoin('flujo', 'flujoregla.flujo_idflujo', '=', 'flujo.idflujo')
-            ->leftJoin('vista', 'flujoregla.vista_idvista', '=', 'vista.idvista')
-            ->select(
-                'flujoregla.*',
-                DB::raw("COALESCE(CONCAT(flujo.idflujo, ' - ', flujo.nombre), 'Sin flujo') as flujo"),
-                DB::raw("COALESCE(CONCAT(vista.idvista, ' - ', vista.nombre), 'Sin vista') as vista")
-            );
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('flujoregla.idflujoregla', 'like', $term)
-                    ->orWhere('flujoregla.orden', 'like', $term)
-                    ->orWhere('flujoregla.estado', 'like', $term)
-                    ->orWhere('flujoregla.condicion', 'like', $term)
-                    ->orWhere('flujo.nombre', 'like', $term)
-                    ->orWhere('vista.nombre', 'like', $term);
-            });
-        }
-
-        $rows = $baseQuery
-            ->orderBy('flujoregla.idflujoregla')
-            ->get();
-
-        $columns = [
-            ['key' => 'idflujoregla', 'label' => 'ID'],
-            ['key' => 'flujo', 'label' => 'Flujo'],
-            ['key' => 'vista', 'label' => 'Vista'],
-            ['key' => 'orden', 'label' => 'Orden'],
-            ['key' => 'estado', 'label' => 'Estado'],
-            ['key' => 'condicion', 'label' => 'Condición'],
-        ];
-
-        $filename = 'flujo_regla_export_' . now()->format('Ymd_His') . '.' . $format;
-
-        if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
-        }
-
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Flujo Reglas', $filename);
-    }
-
-    public function historialFlujosIndex(Request $request): View
-    {
-        $baseQuery = DB::table('historialflujo')
-            ->leftJoin('usuario', 'historialflujo.usuario_usuario', '=', 'usuario.usuario')
-            ->leftJoin('ticket', 'historialflujo.ticket_idticket', '=', 'ticket.idticket')
-            ->leftJoin('flujoregla', 'historialflujo.flujoregla_idflujoregla', '=', 'flujoregla.idflujoregla')
-            ->leftJoin('vista', 'historialflujo.vista_idvista', '=', 'vista.idvista')
-            ->select(
-                'historialflujo.*',
-                'usuario.usuario as usuario',
-                DB::raw("COALESCE(CONCAT(ticket.idticket, ' - ', COALESCE(ticket.detalle, ticket.pedidoReferencia, '')), 'Sin ticket') as ticket"),
-                DB::raw("COALESCE(CONCAT('Orden ', COALESCE(flujoregla.orden, '-'), ' - ', COALESCE(flujoregla.condicion, 'Sin condición')), 'Sin regla') as flujoregla"),
-                DB::raw("COALESCE(CONCAT(vista.idvista, ' - ', vista.nombre), 'Sin vista') as vista")
-            );
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('historialflujo.idhistorialflujo', 'like', $term)
-                    ->orWhere('historialflujo.usuario_usuario', 'like', $term)
-                    ->orWhere('historialflujo.ticket_idticket', 'like', $term)
-                    ->orWhere('historialflujo.flujoregla_idflujoregla', 'like', $term)
-                    ->orWhere('historialflujo.vista_idvista', 'like', $term)
-                    ->orWhere('historialflujo.detalle', 'like', $term)
-                    ->orWhere('historialflujo.resultado', 'like', $term)
-                    ->orWhere('historialflujo.fechaejecucion', 'like', $term)
-                    ->orWhere('usuario.usuario', 'like', $term)
-                    ->orWhere('ticket.detalle', 'like', $term)
-                    ->orWhere('vista.nombre', 'like', $term)
-                    ->orWhere('flujoregla.condicion', 'like', $term);
-            });
-        }
-
-        $items = $baseQuery
-            ->orderBy('historialflujo.idhistorialflujo')
-            ->paginate($this->resolvePerPage($request))
-            ->withQueryString();
-
-        $items->through(function ($row) {
-            if (isset($row->fechaejecucion)) {
-                $row->fechaejecucion = self::formatDateTimeForList((string) $row->fechaejecucion);
-            }
-
-            return $row;
-        });
-
-        return view('configuracion.historialflujo.historialflujo', [
-            'title' => 'Configuracion: Historial Flujo',
-            'singularTitle' => 'Historial Flujo',
-            'items' => $items,
-            'columns' => [
-                ['key' => 'idhistorialflujo', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'usuario', 'label' => 'Usuario', 'type' => 'text'],
-                ['key' => 'ticket', 'label' => 'Ticket', 'type' => 'text'],
-                ['key' => 'flujoregla', 'label' => 'Regla', 'type' => 'text'],
-                ['key' => 'vista', 'label' => 'Vista', 'type' => 'text'],
-                ['key' => 'fechaejecucion', 'label' => 'Fecha ejecución', 'type' => 'text'],
-            ],
-            'exportRoutes' => [
-                'pdf' => route('modules.configuracion.historial-flujos.export', ['format' => 'pdf']),
-                'xlsx' => route('modules.configuracion.historial-flujos.export', ['format' => 'xlsx']),
-            ],
-            'stats' => [
-                ['label' => 'Total de registros de historial', 'value' => (clone $baseQuery)->count()],
-            ],
-            'filters' => [],
-            'createRoute' => route('modules.configuracion.historial-flujos.create'),
-            'editRoute' => 'modules.configuracion.historial-flujos.edit',
-            'showRoute' => 'modules.configuracion.historial-flujos.edit',
-            'destroyRoute' => 'modules.configuracion.historial-flujos.destroy',
-            'bulkDestroyRoute' => route('modules.configuracion.historial-flujos.bulk-destroy'),
-            'identifierKey' => 'idhistorialflujo',
-            'lockResource' => 'configuracion.historialflujo',
-        ]);
-    }
-
-    public function historialFlujosCreate(): View
-    {
-        $usuarios = DB::table('usuario')
-            ->orderBy('usuario')
-            ->select('usuario', DB::raw('usuario as label'))
-            ->get();
-        $tickets = DB::table('ticket')
-            ->orderByDesc('idticket')
-            ->select('idticket', DB::raw("CONCAT(idticket, ' - ', COALESCE(detalle, pedidoReferencia, 'Sin detalle')) as label"))
-            ->get();
-        $flujosRegla = DB::table('flujoregla')
-            ->orderBy('idflujoregla')
-            ->select('idflujoregla', DB::raw("CONCAT('Orden ', COALESCE(orden, '-'), ' - ', COALESCE(condicion, 'Sin condición')) as label"))
-            ->get();
-        $vistas = DB::table('vista')
-            ->orderBy('nombre')
-            ->select('idvista', DB::raw("CONCAT(idvista, ' - ', nombre) as label"))
-            ->get();
-
-        return view('configuracion.historialflujo.historialflujo-form', [
-            'title' => 'Nuevo Historial Flujo',
-            'moduleTitle' => 'Configuracion: Historial Flujo',
-            'mode' => 'create',
-            'formAction' => route('modules.configuracion.historial-flujos.store'),
-            'backRoute' => route('modules.configuracion.historial-flujos.index'),
-            'record' => null,
-            'fields' => [
-                [
-                    'name' => 'usuario_usuario',
-                    'type' => 'select',
-                    'label' => 'Usuario',
-                    'required' => true,
-                    'optionsData' => $usuarios,
-                    'optionKey' => 'usuario',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona el usuario que ejecutó el flujo.',
-                ],
-                [
-                    'name' => 'ticket_idticket',
-                    'type' => 'select',
-                    'label' => 'Ticket',
-                    'required' => true,
-                    'optionsData' => $tickets,
-                    'optionKey' => 'idticket',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona el ticket relacionado.',
-                ],
-                [
-                    'name' => 'flujoregla_idflujoregla',
-                    'type' => 'select',
-                    'label' => 'Regla de flujo',
-                    'required' => true,
-                    'optionsData' => $flujosRegla,
-                    'optionKey' => 'idflujoregla',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona la regla aplicada.',
-                ],
-                [
-                    'name' => 'vista_idvista',
-                    'type' => 'select',
-                    'label' => 'Vista',
-                    'required' => true,
-                    'optionsData' => $vistas,
-                    'optionKey' => 'idvista',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona la vista relacionada.',
-                ],
-                [
-                    'name' => 'detalle',
-                    'type' => 'text',
-                    'label' => 'Detalle',
-                    'required' => false,
-                    'maxlength' => 45,
-                    'minlength' => 0,
-                    'helpText' => 'Detalle opcional de la ejecución.',
-                ],
-                [
-                    'name' => 'resultado',
-                    'type' => 'text',
-                    'label' => 'Resultado',
-                    'required' => true,
-                    'maxlength' => 45,
-                    'minlength' => 2,
-                    'helpText' => 'Resultado de la ejecución.',
-                ],
-                [
-                    'name' => 'fechaejecucion',
-                    'type' => 'datetime-local',
-                    'label' => 'Fecha ejecución',
-                    'required' => false,
-                    'value' => now()->format('Y-m-d\TH:i'),
-                    'helpText' => 'Fecha y hora de ejecución.',
-                ],
-            ],
-            'readOnly' => false,
-        ]);
-    }
-
-    public function historialFlujosStore(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            'usuario_usuario' => ['required', 'string', 'max:50', 'exists:usuario,usuario'],
-            'ticket_idticket' => ['required', 'integer', 'exists:ticket,idticket'],
-            'flujoregla_idflujoregla' => ['required', 'integer', 'exists:flujoregla,idflujoregla'],
-            'vista_idvista' => ['required', 'integer', 'exists:vista,idvista'],
-            'detalle' => ['nullable', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-            'resultado' => ['required', 'string', 'min:2', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-            'fechaejecucion' => ['nullable', 'date_format:Y-m-d\TH:i'],
-        ]);
-
-        $validated['fechaejecucion'] = self::normalizeDateTimeInput($validated['fechaejecucion'] ?? null) ?? now()->format('Y-m-d H:i:s');
-
-        $newId = DB::table('historialflujo')->insertGetId($validated);
-        $this->publishResourceEvent('configuracion.historialflujo', (string) $newId, 'created');
-
-        return redirect()
-            ->route('modules.configuracion.historial-flujos.index')
-            ->with('success', 'Historial de flujo creado correctamente.');
-    }
-
-    public function historialFlujosEdit(int $id): View|RedirectResponse
-    {
-        $record = DB::table('historialflujo')->where('idhistorialflujo', $id)->first();
-        if (!$record) {
-            return redirect()
-                ->route('modules.configuracion.historial-flujos.index')
-                ->with('error', 'No se encontro el historial solicitado.');
-        }
-
-        $usuarios = DB::table('usuario')
-            ->orderBy('usuario')
-            ->select('usuario', DB::raw('usuario as label'))
-            ->get();
-        $tickets = DB::table('ticket')
-            ->orderByDesc('idticket')
-            ->select('idticket', DB::raw("CONCAT(idticket, ' - ', COALESCE(detalle, pedidoReferencia, 'Sin detalle')) as label"))
-            ->get();
-        $flujosRegla = DB::table('flujoregla')
-            ->orderBy('idflujoregla')
-            ->select('idflujoregla', DB::raw("CONCAT('Orden ', COALESCE(orden, '-'), ' - ', COALESCE(condicion, 'Sin condición')) as label"))
-            ->get();
-        $vistas = DB::table('vista')
-            ->orderBy('nombre')
-            ->select('idvista', DB::raw("CONCAT(idvista, ' - ', nombre) as label"))
-            ->get();
-
-        return view('configuracion.historialflujo.historialflujo-form', [
-            'title' => 'Editar Historial Flujo',
-            'moduleTitle' => 'Configuracion: Historial Flujo',
-            'mode' => 'edit',
-            'formAction' => route('modules.configuracion.historial-flujos.update', $id),
-            'backRoute' => route('modules.configuracion.historial-flujos.index'),
-            'record' => $record,
-            'fields' => [
-                [
-                    'name' => 'usuario_usuario',
-                    'type' => 'select',
-                    'label' => 'Usuario',
-                    'required' => true,
-                    'optionsData' => $usuarios,
-                    'optionKey' => 'usuario',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona el usuario que ejecutó el flujo.',
-                ],
-                [
-                    'name' => 'ticket_idticket',
-                    'type' => 'select',
-                    'label' => 'Ticket',
-                    'required' => true,
-                    'optionsData' => $tickets,
-                    'optionKey' => 'idticket',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona el ticket relacionado.',
-                ],
-                [
-                    'name' => 'flujoregla_idflujoregla',
-                    'type' => 'select',
-                    'label' => 'Regla de flujo',
-                    'required' => true,
-                    'optionsData' => $flujosRegla,
-                    'optionKey' => 'idflujoregla',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona la regla aplicada.',
-                ],
-                [
-                    'name' => 'vista_idvista',
-                    'type' => 'select',
-                    'label' => 'Vista',
-                    'required' => true,
-                    'optionsData' => $vistas,
-                    'optionKey' => 'idvista',
-                    'optionLabel' => 'label',
-                    'helpText' => 'Selecciona la vista relacionada.',
-                ],
-                [
-                    'name' => 'detalle',
-                    'type' => 'text',
-                    'label' => 'Detalle',
-                    'required' => false,
-                    'maxlength' => 45,
-                    'minlength' => 0,
-                    'helpText' => 'Detalle opcional de la ejecución.',
-                ],
-                [
-                    'name' => 'resultado',
-                    'type' => 'text',
-                    'label' => 'Resultado',
-                    'required' => true,
-                    'maxlength' => 45,
-                    'minlength' => 2,
-                    'helpText' => 'Resultado de la ejecución.',
-                ],
-                [
-                    'name' => 'fechaejecucion',
-                    'type' => 'datetime-local',
-                    'label' => 'Fecha ejecución',
-                    'required' => false,
-                    'value' => self::formatDateTimeForForm((string) ($record->fechaejecucion ?? '')),
-                    'helpText' => 'Fecha y hora de ejecución.',
-                ],
-            ],
-            'readOnly' => true,
-        ] + $this->prepareLockViewData('configuracion.historialflujo', (string) $id));
-    }
-
-    public function historialFlujosUpdate(Request $request, int $id): RedirectResponse
-    {
-        $exists = DB::table('historialflujo')->where('idhistorialflujo', $id)->exists();
-        if (!$exists) {
-            return redirect()
-                ->route('modules.configuracion.historial-flujos.index')
-                ->with('error', 'No se encontro el historial solicitado.');
-        }
-
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.historialflujo', (string) $id, 'historial de flujo', 'modules.configuracion.historial-flujos.index')) {
-            return $redirect;
-        }
-
-        $validated = $request->validate([
-            'usuario_usuario' => ['required', 'string', 'max:50', 'exists:usuario,usuario'],
-            'ticket_idticket' => ['required', 'integer', 'exists:ticket,idticket'],
-            'flujoregla_idflujoregla' => ['required', 'integer', 'exists:flujoregla,idflujoregla'],
-            'vista_idvista' => ['required', 'integer', 'exists:vista,idvista'],
-            'detalle' => ['nullable', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-            'resultado' => ['required', 'string', 'min:2', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-            'fechaejecucion' => ['nullable', 'date_format:Y-m-d\TH:i'],
-        ]);
-
-        $validated['fechaejecucion'] = self::normalizeDateTimeInput($validated['fechaejecucion'] ?? null) ?? DB::table('historialflujo')->where('idhistorialflujo', $id)->value('fechaejecucion');
-
-        DB::table('historialflujo')->where('idhistorialflujo', $id)->update($validated);
-        $this->publishResourceEvent('configuracion.historialflujo', (string) $id, 'updated');
-
-        $this->releaseLockIfOwned($request, 'configuracion.historialflujo', (string) $id);
-
-        return redirect()
-            ->route('modules.configuracion.historial-flujos.index')
-            ->with('success', 'Historial de flujo actualizado correctamente.');
-    }
-
-    public function historialFlujosDestroy(Request $request, int $id): RedirectResponse
-    {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.historialflujo', (string) $id, 'historial de flujo', 'modules.configuracion.historial-flujos.index')) {
-            return $redirect;
-        }
-
-        try {
-            DB::table('historialflujo')->where('idhistorialflujo', $id)->delete();
-            $this->publishResourceEvent('configuracion.historialflujo', (string) $id, 'deleted');
-            $this->releaseLockIfOwned($request, 'configuracion.historialflujo', (string) $id);
-
-            return redirect()
-                ->route('modules.configuracion.historial-flujos.index')
-                ->with('success', 'Historial de flujo eliminado correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.historial-flujos.index')
-                ->with('error', 'No se puede eliminar el historial porque tiene registros relacionados.');
-        }
-    }
-
-    public function historialFlujosBulkDestroy(Request $request): RedirectResponse
-    {
-        $selectedIds = $request->input('selectedIds', []);
-        if (!is_array($selectedIds)) {
-            $selectedIds = [];
-        }
-
-        $selectedIds = array_filter(array_map('intval', $selectedIds), fn ($id) => $id > 0);
-        if (empty($selectedIds)) {
-            return redirect()
-                ->route('modules.configuracion.historial-flujos.index')
-                ->with('error', 'No se seleccionaron registros para eliminar.');
-        }
-
-        foreach ($selectedIds as $selectedId) {
-            if ($redirect = $this->assertLockAvailable($request, 'configuracion.historialflujo', (string) $selectedId, 'historial de flujo', 'modules.configuracion.historial-flujos.index')) {
-                return $redirect;
-            }
-        }
-
-        try {
-            DB::transaction(function () use ($selectedIds, $request) {
-                DB::table('historialflujo')->whereIn('idhistorialflujo', $selectedIds)->delete();
-
-                foreach ($selectedIds as $selectedId) {
-                    $this->publishResourceEvent('configuracion.historialflujo', (string) $selectedId, 'deleted');
-                    $this->releaseLockIfOwned($request, 'configuracion.historialflujo', (string) $selectedId);
-                }
-            });
-
-            return redirect()
-                ->route('modules.configuracion.historial-flujos.index')
-                ->with('success', 'Historiales de flujo eliminados correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.historial-flujos.index')
-                ->with('error', 'No se pueden eliminar los historiales porque tienen registros relacionados.');
-        }
-    }
-
-    public function historialFlujosExport(Request $request, string $format)
-    {
-        $format = strtolower($format);
-        if (!in_array($format, ['pdf', 'xlsx'], true)) {
-            abort(404);
-        }
-
-        $baseQuery = DB::table('historialflujo')
-            ->leftJoin('usuario', 'historialflujo.usuario_usuario', '=', 'usuario.usuario')
-            ->leftJoin('ticket', 'historialflujo.ticket_idticket', '=', 'ticket.idticket')
-            ->leftJoin('flujoregla', 'historialflujo.flujoregla_idflujoregla', '=', 'flujoregla.idflujoregla')
-            ->leftJoin('vista', 'historialflujo.vista_idvista', '=', 'vista.idvista')
-            ->select(
-                'historialflujo.*',
-                'usuario.usuario as usuario',
-                DB::raw("COALESCE(CONCAT(ticket.idticket, ' - ', COALESCE(ticket.detalle, ticket.pedidoReferencia, '')), 'Sin ticket') as ticket"),
-                DB::raw("COALESCE(CONCAT('Orden ', COALESCE(flujoregla.orden, '-'), ' - ', COALESCE(flujoregla.condicion, 'Sin condición')), 'Sin regla') as flujoregla"),
-                DB::raw("COALESCE(CONCAT(vista.idvista, ' - ', vista.nombre), 'Sin vista') as vista")
-            );
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('historialflujo.idhistorialflujo', 'like', $term)
-                    ->orWhere('historialflujo.usuario_usuario', 'like', $term)
-                    ->orWhere('historialflujo.ticket_idticket', 'like', $term)
-                    ->orWhere('historialflujo.flujoregla_idflujoregla', 'like', $term)
-                    ->orWhere('historialflujo.vista_idvista', 'like', $term)
-                    ->orWhere('historialflujo.detalle', 'like', $term)
-                    ->orWhere('historialflujo.resultado', 'like', $term)
-                    ->orWhere('historialflujo.fechaejecucion', 'like', $term)
-                    ->orWhere('usuario.usuario', 'like', $term)
-                    ->orWhere('ticket.detalle', 'like', $term)
-                    ->orWhere('vista.nombre', 'like', $term)
-                    ->orWhere('flujoregla.condicion', 'like', $term);
-            });
-        }
-
-        $rows = $baseQuery
-            ->orderBy('historialflujo.idhistorialflujo')
-            ->get()
-            ->map(function ($row) {
-                if (isset($row->fechaejecucion)) {
-                    $row->fechaejecucion = self::formatDateTimeForList((string) $row->fechaejecucion);
-                }
-
-                return $row;
-            });
-
-        $columns = [
-            ['key' => 'idhistorialflujo', 'label' => 'ID'],
-            ['key' => 'usuario', 'label' => 'Usuario'],
-            ['key' => 'ticket', 'label' => 'Ticket'],
-            ['key' => 'flujoregla', 'label' => 'Regla'],
-            ['key' => 'vista', 'label' => 'Vista'],
-            ['key' => 'detalle', 'label' => 'Detalle'],
-            ['key' => 'resultado', 'label' => 'Resultado'],
-            ['key' => 'fechaejecucion', 'label' => 'Fecha ejecución'],
-        ];
-
-        $filename = 'historial_flujo_export_' . now()->format('Ymd_His') . '.' . $format;
-
-        if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
-        }
-
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Historiales de Flujo', $filename);
-    }
-
     private static function formatDateTimeForList(string $value): string
     {
         try {
@@ -7530,38 +7244,201 @@ class ConfiguracionController extends Controller
         }
     }
 
-    private static function formatDateTimeForForm(string $value): string
+    private function configuracionListFilters(string $method): array
     {
-        if (trim($value) === '') {
-            return '';
-        }
-
-        try {
-            if (str_contains($value, 'T')) {
-                return Carbon::createFromFormat('Y-m-d\TH:i', $value)->format('Y-m-d\TH:i');
-            }
-
-            return Carbon::parse($value)->format('Y-m-d\TH:i');
-        } catch (\Throwable) {
-            return '';
-        }
+        return match ($method) {
+            'estadosIndex', 'estadosExport' => [
+                ['name' => 'idestadoCliente', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+            ],
+            'tiposGastoIndex', 'tiposGastoExport' => [
+                ['name' => 'idtipoGasto', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nombre', 'label' => 'Nombre', 'type' => 'text'],
+            ],
+            'tiposContactoIndex', 'tiposContactoExport' => [
+                ['name' => 'idtipoContacto', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+            ],
+            'tiposCobroIndex', 'tiposCobroExport' => [
+                ['name' => 'idtipoCobros', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nombre', 'label' => 'Nombre', 'type' => 'text'],
+                ['name' => 'recurrencia', 'label' => 'Recurrencia', 'type' => 'text'],
+                ['name' => 'tiempo', 'label' => 'Tiempo', 'type' => 'text'],
+            ],
+            'unidadMedidasIndex', 'unidadMedidasExport' => [
+                ['name' => 'idunidadMedida', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+                ['name' => 'nomenclatura', 'label' => 'Nomenclatura', 'type' => 'text'],
+            ],
+            'monedasIndex', 'monedasExport' => [
+                ['name' => 'idmoneda', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+                ['name' => 'simbolo', 'label' => 'Símbolo', 'type' => 'text'],
+            ],
+            'marcasIndex', 'marcasExport' => [
+                ['name' => 'idmarca', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nombreMarca', 'label' => 'Nombre', 'type' => 'text'],
+                ['name' => 'procedencia', 'label' => 'Procedencia', 'type' => 'text'],
+            ],
+            'empresapropietariaIndex', 'empresapropietariaExport' => [
+                ['name' => 'RUC', 'label' => 'RUC', 'type' => 'text'],
+                ['name' => 'razonSocial', 'label' => 'Razón social', 'type' => 'text'],
+                ['name' => 'rubro', 'label' => 'Rubro', 'type' => 'text'],
+                ['name' => 'direccionFiscal', 'label' => 'Dirección fiscal', 'type' => 'text'],
+                ['name' => 'ubigeo_label', 'label' => 'Ubigeo', 'type' => 'text'],
+            ],
+            'modeloIndex', 'modeloExport' => [
+                ['name' => 'idmodelo', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nombreModelo', 'label' => 'Nombre', 'type' => 'text'],
+                ['name' => 'marca_label', 'label' => 'Marca', 'type' => 'text'],
+            ],
+            'tributosIndex', 'tributosExport' => [
+                ['name' => 'idtributo', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nombreTributo', 'label' => 'Nombre', 'type' => 'text'],
+                ['name' => 'tipo', 'label' => 'Tipo', 'type' => 'text'],
+                ['name' => 'valor', 'label' => 'Valor', 'type' => 'text'],
+            ],
+            'tecnologiasIndex', 'tecnologiasExport' => [
+                ['name' => 'idtecnologia', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nombreTecnologia', 'label' => 'Nombre', 'type' => 'text'],
+            ],
+            'tiposPlataformaIndex', 'tiposPlataformaExport' => [
+                ['name' => 'idtipoPlataforma', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'descripcion', 'label' => 'Descripcion', 'type' => 'text'],
+            ],
+            'plataformaIndex', 'plataformaExport' => [
+                ['name' => 'idplataforma', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nombrePlataforma', 'label' => 'Nombre', 'type' => 'text'],
+                ['name' => 'tipoPlataforma', 'label' => 'Tipo de plataforma', 'type' => 'text'],
+            ],
+            'tipoElementoIndex', 'tipoElementoExport' => [
+                ['name' => 'idtipoElemento', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nombre', 'label' => 'Nombre', 'type' => 'text'],
+                ['name' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+                ['name' => 'plataforma', 'label' => 'Plataforma', 'type' => 'text'],
+            ],
+            'tiposDocumentoIndex', 'tiposDocumentoExport' => [
+                ['name' => 'idtipoDocumento', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+                ['name' => 'serie', 'label' => 'Serie', 'type' => 'text'],
+                ['name' => 'correlativo', 'label' => 'Correlativo', 'type' => 'text'],
+                ['name' => 'area', 'label' => 'Area', 'type' => 'text'],
+            ],
+            'formasPagoIndex', 'formasPagoExport' => [
+                ['name' => 'idformaPago', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+                ['name' => 'tiempo', 'label' => 'Tiempo', 'type' => 'text'],
+            ],
+            'entidadesBancariasIndex', 'entidadesBancariasExport' => [
+                ['name' => 'identidadBancaria', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'razonSocial', 'label' => 'Razón social', 'type' => 'text'],
+                ['name' => 'ruc', 'label' => 'RUC', 'type' => 'text'],
+                ['name' => 'descripcion', 'label' => 'Descripcion', 'type' => 'text'],
+            ],
+            'operadoresIndex', 'operadoresExport' => [
+                ['name' => 'idoperador', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nombre', 'label' => 'Nombre', 'type' => 'text'],
+            ],
+            'tiposVehiculoIndex', 'tiposVehiculoExport' => [
+                ['name' => 'idtipoVehiculo', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nombre', 'label' => 'Nombre', 'type' => 'text'],
+            ],
+            'tiposOperacionIndex', 'tiposOperacionExport' => [
+                ['name' => 'idtipoOperacion', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nomenclatura', 'label' => 'Nomenclatura', 'type' => 'text'],
+                ['name' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+            ],
+            'listaprecioIndex', 'listaprecioExport' => [
+                ['name' => 'idListaPrecio', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nombreLista', 'label' => 'Nombre lista', 'type' => 'text'],
+            ],
+            'detalleListaPrecioIndex', 'detalleListaPrecioExport' => [
+                ['name' => 'iddetalleListaPrecio', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'almacen_detalle', 'label' => 'Almacén', 'type' => 'text'],
+                ['name' => 'listaprecio_nombre', 'label' => 'Lista de precio', 'type' => 'text'],
+                ['name' => 'precio', 'label' => 'Precio', 'type' => 'text'],
+            ],
+            'elementoAlmacenIndex', 'elementoAlmacenExport' => [
+                ['name' => 'imei', 'label' => 'IMEI', 'type' => 'text'],
+                ['name' => 'almacen_detalle', 'label' => 'Dispositivo', 'type' => 'text'],
+                ['name' => 'fechaIngreso', 'label' => 'Fecha ingreso', 'type' => 'date'],
+                ['name' => 'estado', 'label' => 'Estado', 'options' => [ ['value' => '1', 'label' => 'Activo'], ['value' => '0', 'label' => 'Inactivo'], ],],
+                ['name' => 'idAuxiliar', 'label' => 'ID Auxiliar', 'type' => 'text'],
+            ],
+            'tipopedidoIndex', 'tipopedidoExport' => [
+                ['name' => 'idtipoPedido', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'nomenclatura', 'label' => 'Nomenclatura', 'type' => 'text'],
+                ['name' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+            ],
+            'proveedorIndex', 'proveedorExport' => [
+                ['name' => 'idproveedor', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'razonSocial', 'label' => 'Razón social', 'type' => 'text'],
+                ['name' => 'tipoProveedor', 'label' => 'Tipo proveedor', 'type' => 'text'],
+            ],
+            'vigenciaofertaIndex', 'vigenciaofertaExport' => [
+                ['name' => 'idvigenciaOferta', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
+                ['name' => 'dias', 'label' => 'Días', 'type' => 'text'],
+            ],
+            'certificadosUnatIndex', 'certificadosUnatExport' => [
+                ['name' => 'idcertificadoSUNAT', 'label' => 'Certificado SUNAT', 'type' => 'text'],
+                ['name' => 'proveedor', 'label' => 'Proveedor', 'type' => 'text'],
+                ['name' => 'fechaEmision_from', 'label' => 'Fecha emisión', 'type' => 'date'],
+                ['name' => 'fechaVencimiento_to', 'label' => 'Fecha vencimiento', 'type' => 'date'],
+                ['name' => 'fechaCargaSistema', 'label' => 'Fecha carga', 'type' => 'date'],
+            ],
+            'ubigeosIndex', 'ubigeosExport' => [
+                ['name' => 'idubigeo', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'departamento', 'label' => 'Departamento', 'type' => 'text'],
+                ['name' => 'provincia', 'label' => 'Provincia', 'type' => 'text'],
+                ['name' => 'distrito', 'label' => 'Distrito', 'type' => 'text'],
+                ['name' => 'pais', 'label' => 'Pais', 'type' => 'text'],
+            ],
+            'cargosIndex', 'cargosExport' => [
+                ['name' => 'idcargoPersonal', 'label' => 'ID', 'type' => 'text'],
+                ['name' => 'descripcion', 'label' => 'Descripcion', 'type' => 'text'],
+            ],
+            default => [],
+        };
     }
 
-    private static function normalizeDateTimeInput(?string $value): ?string
+    private function applyConfiguracionListFilters($query, Request $request, string $method): void
     {
-        $trimmed = trim((string) $value);
-        if ($trimmed === '') {
-            return null;
-        }
-
-        try {
-            if (strlen($trimmed) === 16) {
-                return Carbon::createFromFormat('Y-m-d\TH:i', $trimmed)->format('Y-m-d H:i:s');
+        foreach ($this->configuracionListFilters($method) as $filter) {
+            $name = (string) ($filter['name'] ?? '');
+            if ($name === '') {
+                continue;
             }
 
-            return Carbon::parse($trimmed)->format('Y-m-d H:i:s');
-        } catch (\Throwable) {
-            return null;
+            $type = isset($filter['type']) ? strtolower((string) $filter['type']) : 'text';
+            $value = trim((string) $request->input($name, ''));
+            if ($value === '') {
+                continue;
+            }
+
+            if ($type === 'date') {
+                // Expect names like columna_from and columna_to
+                $base = preg_replace('/_(from|to)$/', '', $name);
+                try {
+                    if (str_ends_with($name, '_from')) {
+                        $dt = Carbon::parse($value)->startOfDay()->format('Y-m-d H:i:s');
+                        $query->havingRaw('`' . $base . '` >= ?', [$dt]);
+                        continue;
+                    }
+
+                    if (str_ends_with($name, '_to')) {
+                        $dt = Carbon::parse($value)->endOfDay()->format('Y-m-d H:i:s');
+                        $query->havingRaw('`' . $base . '` <= ?', [$dt]);
+                        continue;
+                    }
+                } catch (\Throwable $e) {
+                    // invalid date input -> skip this filter
+                    continue;
+                }
+            }
+
+            // default: text-like matching
+            $query->havingRaw('`' . $name . '` like ?', ['%' . $value . '%']);
         }
     }
 

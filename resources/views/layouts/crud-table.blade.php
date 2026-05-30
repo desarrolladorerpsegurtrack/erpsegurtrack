@@ -72,6 +72,7 @@
                                 ->unique()
                                 ->contains('ver');
                             $canPerformActions = $canEdit || $canDelete;
+                            $createButtonLabel = $createButtonLabel ?? null;
 
                             $listResource = null;
                             if ($currentRouteName) {
@@ -118,7 +119,7 @@
                                 <a href="{{ $createRoute }}">
                                     <button type="button" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed dark:border-danger/70 dark:text-danger" style="background-color:#c71010;color:#ffffff;">
                                         <i data-tw-merge="" data-lucide="plus" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
-                                        Nuevo {{ $singularTitle ?? 'Registro' }}
+                                        {{ $createButtonLabel ?: ('Nuevo ' . ($singularTitle ?? 'Registro')) }}
                                     </button>
                                 </a>                       
                             @endif
@@ -132,7 +133,7 @@
 
                     <div class="mt-3.5 flex flex-col gap-8">
                         {{-- ALERTAS DE SESIÓN --}}
-                        @if(session('success'))
+                         @if(session('success'))
                             <div class="mb-4 rounded-lg border px-4 py-3 text-base font-semibold relative" style="border-color:#16a34a;background-color:#dcfce7;color:#14532d;">
                                 ✓ {{ session('success') }}
                                 <button type="button" class="absolute top-0 right-0 mt-2 mr-2 text-lg font-bold text-gray-600 hover:text-gray-800" onclick="this.parentElement.style.display='none';">&times;</button>
@@ -206,7 +207,7 @@
                                                         <i data-tw-merge="" data-lucide="chevron-down" class="ml-2 h-4 w-4 stroke-[1.3]"></i>
                                                     </button>
                                                     <div class="dropdown-menu absolute right-0 top-full z-[9999] mt-2 origin-top-right invisible opacity-0 pointer-events-none hidden">
-                                                        <div data-tw-merge="" class="dropdown-content rounded-xl border border-slate-200/80 bg-white p-2 shadow-xl shadow-slate-200/70 dark:border-transparent dark:bg-darkmode-600">
+                                                        <div data-tw-merge="" class="dropdown-content rounded-md border border-slate-200/80 bg-white p-2 shadow-xl shadow-slate-200/70 dark:border-transparent dark:bg-darkmode-600">
                                                             <a href="{{ $exportRoutes['pdf'] ?? '#' }}" data-export-link="true" data-export-base="{{ $exportRoutes['pdf'] ?? '#' }}" data-export-format="pdf" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item">
                                                                 <i data-tw-merge="" data-lucide="file-bar-chart" class="stroke-[1] mr-2 h-4 w-4"></i>
                                                                 PDF
@@ -328,6 +329,7 @@
                                     <tbody>
                                         @php
                                             $historyRowColspan = count($columns) + 2 + ($showGroupClientsColumn ? 1 : 0) + (($showActionsColumn ?? true) && $canPerformActions ? 1 : 0);
+                                            $historyTitle = $historyTitle ?? 'Historial de relaciones';
                                             $historyColumns = $historyColumns ?? [
                                                 ['key' => 'simCard_idsimCard', 'label' => 'SimCard', 'type' => 'text'],
                                                 ['key' => 'numeroTelefonico_numeroTelefonico', 'label' => 'Número telefónico', 'type' => 'text'],
@@ -336,6 +338,13 @@
                                             ];
                                         @endphp
                                         @forelse($items as $row)
+                                            @php
+                                                $historyItems = collect(data_get($row, 'history', []));
+                                                $relationGroups = collect(data_get($row, 'relation_groups', []))
+                                                    ->filter(fn ($group) => is_array($group) && !empty($group['records'] ?? []))
+                                                    ->values();
+                                                $hasExpandableRelations = $historyItems->isNotEmpty() || $relationGroups->isNotEmpty();
+                                            @endphp
                                             <tr data-tw-merge="" class="[&_td]:last:border-b-0">
                                                 <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 border-dashed py-4 dark:bg-darkmode-600">
                                                     <div class="flex items-center gap-2">
@@ -356,7 +365,7 @@
                                                                         && $canEdit;
                                                                 @endphp
                                                                 @if($canShowLink)
-                                                                    <a class="font-medium text-slate-700 hover:text-slate-900 hover:underline @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif" href="{{ route($showRoute, data_get($row, $identifierKey)) }}">
+                                                                    <a class="font-medium text-slate-700 hover:text-primary hover:underline @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif" href="{{ route($showRoute, data_get($row, $identifierKey)) }}">
                                                                         {{ data_get($row, $column['key']) ?? '-' }}
                                                                     </a>
                                                                 @else
@@ -540,7 +549,7 @@
                                                                     <i data-tw-merge="" data-lucide="more-vertical" class="stroke-[1] w-5 h-5 fill-slate-400/70 stroke-slate-400/70"></i>
                                                                 </button>
                                                                 <div class="dropdown-menu absolute right-0 top-full z-[9999] mt-2 origin-top-right invisible opacity-0 pointer-events-none hidden">
-                                                                    <div data-tw-merge="" class="dropdown-content rounded-xl border border-slate-200/80 bg-white p-2 shadow-xl shadow-slate-200/70 dark:border-transparent dark:bg-darkmode-600">
+                                                                    <div data-tw-merge="" class="dropdown-content rounded-md border border-slate-200/80 bg-white p-2 shadow-xl shadow-slate-200/70 dark:border-transparent dark:bg-darkmode-600">
                                                                         @if($canEditRoute)
                                                                             @if($rowLockBlocked)
                                                                                 <button type="button" disabled class="cursor-not-allowed flex items-center p-2 transition duration-300 ease-in-out rounded-md text-slate-400 dark:text-slate-500 dropdown-item opacity-50" title="Bloqueado por {{ $rowLockOwner ?? 'otro usuario' }}">
@@ -568,8 +577,8 @@
                                                                 </div>
                                                             </div>
                                                         @endif
-                                                        @if(!empty(data_get($row, 'history')) && data_get($row, 'history')->isNotEmpty())
-                                                            <button type="button" data-history-toggle="{{ data_get($row, $identifierKey) }}" class="history-toggle ml-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100" aria-label="Mostrar historial">
+                                                        @if($hasExpandableRelations)
+                                                            <button type="button" data-history-toggle="{{ data_get($row, $identifierKey) }}" class="history-toggle ml-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100" aria-label="Mostrar {{ $historyTitle }}">
                                                                 <i data-lucide="chevron-down" class="h-4 w-4 stroke-[1.7] transition-transform duration-200"></i>
                                                             </button>
                                                         @endif
@@ -577,59 +586,146 @@
                                                 </td>
                                             @endif
                                             </tr>
-                                            @if(!empty(data_get($row, 'history')) && data_get($row, 'history')->isNotEmpty())
+                                            @if($hasExpandableRelations)
                                                 <tr data-history-row="{{ data_get($row, $identifierKey) }}" class="hidden" style="background-color: #FCE8E8;">
                                                     <td colspan="{{ $historyRowColspan }}" class="px-5 py-4" >
-                                                        <div class="overflow-hidden rounded-lg border border-slate-200 shadow-sm" style="background-color: #ffffff; ">
-                                                            <div class="border-b px-4 py-3 text-sm font-semibold" >Historial de relaciones</div>
-                                                            <div class="overflow-x-auto px-4 py-3" >
-                                                                <table class="w-full text-left text-sm">
-                                                                    <thead>
-                                                                        <tr>
-                                                                            @foreach($historyColumns as $historyColumn)
-                                                                                <th class="px-3 py-2 whitespace-nowrap">{{ $historyColumn['label'] ?? '' }}</th>
+                                                        @if(!empty($relationPanelView) && \Illuminate\Support\Facades\View::exists($relationPanelView))
+                                                            @include($relationPanelView, [
+                                                                'row' => $row,
+                                                                'relationGroups' => $relationGroups,
+                                                                'historyItems' => $historyItems,
+                                                                'historyColumns' => $historyColumns,
+                                                                'historyTitle' => $historyTitle,
+                                                            ])
+                                                        @else
+                                                            <div class="overflow-hidden rounded-lg border border-slate-200 shadow-sm" style="background-color: #ffffff; ">
+                                                                <div class="border-b px-4 py-3 text-sm font-semibold" >{{ $historyTitle }}</div>
+                                                                <div class="overflow-x-auto px-4 py-3" >
+                                                                    @if($relationGroups->isNotEmpty())
+                                                                        <div class="flex flex-col gap-4">
+                                                                            @foreach($relationGroups as $relationGroup)
+                                                                                <div class="overflow-hidden rounded-lg border border-slate-200 shadow-sm">
+                                                                                    <div class="border-b px-4 py-3 text-sm font-semibold">
+                                                                                        {{ $relationGroup['label'] ?? 'Relación' }}
+                                                                                    </div>
+                                                                                    <div class="overflow-x-auto px-4 py-3">
+                                                                                        <table class="w-full text-left text-sm">
+                                                                                            <thead>
+                                                                                                <tr>
+                                                                                                    @foreach(($relationGroup['columns'] ?? []) as $relationColumn)
+                                                                                                        <th class="px-3 py-2 whitespace-nowrap">{{ $relationColumn['label'] ?? '' }}</th>
+                                                                                                    @endforeach
+                                                                                                </tr>
+                                                                                            </thead>
+                                                                                            <tbody>
+                                                                                                @foreach(($relationGroup['records'] ?? []) as $relationRecord)
+                                                                                                    <tr>
+                                                                                                        @foreach(($relationGroup['columns'] ?? []) as $relationColumn)
+                                                                                                            @php
+                                                                                                                $relationValue = data_get($relationRecord, $relationColumn['key'] ?? '') ?? '-';
+                                                                                                                $relationKey = (string) ($relationColumn['key'] ?? '');
+                                                                                                                $relationType = $relationColumn['type'] ?? 'text';
+                                                                                                            @endphp
+                                                                                                            @if($relationType === 'status' || $relationKey === 'estado')
+                                                                                                                @php
+                                                                                                                    $isActive = false;
+                                                                                                                    $label = '';
+                                                                                                                    if (is_numeric($relationValue)) {
+                                                                                                                        $isActive = (string) $relationValue === '1';
+                                                                                                                        $label = $isActive ? 'Activo' : 'Inactivo';
+                                                                                                                    } else {
+                                                                                                                        $label = trim((string) $relationValue);
+                                                                                                                        $isActive = stripos($label, 'activo') !== false && stripos($label, 'inactivo') === false;
+                                                                                                                    }
+                                                                                                                @endphp
+                                                                                                                <td class="px-3 py-2">
+                                                                                                                    <div class="flex items-center">
+                                                                                                                        <i data-lucide="database" class="h-3.5 w-3.5 stroke-[1.7] {{ $isActive ? 'text-danger' : 'text-slate-400' }}"></i>
+                                                                                                                        <span class="ml-1.5 whitespace-nowrap font-medium {{ $isActive ? 'text-danger' : 'text-slate-500' }}">{{ $label }}</span>
+                                                                                                                    </div>
+                                                                                                                </td>
+                                                                                                            @elseif($relationType === 'date' || str_starts_with($relationKey, 'fecha'))
+                                                                                                                @php
+                                                                                                                    $formattedRelationDate = '-';
+                                                                                                                    if (!empty($relationValue) && $relationValue !== '0000-00-00 00:00:00') {
+                                                                                                                        try {
+                                                                                                                            $relationDate = \Illuminate\Support\Carbon::parse($relationValue);
+                                                                                                                            $relationMonths = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.'];
+                                                                                                                            $formattedRelationDate = sprintf(
+                                                                                                                                '%s %s %s, %s',
+                                                                                                                                $relationDate->format('d'),
+                                                                                                                                $relationMonths[(int) $relationDate->format('m') - 1],
+                                                                                                                                $relationDate->format('Y'),
+                                                                                                                                $relationDate->format('H:i')
+                                                                                                                            );
+                                                                                                                        } catch (\Throwable $throwable) {
+                                                                                                                            $formattedRelationDate = (string) $relationValue;
+                                                                                                                        }
+                                                                                                                    }
+                                                                                                                @endphp
+                                                                                                                <td class="px-3 py-2 whitespace-nowrap">{{ $formattedRelationDate }}</td>
+                                                                                                            @else
+                                                                                                                <td class="px-3 py-2 whitespace-nowrap">{{ $relationValue }}</td>
+                                                                                                            @endif
+                                                                                                        @endforeach
+                                                                                                    </tr>
+                                                                                                @endforeach
+                                                                                            </tbody>
+                                                                                        </table>
+                                                                                    </div>
+                                                                                </div>
                                                                             @endforeach
-                                                                        </tr>
-                                                                    </thead>
-                                                                    <tbody>
-                                                                        @foreach(data_get($row, 'history') as $history)
-                                                                            <tr >
-                                                                                @foreach($historyColumns as $historyColumn)
-                                                                                    @php
-                                                                                        $historyValue = data_get($history, $historyColumn['key'] ?? '') ?? '-';
-                                                                                        $historyType = $historyColumn['type'] ?? 'text';
-                                                                                    @endphp
-                                                                                    @if($historyType === 'status')
-                                                                                        @php
-                                                                                            $value = $historyValue;
-                                                                                            $isActive = false;
-                                                                                            $label = '';
-                                                                                            if (is_numeric($value)) {
-                                                                                                $isActive = (string) ($value ?? '1') === '1';
-                                                                                                $label = $isActive ? 'Activo' : 'Inactivo';
-                                                                                            } else {
-                                                                                                $label = trim((string) ($value ?? ''));
-                                                                                                $isActive = stripos($label, 'activo') !== false && stripos($label, 'inactivo') === false;
-                                                                                            }
-                                                                                        @endphp
-                                                                                        <td class="px-3 py-2">
-                                                                                            <div class="flex items-center">
-                                                                                                <i data-tw-merge="" data-lucide="database" class="h-3.5 w-3.5 stroke-[1.7] {{ $isActive ? 'text-danger' : 'text-slate-400' }}"></i>
-                                                                                                <span class="ml-1.5 whitespace-nowrap font-medium {{ $isActive ? 'text-danger' : 'text-slate-500' }}">
-                                                                                                    {{ $label }}
-                                                                                                </span>
-                                                                                            </div>
-                                                                                        </td>
-                                                                                    @else
-                                                                                        <td class="px-3 py-2">{{ $historyValue }}</td>
-                                                                                    @endif
+                                                                        </div>
+                                                                    @else
+                                                                        <table class="w-full text-left text-sm">
+                                                                            <thead>
+                                                                                <tr>
+                                                                                    @foreach($historyColumns as $historyColumn)
+                                                                                        <th class="px-3 py-2 whitespace-nowrap">{{ $historyColumn['label'] ?? '' }}</th>
+                                                                                    @endforeach
+                                                                                </tr>
+                                                                            </thead>
+                                                                            <tbody>
+                                                                                @foreach($historyItems as $history)
+                                                                                    <tr>
+                                                                                        @foreach($historyColumns as $historyColumn)
+                                                                                            @php
+                                                                                                $historyValue = data_get($history, $historyColumn['key'] ?? '') ?? '-';
+                                                                                                $historyType = $historyColumn['type'] ?? 'text';
+                                                                                            @endphp
+                                                                                            @if($historyType === 'status')
+                                                                                                @php
+                                                                                                    $value = $historyValue;
+                                                                                                    $isActive = false;
+                                                                                                    $label = '';
+                                                                                                    if (is_numeric($value)) {
+                                                                                                        $isActive = (string) ($value ?? '1') === '1';
+                                                                                                        $label = $isActive ? 'Activo' : 'Inactivo';
+                                                                                                    } else {
+                                                                                                        $label = trim((string) ($value ?? ''));
+                                                                                                        $isActive = stripos($label, 'activo') !== false && stripos($label, 'inactivo') === false;
+                                                                                                    }
+                                                                                                @endphp
+                                                                                                <td class="px-3 py-2">
+                                                                                                    <div class="flex items-center">
+                                                                                                        <i data-lucide="database" class="h-3.5 w-3.5 stroke-[1.7] {{ $isActive ? 'text-danger' : 'text-slate-400' }}"></i>
+                                                                                                        <span class="ml-1.5 whitespace-nowrap font-medium {{ $isActive ? 'text-danger' : 'text-slate-500' }}">
+                                                                                                            {{ $label }}
+                                                                                                        </span>
+                                                                                                    </div>
+                                                                                                </td>
+                                                                                            @else
+                                                                                                <td class="px-3 py-2 whitespace-nowrap">{{ $historyValue }}</td>
+                                                                                            @endif
+                                                                                        @endforeach
+                                                                                    </tr>
                                                                                 @endforeach
-                                                                            </tr>
-                                                                        @endforeach
-                                                                    </tbody>
-                                                                </table>
+                                                                            </tbody>
+                                                                        </table>
+                                                                    @endif
+                                                                </div>
                                                             </div>
-                                                        </div>
+                                                        @endif
                                                     </td>
                                                 </tr>
                                             @endif
@@ -679,7 +775,7 @@
                 </div>
             </div>
             <div id="delete-confirmation-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;" role="dialog" aria-modal="true" aria-labelledby="delete-confirmation-title" aria-describedby="delete-confirmation-message">
-                <div style="width:720px;max-width:92%;margin:0 auto;position:relative;border-radius:20px;background:#ffffff;box-shadow:0 20px 40px rgba(2,6,23,0.12);overflow:hidden;">
+                <div style="width:720px;max-width:92%;margin:0 auto;position:relative;border-radius:10px;background:#ffffff;box-shadow:0 20px 40px rgba(2,6,23,0.12);overflow:hidden;">
                     <button type="button" data-delete-modal-close style="position:absolute;right:16px;top:16px;height:44px;width:44px;border-radius:9999px;border:1px solid #e6e9ee;background:#fff;color:#6b7280;display:inline-flex;align-items:center;justify-content:center;" aria-label="Cerrar">
                         <i data-lucide="x" style="width:16px;height:16px"></i>
                     </button>
@@ -690,12 +786,12 @@
                         <h2 id="delete-confirmation-title" style="font-size:22px;font-weight:600;margin:0;color:#111827;">¿Estás seguro?</h2>
                         <p id="delete-confirmation-message" style="margin-top:12px;color:#6b7280;font-size:14px;line-height:1.6;">Esta acción eliminará el registro y no se podrá deshacer.</p>
                         <div id="delete-confirmation-details" class="mt-5 hidden rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900"></div>
-                        <div id="delete-confirmation-relations" class="mt-5 hidden rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"></div>
+                        <div id="delete-confirmation-relations" class="mt-5 hidden rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" style="background-color: #ffe7e7;"></div>
                         <div id="delete-confirmation-hint" class="mt-3 hidden text-sm text-slate-600"></div>
                         <div style="margin-top:26px;display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;align-items:center;">
                             <div id="delete-confirmation-actions" class="hidden flex flex-wrap gap-3 mr-auto"></div>
-                            <button type="button" data-delete-modal-close style="min-width:120px;padding:10px 18px;border-radius:10px;border:1px solid #e6e9ee;background:#ffffff;color:#374151;font-weight:600;">Cancelar</button>
-                            <button type="button" id="delete-confirmation-submit" style="min-width:120px;padding:10px 18px;border-radius:10px;background:#ef4444;color:#ffffff;font-weight:600;border:none;">Eliminar</button>
+                            <button type="button" data-delete-modal-close style="min-width:120px;padding:10px 18px;border-radius:10px;border:1px solid #000000;background:#ffffff;color:#374151;font-weight:600;">Cancelar</button>
+                            <button type="button" id="delete-confirmation-submit" style="min-width:120px;padding:10px 18px;border-radius:10px;background:#c71010;color:#ffffff;font-weight:600;border:none;">Eliminar</button>
                         </div>
                     </div>
                 </div>
@@ -760,7 +856,7 @@
                 </form>
             @endif
             @if(!empty($bulkDeactivateRoute))
-                <div id="detallesimcard-bulk-deactivate-modal" class="fixed inset-0 hidden items-center justify-center px-4 py-6" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.68);" role="dialog" aria-modal="true" aria-labelledby="detallesimcard-bulk-title">
+                <div id="detallesimcard-bulk-deactivate-modal" class="fixed inset-0 hidden items-center justify-center px-4 py-6" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.78);" role="dialog" aria-modal="true" aria-labelledby="detallesimcard-bulk-title">
                     <div class="w-full rounded-lg overflow-hidden rounded-[1.25rem] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.16)] flex flex-col max-h-[85vh]" style="max-width: 980px;">
                         <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
                             <h3 id="detallesimcard-bulk-title" class="text-lg font-semibold text-slate-800">Dar de baja números telefónicos</h3>
@@ -925,7 +1021,7 @@
             <!-- Carga de numeros nuevos -->
             @if(!empty($importPreviewRoute) && !empty($importProcessRoute))
                 <div id="detallesimcard-import-modal" class="fixed inset-0 hidden items-center justify-center px-4" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.78);" role="dialog" aria-modal="true" aria-labelledby="detallesimcard-import-title">
-                    <div class="w-full max-w-2xl max-h-[calc(100vh-4rem)] overflow-hidden rounded-[1.25rem] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.16)]">
+                    <div class="w-full rounded-lg max-w-2xl max-h-[calc(100vh-4rem)] overflow-hidden rounded-[1.25rem] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.16)]">
                         <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
                             <h3 id="detallesimcard-import-title" class="text-lg font-semibold text-slate-800">Cargar números por archivo</h3>
                             <button type="button" data-close-detallesimcard-modal="import" class="rounded-full ml-auto p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700">
@@ -1091,6 +1187,7 @@
         }
 
         #list-select-all:checked,
+        #list-select-all:indeterminate,
         .list-row-checkbox:checked {
             accent-color: #c1121f !important;
             background-color: #c1121f !important;
@@ -1197,7 +1294,7 @@
                     return;
                 }
                 closeOpenDropdowns();
-                openDeleteConfirmation(bulkDeleteForm, '¿Estás seguro? Esta acción eliminará los registros seleccionados y no se podrá deshacer.');
+                openDeleteConfirmation(bulkDeleteForm, '¿Estás seguro? Esta acción eliminará los registros seleccionados y no se podrá deshacer.', 'bulk-delete');
             };
 
             document.addEventListener('change', (event) => {
@@ -1242,13 +1339,39 @@
                 updateBulkActionState();
             };
 
-            const buildUrl = () => {
-                const params = new URLSearchParams(new FormData(form));
+            const getRequestParams = () => {
+                const formData = new FormData(form);
+                const params = new URLSearchParams();
+                const dateIsoValues = {};
+
+                for (const [key, value] of formData.entries()) {
+                    if (key.endsWith('_iso')) {
+                        const visibleKey = key.slice(0, -4);
+                        if (String(value).trim() !== '') {
+                            dateIsoValues[visibleKey] = value;
+                        }
+                        continue;
+                    }
+                    params.append(key, value);
+                }
+
+                Object.entries(dateIsoValues).forEach(([visibleKey, value]) => {
+                    if (String(value).trim() !== '') {
+                        params.set(visibleKey, value);
+                    }
+                });
+
                 for (const [key, value] of Array.from(params.entries())) {
                     if (value === null || String(value).trim() === '') {
                         params.delete(key);
                     }
                 }
+
+                return params;
+            };
+
+            const buildUrl = () => {
+                const params = getRequestParams();
                 const pageSizeElement = getPageSizeElement();
                 if (pageSizeElement && pageSizeElement.value) {
                     params.set('perPage', pageSizeElement.value);
@@ -1263,12 +1386,7 @@
                     return;
                 }
 
-                const params = new URLSearchParams(new FormData(form));
-                for (const [key, value] of Array.from(params.entries())) {
-                    if (value === null || String(value).trim() === '') {
-                        params.delete(key);
-                    }
-                }
+                const params = getRequestParams();
 
                 form.querySelectorAll('[data-export-link]').forEach((link) => {
                     const baseHref = link.getAttribute('data-export-base') || link.href;
@@ -1378,7 +1496,7 @@
             const positionMenu = (menu, toggle) => {
                 const rect = toggle.getBoundingClientRect();
                 const menuWidth = menu.offsetWidth;
-                let left = rect.left;
+                let left = rect.right - menuWidth;
 
                 const viewportMargin = 12; // px
                 if (left + menuWidth > window.innerWidth - viewportMargin) {
@@ -1406,6 +1524,7 @@
                     window.visualViewport.addEventListener('scroll', handler);
                 }
                 window.addEventListener('resize', handler);
+                window.addEventListener('scroll', handler, true);
             };
 
             const detachMenuReposition = (menu) => {
@@ -1417,6 +1536,7 @@
                     window.visualViewport.removeEventListener('scroll', handler);
                 }
                 window.removeEventListener('resize', handler);
+                window.removeEventListener('scroll', handler, true);
                 if (menu._repositionRaf) cancelAnimationFrame(menu._repositionRaf);
                 delete menu._repositionHandler;
                 delete menu._repositionRaf;
@@ -1656,6 +1776,9 @@
                 wrapper.innerHTML = nextWrapper.innerHTML;
                 restoreIcons();
                 initDropdowns();
+                if (window.initLitepickers && typeof window.initLitepickers === 'function') {
+                    window.initLitepickers(wrapper);
+                }
                 init();
             };
 
@@ -2775,7 +2898,7 @@
 
                 if (deleteConfirmationSubmit) {
                     deleteConfirmationSubmit.textContent = 'Eliminar';
-                    deleteConfirmationSubmit.style.background = '#ef4444';
+                    deleteConfirmationSubmit.style.background = '#c71010';
                 }
 
                 activeDeleteMode = '';
@@ -2816,7 +2939,7 @@
                 const relatedList = records.length > 0 ? records.join(', ') : 'sin detalle adicional';
                 const suffix = extraCount > 0 ? ` y otros ${extraCount} más` : '';
 
-                return `Este registro está relacionado con ${relation.count} ${relation.label}${relation.count === 1 ? '' : 'es'}: ${relatedList}${suffix}.`;
+                return `Este registro está relacionado con ${relation.count} ${relation.label}${relation.count === 1 ? '' : 's'}: ${relatedList}${suffix}.`;
             };
 
             const renderDeleteConfirmation = (summary, actionMode) => {
@@ -2856,11 +2979,14 @@
 
                 if (relations.length > 0) {
                     const relationList = document.createElement('div');
-                    relationList.className = 'space-y-3';
+                    relationList.style.display = 'flex';
+                    relationList.style.flexDirection = 'column';
+                    relationList.style.gap = '16px';
 
                     relations.forEach((relation) => {
                         const block = document.createElement('div');
-                        block.className = 'rounded-lg border border-amber-200 bg-white px-4 py-3';
+                        block.className = 'rounded-md border border-amber-800 bg-white px-4 py-3';
+                        block.style.marginBottom = '0';
 
                         const heading = document.createElement('div');
                         heading.className = 'font-semibold text-amber-900';
@@ -2892,7 +3018,7 @@
                     deleteActions.forEach((action) => {
                         const button = document.createElement('button');
                         button.type = 'button';
-                        button.className = 'rounded-xl border px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-50';
+                        button.className = 'rounded-md border px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-50';
                         button.style.background = 'linear-gradient(90deg, #ef4444, #dc2626)';
                         button.textContent = action.label || 'Eliminar con relación';
                         button.onclick = () => {
@@ -2918,7 +3044,7 @@
                 }
 
                 deleteConfirmationSubmit.textContent = isEdit ? 'Guardar cambios' : 'Eliminar';
-                deleteConfirmationSubmit.style.background = isEdit ? '#dc2626' : '#ef4444';
+                deleteConfirmationSubmit.style.background = isEdit ? '#dc2626' : '#c71010';
             };
 
             const openDeleteConfirmation = (form, summary = null, actionMode = 'delete') => {
@@ -3097,6 +3223,9 @@
                 }
                 restoreIcons();
                 initDropdowns();
+                if (window.initLitepickers && typeof window.initLitepickers === 'function') {
+                    window.initLitepickers(document);
+                }
                 closeLocalDropdowns();
                 searchInput = getSearchInput();
                 searchClearBtn = form.querySelector('[data-list-clear-search]');

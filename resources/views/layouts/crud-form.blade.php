@@ -23,12 +23,14 @@
     $quickEstadoField = collect($fields ?? [])->first(fn ($field) => ($field['quickCreateEstado'] ?? false) === true);
     $quickCargoField = collect($fields ?? [])->first(fn ($field) => ($field['quickCreateCargo'] ?? false) === true);
     $quickDispositivoField = collect($fields ?? [])->first(fn ($field) => ($field['quickCreateDispositivo'] ?? false) === true);
+    $quickDetalleListaPrecioField = collect($fields ?? [])->first(fn ($field) => ($field['quickCreateDetalleListaPrecio'] ?? false) === true);
     $hasQuickDireccion = !empty($quickDireccionField);
     $hasQuickContacto = !empty($quickContactoField);
     $hasQuickCredencial = !empty($quickCredencialField);
     $hasQuickEstado = !empty($quickEstadoField);
     $hasQuickCargo = !empty($quickCargoField);
     $hasQuickDispositivo = !empty($quickDispositivoField);
+    $hasQuickDetalleListaPrecio = !empty($quickDetalleListaPrecioField);
 
     $authData = session('erp_auth', []);
     $userRoles = collect($authData['roles'] ?? [])
@@ -91,6 +93,9 @@
             border-radius: 0.35rem;
             background-color: #ffffff;
             color: #0f172a;
+            position: relative;
+            cursor: pointer;
+            user-select: none;
             transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
         }
         .checkbox-object-item:hover {
@@ -183,16 +188,263 @@
             white-space: normal;
             word-break: break-word;
         }
+        .vista-selector-shell {
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: minmax(0, 0.68fr) minmax(390px, 1.32fr);
+            align-items: start;
+        }
+        .vista-selector-panel,
+        .vista-selected-panel {
+            border: 1px solid #dbe2ea;
+            border-radius: 0.50rem;
+            background-color: #ffffff;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+            overflow: hidden;
+        }
+        .vista-selector-search {
+            width: 100%;
+            border: 1px solid #d1d5db;
+            border-radius: 0.8rem;
+            background-color: #ffffff;
+            color: #0f172a;
+            padding: 0.72rem 0.9rem;
+            font-size: 0.9rem;
+            margin-bottom: 0.85rem;
+        }
+        .vista-selector-list {
+            display: grid;
+            gap: 0.55rem;
+            max-height: 19rem;
+            overflow: auto;
+            padding-right: 0.15rem;
+        }
+        .vista-selector-option {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.50rem;
+            background-color: #ffffff;
+            padding: 0.78rem 0.85rem;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+        }
+        .vista-selector-option:hover {
+            border-color: #cbd5e1;
+            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+            transform: translateY(-1px);
+            background-color: #fcfdff;
+        }
+        .vista-selector-option.is-selected {
+            border-color: #e2e8f0;
+            background-color: #ffffff;
+        }
+        .vista-selector-option.is-hidden {
+            display: none;
+        }
+        .vista-selector-option-main {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+            flex: 1 1 auto;
+        }
+        .vista-selector-option-title {
+            font-size: 0.92rem;
+            font-weight: 800;
+            color: #0f172a;
+            line-height: 1.25;
+        }
+        .vista-selector-option-detail {
+            font-size: 0.8rem;
+            color: #64748b;
+            line-height: 1.35;
+        }
+        .vista-selector-option-meta {
+            display: inline-flex;
+            align-items: center;
+            width: fit-content;
+            padding: 0.14rem 0.45rem;
+            background-color: #eef2f7;
+            color: #334155;
+            font-size: 0.72rem;
+            font-weight: 700;
+            border-radius: 0.50rem;
+            box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+            overflow: hidden;
+        }
+        .vista-selector-option-input-wrap {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.2rem;
+            height: 1.2rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 9999px;
+            background-color: #ffffff;
+            flex-shrink: 0;
+            margin-top: 0.15rem;
+        }
+        .vista-selector-option-input-wrap input {
+            position: absolute;
+            inset: 0;
+            margin: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .vista-selector-option-input-box {
+            width: 0.95rem;
+            height: 0.95rem;
+            border-radius: 9999px;
+            border: 1px solid transparent;
+            background-color: #ffffff;
+            position: relative;
+        }
+        .vista-selector-option-input-box::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            margin: auto;
+            width: 0.42rem;
+            height: 0.42rem;
+            border-radius: 9999px;
+            background-color: transparent;
+            transform: scale(0);
+            transition: transform 0.15s ease, background-color 0.15s ease;
+        }
+        .vista-selector-option-input-wrap input:checked + .vista-selector-option-input-box {
+            background-color: #dc2626;
+            border-color: #dc2626;
+        }
+        .vista-selector-option-input-wrap input:checked + .vista-selector-option-input-box::after {
+            background-color: #ffffff;
+            transform: scale(1);
+        }
+        .vista-selector-option-input-wrap input:focus-visible + .vista-selector-option-input-box {
+            box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.15);
+        }
+        .vista-selector-option-check {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            width: 100%;
+            cursor: pointer;
+        }
+        .vista-selector-option-check input:checked ~ .vista-selector-option-main {
+            color: inherit;
+        }
+        .vista-selector-panel {
+            padding: 0.95rem;
+        }
+        .vista-selector-title,
+        .vista-selected-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            font-size: 0.88rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 0.7rem;
+        }
+        .vista-selector-help {
+            font-size: 0.78rem;
+            color: #64748b;
+            font-weight: 500;
+        }
+        .vista-selector-select {
+            width: 100%;
+            min-height: 16rem;
+            border-radius: 0.75rem;
+            border: 1px solid #d1d5db;
+            background-color: #ffffff;
+            color: #0f172a;
+            padding: 0.45rem;
+        }
+        .vista-selected-panel {
+            padding: 0.95rem;
+        }
+        .vista-selected-list {
+            display: grid;
+            gap: 0.4rem;
+            max-height: 30rem;
+            overflow: auto;
+            padding-right: 0.15rem;
+        }
+        .vista-selected-head,
+        .vista-selected-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1.35fr) minmax(0, 1.2fr) minmax(110px, 0.55fr) auto;
+            gap: 0.65rem;
+            align-items: center;
+        }
+        .vista-selected-head {
+            padding: 0 0.35rem 0.2rem;
+            color: #64748b;
+            font-size: 0.72rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .vista-selected-row {
+            border: 1px solid #e2e8f0;
+            border-radius: 0.50rem;
+            background-color: #ffffff;
+            padding: 0.7rem 0.8rem;
+        }
+        .vista-selected-row-name {
+            min-width: 0;
+            font-size: 0.9rem;
+            font-weight: 800;
+            color: #0f172a;
+            line-height: 1.25;
+        }
+        .vista-selected-row-detail,
+        .vista-selected-row-state {
+            min-width: 0;
+            font-size: 0.8rem;
+            line-height: 1.35;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .vista-selected-row-state {
+            display: inline-flex;
+            width: fit-content;
+            padding: 0.14rem 0.48rem;
+            border-radius: 0.50rem;
+            background-color: #eef2f7;
+            color: #334155;
+            font-weight: 700;
+        }
+        .vista-selected-empty {
+            border: 1px dashed #cbd5e1;
+            border-radius: 0.50rem;
+            background-color: #f8fafc;
+            color: #64748b;
+            font-size: 0.84rem;
+            padding: 0.8rem 0.9rem;
+        }
+        @media (max-width: 1024px) {
+            .vista-selected-row {
+                grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(96px, 0.55fr) auto;
+            }
+        }
+        @media (max-width: 720px) {
+            .vista-selected-head {
+                display: none;
+            }
+        }
         input.custom-checkbox {
             position: absolute;
-            width: 1px;
-            height: 1px;
-            margin: -1px;
-            padding: 0;
-            overflow: hidden;
-            clip: rect(0, 0, 0, 0);
-            border: 0;
-            white-space: nowrap;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            opacity: 0;
+            cursor: pointer;
+            z-index: 2;
         }
         .custom-checkbox-box {
             width: 1.05rem;
@@ -203,21 +455,32 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            transition: border-color 0.2s ease, background-color 0.2s ease;
             flex-shrink: 0;
+            box-sizing: border-box;
+            position: relative;
+            transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
         }
-        .custom-checkbox-box::before {
-            width: auto;
+        .custom-checkbox-box::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            margin: auto;
+            width: 0.55rem;
+            height: 0.55rem;
+            border-radius: 0.5rem;
+            background-color: transparent;
+            transform: scale(0);
+            transition: transform 0.15s ease, background-color 0.15s ease;
         }
         input.custom-checkbox:checked + .custom-checkbox-box {
-            border-color: #a848487a;
+            border-color: #dc2626;
             background-color: #dc2626;
         }
-        input.custom-checkbox:checked + .custom-checkbox-box::before {
-            border-color: #ffffff;
-            transform: translateY(-1px) rotate(-45deg) scale(1);
+        input.custom-checkbox:checked + .custom-checkbox-box::after {
+            background-color: #ffffff;
+            transform: scale(1);
         }
-        input.custom-checkbox:focus + .custom-checkbox-box {
+        input.custom-checkbox:focus-visible + .custom-checkbox-box {
             box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.15);
         }
         input[type="text"],
@@ -1018,6 +1281,9 @@
                         if (typeof window.updateCredentialRows === 'function') {
                             window.updateCredentialRows();
                         }
+                        if (typeof window.updateVistaSelectorVisibility === 'function') {
+                            window.updateVistaSelectorVisibility();
+                        }
                     });
                 });
 
@@ -1144,6 +1410,50 @@
                         toggle.querySelector('.permissions-card-toggle-icon').textContent = isCollapsed ? '▾' : '▴';
                     }
                 });
+            };
+
+            var updateVistaSelectorVisibility = function () {
+                var vistaSelectorFieldset = form.querySelector('fieldset[data-vista-selector-fieldset]');
+                if (!vistaSelectorFieldset) {
+                    return;
+                }
+
+                var ticketsVerInput = form.querySelector('input[name="permissions[tickets][ver]"]');
+                var shouldShow = !!(ticketsVerInput && ticketsVerInput.checked);
+                vistaSelectorFieldset.classList.toggle('hidden', !shouldShow);
+            };
+
+            var syncTicketsViewModeExclusive = function () {
+                var ticketsVerInput = form.querySelector('input[name="permissions[tickets][ver]"]');
+                var ticketsVerFlujoInput = form.querySelector('input[name="permissions[tickets][ver_flujo]"]');
+
+                if (!ticketsVerInput || !ticketsVerFlujoInput) {
+                    return;
+                }
+
+                [ticketsVerInput, ticketsVerFlujoInput].forEach(function (input) {
+                    if (input.dataset.exclusiveApplied === 'true') {
+                        input.disabled = input.dataset.exclusiveBaseDisabled === 'true';
+                        input.dataset.exclusiveApplied = 'false';
+                    }
+
+                    input.dataset.exclusiveBaseDisabled = input.disabled ? 'true' : 'false';
+                });
+
+                if (ticketsVerInput.checked) {
+                    ticketsVerFlujoInput.checked = false;
+                    ticketsVerFlujoInput.disabled = true;
+                    ticketsVerFlujoInput.dataset.exclusiveApplied = 'true';
+                    return;
+                }
+
+                if (ticketsVerFlujoInput.checked) {
+                    ticketsVerInput.checked = false;
+                    ticketsVerInput.disabled = true;
+                    ticketsVerInput.dataset.exclusiveApplied = 'true';
+                }
+
+                updateVistaSelectorVisibility();
             };
 
             var form = document.getElementById('main-crud-form');
@@ -1353,6 +1663,8 @@
                         updatePermissionCardExpansion();
                         syncModuleToggleStates();
                         updateConfiguracionGroupExpansion();
+                        syncTicketsViewModeExclusive();
+                        updateVistaSelectorVisibility();
                         if (typeof window.updateCredentialRows === 'function') {
                             window.updateCredentialRows();
                         }
@@ -1374,6 +1686,8 @@
                             updatePermissionCardExpansion();
                             syncModuleToggleStates();
                             updateConfiguracionGroupExpansion();
+                            syncTicketsViewModeExclusive();
+                            updateVistaSelectorVisibility();
                             if (typeof window.updateCredentialRows === 'function') {
                                 window.updateCredentialRows();
                             }
@@ -1385,6 +1699,8 @@
                         updatePermissionCardExpansion();
                         syncModuleToggleStates();
                         updateConfiguracionGroupExpansion();
+                        syncTicketsViewModeExclusive();
+                        updateVistaSelectorVisibility();
                         if (typeof window.updateCredentialRows === 'function') {
                             window.updateCredentialRows();
                         }
@@ -1419,6 +1735,10 @@
 
                             manualDraftMatrix = cloneMatrix(matrixFromInputs());
                             updatePermissionCardExpansion();
+                            syncTicketsViewModeExclusive();
+                            if (String(this.name || '') === 'permissions[tickets][ver]') {
+                                updateVistaSelectorVisibility();
+                            }
                             if (typeof window.updateCredentialRows === 'function') {
                                 window.updateCredentialRows();
                             }
@@ -1432,6 +1752,7 @@
                 };
 
                 window.updateCredentialRows = updateCredentialRows;
+                window.syncTicketsViewModeExclusive = syncTicketsViewModeExclusive;
 
                 document.querySelectorAll(
                     'input[name="permissions[clientes.cliente][ver]"], input[name="permissions[clientes.cliente][crear]"], input[name="permissions[clientes.cliente][editar]"],' +
@@ -1440,6 +1761,17 @@
                 ).forEach(function (input) {
                     input.addEventListener('change', updateCredentialRows);
                 });
+
+                var ticketsVerInput = form.querySelector('input[name="permissions[tickets][ver]"]');
+                if (ticketsVerInput) {
+                    ticketsVerInput.addEventListener('change', updateVistaSelectorVisibility);
+                    ticketsVerInput.addEventListener('change', syncTicketsViewModeExclusive);
+                }
+
+                var ticketsVerFlujoInput = form.querySelector('input[name="permissions[tickets][ver_flujo]"]');
+                if (ticketsVerFlujoInput) {
+                    ticketsVerFlujoInput.addEventListener('change', syncTicketsViewModeExclusive);
+                }
 
                 if (!isReadOnlyView) {
                     updateCredentialRows();
@@ -1452,6 +1784,8 @@
                 syncModuleToggleStates();
                 updatePermissionCardExpansion();
                 updateConfiguracionGroupExpansion();
+                updateVistaSelectorVisibility();
+                syncTicketsViewModeExclusive();
 
                 form.addEventListener('submit', function (event) {
                     var permissionFieldsets = form.querySelectorAll('fieldset[data-permissions-fieldset]');
@@ -1570,6 +1904,14 @@
                             </div>
                         @endif
 
+                        @if(!empty($topSections) && is_array($topSections))
+                            <div class="mb-8 space-y-6">
+                                @foreach($topSections as $topSection)
+                                    @include($topSection['view'], $topSection['data'] ?? [])
+                                @endforeach
+                            </div>
+                        @endif
+
                         <!-- CAMPOS DINÁMICOS -->
                         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                             @foreach($fields as $field)
@@ -1615,10 +1957,32 @@
                                             @endphp
                                             <div class="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                                                 <label class="block text-sm font-medium text-slate-700">
-                                                    {{ $field['label'] }}
-                                                    @if(($field['required'] ?? false))
-                                                        <span class="text-red-500">*</span>
-                                                    @endif
+                                                    <span class="flex items-center gap-2">
+                                                        <span>
+                                                            {{ $field['label'] }}
+                                                            @if(($field['required'] ?? false))
+                                                                <span class="text-red-500">*</span>
+                                                            @endif
+                                                        </span>
+                                                        @if(($field['quickCreateDetalleListaPrecio'] ?? false) === true)
+                                                            <button
+                                                                type="button"
+                                                                id="quick-detalle-lista-precio-button"
+                                                                data-quick-create-button="true"
+                                                                data-quick-detalle-payload-input="{{ $field['quickCreateDetalleListaPrecioPayloadInput'] ?? 'detalle_lista_precio_payload' }}"
+                                                                data-quick-detalle-list-options='@json($field['quickCreateDetalleListaPrecioOptions'] ?? [])'
+                                                                data-quick-detalle-existing='@json($field['quickCreateDetalleListaPrecioExisting'] ?? [])'
+                                                                data-quick-detalle-almacen-id="{{ $field['quickCreateDetalleListaPrecioAlmacenId'] ?? '' }}"
+                                                                data-quick-detalle-almacen-label="{{ $field['quickCreateDetalleListaPrecioAlmacenLabel'] ?? '' }}"
+                                                                style="background-color: #dc2626 !important; color: #fff !important;"
+                                                                class="ml-1 inline-flex items-center gap-1 rounded border border-red-600 px-2 py-1 text-xs transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-opacity-50 disabled:cursor-not-allowed disabled:opacity-70"
+                                                                {{ ($readOnly ?? false) ? 'disabled' : '' }}
+                                                            >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
+                                                                Crear rápido
+                                                            </button>
+                                                        @endif
+                                                    </span>
                                                 </label>
                                                 @if($fieldHelpText)
                                                     <p id="{{ $field['name'] }}-help" class="text-xs text-slate-500 sm:text-right">{{ $fieldHelpText }}</p>
@@ -1651,6 +2015,13 @@
                                                     oninput="this.setCustomValidity('')"
                                                     placeholder="{{ $field['placeholder'] ?? $field['label'] ?? '' }}"
                                                 >
+                                                @if(($field['quickCreateDetalleListaPrecio'] ?? false) === true)
+                                                    <input
+                                                        type="hidden"
+                                                        name="{{ $field['quickCreateDetalleListaPrecioPayloadInput'] ?? 'detalle_lista_precio_payload' }}"
+                                                        value="{{ old($field['quickCreateDetalleListaPrecioPayloadInput'] ?? 'detalle_lista_precio_payload', '[]') }}"
+                                                    >
+                                                @endif
                                                 @if(isset($field['datalistOptions']) && is_array($field['datalistOptions']))
                                                     <div class="custom-datalist hidden absolute left-0 right-0 z-20 mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
                                                         <div class="custom-datalist-options overflow-y-auto" style="max-height: 150px;"></div>
@@ -1658,7 +2029,9 @@
                                                 @endif
                                             </div>
                                             @if($hasError)
-                                                <p class="mt-1 text-sm text-red-500">{{ $errorMessage }}</p>
+                                                <p class="mt-1 text-sm font-semibold text-red-600" style="color: #b63434;">
+                                                    {{ $errorMessage }}
+                                                </p>
                                             @endif
                                         @break
 
@@ -1846,7 +2219,9 @@
                                                 <input type="hidden" name="{{ $field['name'] }}" value="{{ $fieldValue }}">
                                             @endif
                                             @if($hasError)
-                                                <p class="mt-1 text-sm text-red-500">{{ $errorMessage }}</p>
+                                                <p class="mt-1 text-sm font-semibold text-red-600" style="color: #b63434;">
+                                                    {{ $errorMessage }}
+                                                </p>
                                             @endif
                                         @break
 
@@ -1970,6 +2345,7 @@
                                                         <label class="checkbox-object-item">
                                                             <input 
                                                                 type="checkbox" 
+                                                                class="custom-checkbox"
                                                                 name="{{ $field['name'] }}[]" 
                                                                 value="{{ $optKey }}"
                                                                 @if($isChecked) checked @endif
@@ -1979,8 +2355,8 @@
                                                                     data-role-option="true"
                                                                     data-role-id="{{ $optKey }}"
                                                                     data-role-permissions-matrix='@json(data_get($option, 'permissionMatrix', []))'
+                                                                    data-role-vista-ids='@json(data_get($option, 'vista_ids', []))'
                                                                 @endif
-                                                                class="custom-checkbox"
                                                             >
                                                             <span class="custom-checkbox-box" aria-hidden="true"></span>
                                                             <div class="checkbox-object-content">
@@ -1998,6 +2374,130 @@
                                             </fieldset>
                                         @break
 
+                                        @case('vista-permissions')
+                                            @php
+                                                $vistaOptions = $field['optionsData'] ?? [];
+                                                $selectedVistaIds = is_array($fieldValue) ? array_map('strval', $fieldValue) : [];
+                                                $selectedVistas = collect($vistaOptions)
+                                                    ->filter(fn ($vista) => in_array((string) data_get($vista, $field['optionKey'] ?? 'idvista'), $selectedVistaIds, true))
+                                                    ->values();
+                                            @endphp
+                                            <fieldset class="md:col-span-2 rounded-3xl border border-slate-200 p-4 hidden {{ $hasError ? 'permissions-field-error' : '' }}" data-vista-selector-fieldset>
+                                                <legend class="mb-2 block text-sm font-medium text-slate-700">
+                                                    {{ $field['label'] }}
+                                                    @if(($field['required'] ?? false))
+                                                        <span class="text-red-500">*</span>
+                                                    @endif
+                                                </legend>
+                                                <div class="vista-selector-shell">
+                                                    <div class="vista-selector-panel">
+                                                        <div class="vista-selector-title">
+                                                            <span>Buscar y seleccionar accion</span>
+                                                           <label>
+                                                            <span class="text-sm font-semibold ext-slate-700">Todo</span>
+                                                            <span class="permission-action-checkbox-wrapper">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    class="permission-action-checkbox"
+                                                                    data-vista-select-all
+                                                                    {{ ($readOnly ?? false) ? 'disabled' : '' }}
+                                                                >
+                                                                <span class="permission-action-checkbox-box" aria-hidden="true"></span>
+                                                            </span>
+                                                           </label>
+                                                        </div>
+                                                        <input
+                                                            type="search"
+                                                            class="vista-selector-search"
+                                                            placeholder="Buscar vista..."
+                                                            data-vista-search
+                                                            {{ ($readOnly ?? false) ? 'disabled' : '' }}
+                                                        >
+                                                        <div class="vista-selector-list" data-vista-selector-list>
+                                                            @forelse($vistaOptions as $vista)
+                                                                @php
+                                                                    $vistaId = data_get($vista, $field['optionKey'] ?? 'idvista');
+                                                                    $vistaName = data_get($vista, $field['optionLabel'] ?? 'nombre');
+                                                                    $vistaDetail = data_get($vista, 'detalle', '');
+                                                                    $vistaState = data_get($vista, 'estado', null);
+                                                                    $vistaStateLabel = trim((string) $vistaState);
+                                                                    if ($vistaStateLabel !== '' && !in_array(mb_strtolower($vistaStateLabel), ['activo', 'inactivo'], true)) {
+                                                                        $vistaStateLabel = $vistaStateLabel === '1' ? 'Activo' : ($vistaStateLabel === '0' ? 'Inactivo' : ucfirst(mb_strtolower($vistaStateLabel)));
+                                                                    }
+                                                                    $vistaText = mb_strtolower(trim($vistaName . ' ' . $vistaDetail . ' ' . $vistaStateLabel));
+                                                                    $isSelected = in_array((string) $vistaId, $selectedVistaIds, true);
+                                                                @endphp
+                                                                <label class="vista-selector-option {{ $isSelected ? 'is-selected' : '' }}" data-vista-option data-vista-text="{{ $vistaText }}" data-vista-name="{{ e($vistaName) }}" data-vista-detail="{{ e($vistaDetail) }}" data-vista-state="{{ e($vistaStateLabel) }}">
+                                                                    <span class="vista-selector-option-input-wrap" aria-hidden="true">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            name="vista_permissions[]"
+                                                                            value="{{ $vistaId }}"
+                                                                            @if($isSelected) checked @endif
+                                                                            {{ ($readOnly ?? false) ? 'disabled' : '' }}
+                                                                            data-vista-checkbox
+                                                                        >
+                                                                        <span class="vista-selector-option-input-box"></span>
+                                                                    </span>
+                                                                    <div class="vista-selector-option-main">
+                                                                        <span class="vista-selector-option-title">{{ $vistaName }}</span>
+                                                                        @if($vistaDetail)
+                                                                            <span class="vista-selector-option-detail">{{ $vistaDetail }}</span>
+                                                                        @endif
+                                                                        @if($vistaStateLabel !== '')
+                                                                            <span class="vista-selector-option-meta">Estado {{ $vistaStateLabel }}</span>
+                                                                        @endif
+                                                                    </div>
+                                                                </label>
+                                                            @empty
+                                                                <div class="vista-selected-empty">
+                                                                    No hay vistas registradas.
+                                                                </div>
+                                                            @endforelse
+                                                        </div>
+                                                    </div>
+                                                    <div class="vista-selected-panel">
+                                                        <div class="vista-selected-title">
+                                                            <span>Seleccionadas</span>
+                                                            <span class="vista-selector-help">Se guardarán solo estas vistas</span>
+                                                        </div>
+                                                        <div class="vista-selected-list" data-vista-selected-list>
+                                                            <div class="vista-selected-head">
+                                                                <span>Vista</span>
+                                                                <span>Detalle</span>
+                                                                <span>Estado</span>
+                                                            </div>
+                                                            @forelse($selectedVistas as $vista)
+                                                                @php
+                                                                    $vistaId = data_get($vista, $field['optionKey'] ?? 'idvista');
+                                                                    $vistaName = data_get($vista, $field['optionLabel'] ?? 'nombre');
+                                                                    $vistaDetail = data_get($vista, 'detalle', '');
+                                                                    $vistaState = data_get($vista, 'estado', null);
+                                                                    $vistaStateLabel = trim((string) $vistaState);
+                                                                    if ($vistaStateLabel !== '' && !in_array(mb_strtolower($vistaStateLabel), ['activo', 'inactivo'], true)) {
+                                                                        $vistaStateLabel = $vistaStateLabel === '1' ? 'Activo' : ($vistaStateLabel === '0' ? 'Inactivo' : ucfirst(mb_strtolower($vistaStateLabel)));
+                                                                    }
+                                                                    $vistaText = mb_strtolower(trim($vistaName . ' ' . $vistaDetail . ' ' . $vistaStateLabel));
+                                                                @endphp
+                                                                <div class="vista-selected-row" data-vista-item="{{ $vistaId }}" data-vista-text="{{ $vistaText }}">
+                                                                    <div class="vista-selected-row-name">{{ $vistaName }}</div>
+                                                                    <div class="vista-selected-row-detail">{{ $vistaDetail ?: '-' }}</div>
+                                                                    <div class="vista-selected-row-state">{{ $vistaStateLabel ?: '-' }}</div>
+                                                                </div>
+                                                            @empty
+                                                                <div class="vista-selected-empty" data-vista-empty>
+                                                                    Todavía no has seleccionado ninguna vista.
+                                                                </div>
+                                                            @endforelse
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                @if($hasError)
+                                                    <p class="mt-1 text-sm text-red-500">{{ $errorMessage }}</p>
+                                                @endif
+                                            </fieldset>
+                                        @break
+
                                         @case('permissions-matrix')
                                             @php
                                                 $permissionModules = $field['modules'] ?? [];
@@ -2005,13 +2505,6 @@
                                                 $permissionValue = is_array($fieldValue) ? $fieldValue : [];
                                                 $lockedByRole = ($field['lockedByRole'] ?? false) === true;
                                                 $configuracionGroupDefinitions = [
-                                                    'Almacen' => [
-                                                        'configuracion.marca',
-                                                        'configuracion.unidad_medida',
-                                                        'configuracion.tipo_pedido',
-                                                        'configuracion.tecnologia',
-                                                        'configuracion.lista_precio',
-                                                    ],
                                                     'Cliente' => [
                                                         'configuracion.ubigeo',
                                                         'configuracion.estado',
@@ -2037,15 +2530,20 @@
                                                     'Plataforma' => [
                                                         'configuracion.tipo_plataforma',
                                                         'configuracion.plataforma',
+                                                    ],
+                                                    'Almacén' => [
+                                                        'configuracion.detalle_lista_precio',
+                                                        'configuracion.empresapropietaria',
+                                                        'configuracion.elemento_almacen',
+                                                        'configuracion.lista_precio',
+                                                        'configuracion.marca',
+                                                        'configuracion.modelo',
+                                                        'configuracion.tecnologia',
                                                         'configuracion.tipo_elemento',
+                                                        'configuracion.tipo_pedido',
+                                                        'configuracion.unidad_medida',
                                                     ],
-                                                    'Sistema' => [
-                                                        'configuracion.vista',
-                                                        'configuracion.flujo',
-                                                        'configuracion.flujoregla',
-                                                        'configuracion.historialflujo',
-                                                    ],
-                                                    'Ticket' => [
+                                                    'Gestion' => [
                                                         'configuracion.tipo_operacion',
                                                     ],
                                                     'Vehículos' => [
@@ -2166,10 +2664,15 @@
                                                                                     </div>
                                                                                     <div class="permissions-config-group-body">
                                                                                     <table class="permissions-card-table">
+                                                                                        @php
+                                                                                            $tablePermissionActions = collect($permissionActions)
+                                                                                                ->except('ver_flujo')
+                                                                                                ->all();
+                                                                                        @endphp
                                                                                         <thead>
                                                                                             <tr>
                                                                                                 <th>Modulo</th>
-                                                                                                @foreach($permissionActions as $actionLabel)
+                                                                                                @foreach($tablePermissionActions as $actionLabel)
                                                                                                     <th>{{ $actionLabel }}</th>
                                                                                                 @endforeach
                                                                                             </tr>
@@ -2178,6 +2681,7 @@
                                                                                             @foreach($configGroup['submodules'] as $subKey => $subLabel)
                                                                                                 @php
                                                                                                     $isCredentialRow = $subKey === 'clientes.credenciales';
+                                                                                                    $isAuditoriaRow = $subKey === 'configuracion.auditoria';
                                                                                                     $clienteActions = $permissionValue['clientes.cliente'] ?? [];
                                                                                                     $clienteVer = !empty($clienteActions['ver']);
                                                                                                     $clienteCrear = !empty($clienteActions['crear']);
@@ -2187,10 +2691,14 @@
                                                                                                 @endphp
                                                                                                 <tr data-submodule="{{ $subKey }}" data-parent-module="configuracion" class="{{ $isCredentialRow ? 'credential-permission-row' : '' }} {{ $credentialDisabled ? 'credential-row-disabled' : '' }}">
                                                                                                     <td>{{ $configDisplayLabel }}</td>
-                                                                                                    @foreach($permissionActions as $actionKey => $actionLabel)
+                                                                                                    @foreach($tablePermissionActions as $actionKey => $actionLabel)
                                                                                                         @php
                                                                                                             $isChecked = !empty($permissionValue[$subKey][$actionKey]);
+                                                                                                            $isHiddenAction = $isAuditoriaRow && $actionKey !== 'ver';
                                                                                                         @endphp
+                                                                                                        @if($isHiddenAction)
+                                                                                                            <td class="permissions-action-cell"></td>
+                                                                                                        @else
                                                                                                         <td class="permissions-action-cell">
                                                                                                             <label class="permission-action-checkbox-wrapper">
                                                                                                                 <input
@@ -2205,6 +2713,7 @@
                                                                                                                 <span class="permission-action-checkbox-box" aria-hidden="true"></span>
                                                                                                             </label>
                                                                                                         </td>
+                                                                                                @endif
                                                                                                     @endforeach
                                                                                                 </tr>
                                                                                             @endforeach
@@ -2216,10 +2725,21 @@
                                                                         </div>
                                                                     @else
                                                                         <table class="permissions-card-table">
+                                                                            @php
+                                                                                $tablePermissionActions = collect($permissionActions);
+                                                                                if ($moduleEntry['moduleKey'] === 'tickets') {
+                                                                                    // Para el módulo Gestiones (tickets) no mostramos Editar/Eliminar
+                                                                                    $tablePermissionActions = $tablePermissionActions->except(['editar', 'eliminar']);
+                                                                                } else {
+                                                                                    // Para el resto removemos la columna "Ver flujo" cuando no aplica
+                                                                                    $tablePermissionActions = $tablePermissionActions->except('ver_flujo');
+                                                                                }
+                                                                                $tablePermissionActions = $tablePermissionActions->all();
+                                                                            @endphp
                                                                             <thead>
                                                                                 <tr>
                                                                                     <th>Modulo</th>
-                                                                                    @foreach($permissionActions as $actionLabel)
+                                                                                    @foreach($tablePermissionActions as $actionLabel)
                                                                                         <th>{{ $actionLabel }}</th>
                                                                                     @endforeach
                                                                                 </tr>
@@ -2228,9 +2748,11 @@
                                                                                 @if($moduleEntry['hasSubmodules'])
                                                                                     @foreach($moduleEntry['submodules'] as $subKey => $subLabel)
                                                                                         @php
+                                                                                            $isHistorialFlujoRow = $moduleEntry['moduleKey'] === 'sistema' && $subKey === 'sistema.historialflujo';
                                                                                             $isCredentialRow = $subKey === 'clientes.credenciales';
                                                                                             $isDeviceRow = $subKey === 'vehiculos.dispositivo_cliente' || $subKey === 'dispositivo_cliente';
                                                                                             $isLineasChildRow = in_array($subKey, ['lineas_chips.cargar_numeros', 'lineas_chips.bajar_numeros'], true);
+                                                                                            $isTicketsRow = $subKey === 'tickets';
                                                                                             $clienteActions = $permissionValue['clientes.cliente'] ?? [];
                                                                                             $clienteVer = !empty($clienteActions['ver']);
                                                                                             $clienteCrear = !empty($clienteActions['crear']);
@@ -2245,14 +2767,16 @@
                                                                                         @endphp
                                                                                         <tr data-submodule="{{ $subKey }}" data-parent-module="{{ $moduleEntry['moduleKey'] }}" data-dependency="{{ $isLineasChildRow ? 'lineas_chips.detallesimcard' : '' }}" class="{{ $isConditionalRow ? 'credential-permission-row' : '' }} {{ $isLineasChildRow ? 'dependent-permission-row' : '' }} {{ $rowDisabled ? 'credential-row-disabled' : '' }}">
                                                                                             <td>{{ $subLabel }}</td>
-                                                                                            @foreach($permissionActions as $actionKey => $actionLabel)
+                                                                                            @foreach($tablePermissionActions as $actionKey => $actionLabel)
                                                                                                 @php
                                                                                                     $isEditForbidden = in_array($subKey, ['lineas_chips.detallesimcard', 'lineas_chips.numero_dispositivo'], true) && $actionKey === 'editar';
+                                                                                                    $isDeleteForbidden = $isTicketsRow && in_array($actionKey, ['editar', 'eliminar'], true);
                                                                                                     $isVerOnlyRow = in_array($subKey, ['lineas_chips.cargar_numeros', 'lineas_chips.bajar_numeros'], true);
+                                                                                                    $isHistorialFlujoHidden = $isHistorialFlujoRow && $actionKey !== 'ver';
                                                                                                     $isActionHidden = $isVerOnlyRow && $actionKey !== 'ver';
                                                                                                     $isChecked = !empty($permissionValue[$subKey][$actionKey]);
                                                                                                 @endphp
-                                                                                                @if($isEditForbidden || $isActionHidden)
+                                                                                                @if($isEditForbidden || $isDeleteForbidden || $isActionHidden || $isHistorialFlujoHidden)
                                                                                                     <td class="permissions-action-cell"></td>
                                                                                                 @else
                                                                                                     <td class="permissions-action-cell">
@@ -2263,6 +2787,7 @@
                                                                                                                 name="permissions[{{ $subKey }}][{{ $actionKey }}]"
                                                                                                                 value="1"
                                                                                                                 @if($isChecked) checked @endif
+                                                                                                                @if($subKey === 'tickets' && $actionKey === 'ver') data-vista-selector-toggle="true" @endif
                                                                                                                 {{ ($readOnly ?? false || $rowDisabled || $lockedByRole) ? 'disabled' : '' }}
                                                                                                             >
                                                                                                             <span class="permission-action-checkbox-box" aria-hidden="true"></span>
@@ -2275,10 +2800,16 @@
                                                                                 @else
                                                                                     <tr>
                                                                                         <td class="permissions-module-label">{{ $moduleEntry['moduleLabel'] }}</td>
-                                                                                        @foreach($permissionActions as $actionKey => $actionLabel)
+                                                                                        @foreach($tablePermissionActions as $actionKey => $actionLabel)
                                                                                             @php
                                                                                                 $isChecked = !empty($permissionValue[$moduleEntry['moduleKey']][$actionKey]);
+                                                                                                $isTicketsModule = $moduleEntry['moduleKey'] === 'tickets';
+                                                                                                $isAuditoriaModule = $moduleEntry['moduleKey'] === 'configuracion.auditoria';
+                                                                                                $isHiddenAction = ($isTicketsModule && in_array($actionKey, ['editar', 'eliminar'], true)) || ($isAuditoriaModule && $actionKey !== 'ver');
                                                                                             @endphp
+                                                                                            @if($isHiddenAction)
+                                                                                                <td class="permissions-action-cell"></td>
+                                                                                            @else
                                                                                             <td class="permissions-action-cell">
                                                                                                 <label class="permission-action-checkbox-wrapper">
                                                                                                     <input
@@ -2292,6 +2823,7 @@
                                                                                                     <span class="permission-action-checkbox-box" aria-hidden="true"></span>
                                                                                                 </label>
                                                                                             </td>
+                                                                                            @endif
                                                                                         @endforeach
                                                                                     </tr>
                                                                                 @endif
@@ -2356,7 +2888,7 @@
                                                     <div class="file-input-message text-sm mt-2 hidden" style="color:#16a34a"></div>
                                                 </div>
                                                 @if($hasError)
-                                                    <p class="mt-1 text-sm text-red-500">{{ $errorMessage }}</p>
+                                                    <p class="mt-1 text-sm text-red-500" style="color: #c71010;">{{ $errorMessage }}</p>
                                                 @endif
                                             @break
 
@@ -2391,6 +2923,14 @@
                                 </div>
                             @endforeach
                         </div>
+
+                        @if(!empty($extraSections) && is_array($extraSections))
+                            <div class="mt-8 space-y-6">
+                                @foreach($extraSections as $extraSection)
+                                    @include($extraSection['view'], $extraSection['data'] ?? [])
+                                @endforeach
+                            </div>
+                        @endif
 
                         <!-- Listado de clientes asociados al grupo (solo lectura) -->
                         @if(isset($clientes) && count($clientes) > 0)
@@ -2477,7 +3017,7 @@
                                     </svg>
                                     Guardando datos...
                                 </span>
-                                <a href="{{ $backRoute }}" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 [&:hover:not(:disabled)]:dark:bg-darkmode-100/10">
+                                <a href="{{ $backRoute }}" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 [&:hover:not(:disabled)]:dark:bg-darkmode-100/10" style=" border-color: #000000; color: #000000;">
                                     cancelar
                                 </a>
                                 <button type="button" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed bg-primary border-primary text-white dark:border-primary" id="btnEditar" {{ ($lockBlocked ?? false) ? 'disabled' : '' }}>
@@ -2584,7 +3124,7 @@
 
     @if($hasQuickDireccion)
         <div id="quick-direccion-modal" class="fixed inset-0 hidden items-center justify-center px-4 backdrop-blur-sm" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.78);">
-            <div class="w-full rounded-xl bg-white shadow-2xl ring-1 ring-slate-900/10 border-t-4 border-red-600 overflow-hidden" style="max-width: 980px;">
+            <div class="w-full rounded-lg bg-white shadow-2xl ring-1 ring-slate-900/10 border-t-4 border-red-600 overflow-hidden" style="max-width: 980px;">
                 <div class="flex items-start justify-between border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white px-6 py-5">
                     <div>
                         <h3 class="text-lg font-bold text-slate-900">Seleccionar o crear direccion</h3>
@@ -2677,6 +3217,51 @@
                 const countBadge = document.getElementById('quick-direccion-count');
                 let ubigeoTomSelect = null;
 
+                const resetDropdownPosition = (dropdown) => {
+                    if (!dropdown) {
+                        return;
+                    }
+
+                    dropdown.style.top = '';
+                    dropdown.style.right = '';
+                    dropdown.style.bottom = '';
+                    dropdown.style.left = '';
+                    dropdown.style.width = '';
+                    dropdown.style.marginTop = '';
+                    dropdown.style.marginBottom = '';
+                };
+
+                const updateDropdownPosition = (instance) => {
+                    if (!instance || !instance.dropdown || !instance.control) {
+                        return;
+                    }
+
+                    const dropdown = instance.dropdown;
+                    const control = instance.control;
+                    const rect = control.getBoundingClientRect();
+                    const dropdownHeight = dropdown.offsetHeight || dropdown.scrollHeight || 0;
+                    const spaceBelow = window.innerHeight - rect.bottom;
+                    const spaceAbove = rect.top;
+                    const openUp = dropdownHeight > 0 && spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+
+                    resetDropdownPosition(dropdown);
+
+                    if (!openUp) {
+                        return;
+                    }
+
+                    if (instance.settings.dropdownParent === 'body') {
+                        dropdown.style.top = Math.max(window.scrollY + rect.top - dropdownHeight - 4, 0) + 'px';
+                        dropdown.style.left = (rect.left + window.scrollX) + 'px';
+                        dropdown.style.width = rect.width + 'px';
+                    } else {
+                        dropdown.style.top = 'auto';
+                        dropdown.style.bottom = '100%';
+                        dropdown.style.marginTop = '0';
+                        dropdown.style.marginBottom = '0.25rem';
+                    }
+                };
+
                 const initUbigeoTomSelect = () => {
                     if (!ubigeoSelect || typeof window.TomSelect !== 'function') {
                         return;
@@ -2698,6 +3283,14 @@
                                 return '<div>' + escape(data.text) + '</div>';
                             }
                         }
+                    });
+
+                    ubigeoTomSelect.on('dropdown_open', () => {
+                        updateDropdownPosition(ubigeoTomSelect);
+                    });
+
+                    ubigeoTomSelect.on('dropdown_close', () => {
+                        resetDropdownPosition(ubigeoTomSelect.dropdown);
                     });
 
                     const ubigeoWrapper = ubigeoSelect.nextElementSibling;
@@ -3086,7 +3679,7 @@
                     items.forEach((item) => {
                         const row = document.createElement('div');
                         const isSelected = String(selectedDireccionId) === String(item.id);
-                        row.className = 'flex items-center justify-between gap-3 rounded-md border p-2 transition ' +
+                        row.className = 'flex items-center justify-between mb-2 gap-3 rounded-md border p-2 transition ' +
                             (isSelected ? 'border-primary bg-red-50/50 ring-1 ring-inset ring-red-200' : 'border-slate-200 bg-white hover:border-slate-300');
 
                         const text = document.createElement('div');
@@ -3379,9 +3972,61 @@
         </script>
     @endif
 
+    @if($hasQuickDetalleListaPrecio)
+        <div id="quick-detalle-lista-precio-modal" class="fixed inset-0 hidden items-center justify-center px-4 backdrop-blur-sm" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.78);">
+            <div class="w-full rounded-xl bg-white shadow-2xl ring-1 ring-slate-900/10 border-t-4 border-red-600 overflow-hidden" style="max-width: 980px;">
+                <div class="flex items-start justify-between border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white px-6 py-5">
+                    <div>
+                        <h3 class="text-lg font-bold text-slate-900">Crear detalle de lista de precio</h3>
+                        <p class="mt-2 text-sm text-slate-600">Agrega varios precios para este almacén antes de guardar el formulario.</p>
+                    </div>
+                    <button type="button" id="quick-detalle-close" class="ml-auto flex-shrink-0 rounded-lg border-0 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition duration-200 hover:bg-slate-100 hover:text-red-600">
+                        <i data-lucide="x" class="h-5 w-5"></i>
+                    </button>
+                </div>
+
+                <div class="grid gap-5 bg-white p-7 md:grid-cols-2">
+                    <div>
+                        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                            <div class="flex items-center gap-2">
+                                <h4 class="text-sm font-bold text-slate-900">Detalles</h4>
+                                <span id="quick-detalle-pending-count" class="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-600">0</span>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <input type="text" id="quick-detalle-search" placeholder="Buscar lista de precio..." class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 focus:border-red-600 focus:ring-2 focus:ring-red-500/20">
+                        </div>
+                        <div>
+                            <div class="space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700" id="quick-detalle-saved-list" style="max-height: 225px; overflow-y: auto;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <h4 class="mb-4 text-sm font-semibold text-slate-800">Agregar precio rápido</h4>
+                        <form class="space-y-5 rounded-lg gap-4 border border-gray-5 bg-red-50/30 p-4" onsubmit="return false;">
+                            <div class="grid mt-2 gap-4 sm:grid-cols-[1.4fr_0.8fr] mb-4">
+                                <div>
+                                    <label class="mb-2 block text-sm font-medium text-slate-700">Lista de precio *</label>
+                                    <select id="quick-detalle-lista" required class="tom-select tom-select--compact w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"></select>
+                                </div>
+                                <div>
+                                    <label class="mb-2 block text-sm font-medium text-slate-700">Precio *</label>
+                                    <input id="quick-detalle-precio" type="number" min="0" step="0.01" required class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm transition duration-200 focus:border-red-600 focus:ring-2 focus:ring-red-500/20" placeholder="0.00">
+                                </div>
+                            </div>
+                            <div class="mt-6 mb-2 flex items-center justify-end gap-3 border-t border-slate-200 pt-4">
+                                <button type="button" id="quick-detalle-cancel" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-100" style=" border-color: #000000; color: #000000;">Cancelar</button>
+                                <button type="button" id="quick-detalle-add" class="rounded-md border-0 px-4 py-2 text-xs font-semibold text-white shadow-sm transition duration-200" style="background-color: #c1121f; color: #ffffff;">Guardar detalle</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
+
     @if($hasQuickContacto)
         <div id="quick-contacto-modal" class="fixed inset-0 hidden items-center justify-center px-4 backdrop-blur-sm" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.78);">
-            <div class="w-full rounded-xl bg-white shadow-2xl ring-1 ring-slate-900/10 border-t-4 border-red-600 overflow-hidden" style="max-width: 980px;">
+            <div class="w-full rounded-lg bg-white shadow-2xl ring-1 ring-slate-900/10 border-t-4 border-red-600 overflow-hidden" style="max-width: 980px;">
                 <div class="flex items-start justify-between border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white px-6 py-5">
                     <div>
                         <h3 class="text-lg font-bold text-slate-900">Seleccionar o crear contacto</h3>
@@ -3913,7 +4558,7 @@
                         const isSelected = String(selectedContactoId) === id;
 
                         const row = document.createElement('div');
-                        row.className = 'flex items-center justify-between gap-3 rounded-md border p-2 transition ' +
+                        row.className = 'flex items-center justify-between mb-2 gap-3 rounded-md border p-2 transition ' +
                             (isSelected ? 'border-primary bg-red-50/50' : 'border-slate-200 bg-white hover:border-slate-300');
 
                         const text = document.createElement('div');
@@ -4239,7 +4884,7 @@
 
     @if($hasQuickCredencial)
         <div id="quick-credencial-modal" class="fixed inset-0 hidden items-center justify-center px-4 backdrop-blur-sm" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.78);">
-            <div class="w-full rounded-xl bg-white shadow-2xl ring-1 ring-slate-900/10 border-t-4 border-red-600 overflow-hidden" style="max-width: 980px;">
+            <div class="w-full rounded-lg bg-white shadow-2xl ring-1 ring-slate-900/10 border-t-4 border-red-600 overflow-hidden" style="max-width: 980px;">
                 <div class="flex items-start justify-between border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white px-6 py-5">
                     <div>
                         <h3 class="text-lg font-bold text-slate-900">Seleccionar o crear credencial</h3>
@@ -4809,7 +5454,7 @@
                         const isSelected = String(selectedCredencialId) === id;
 
                         const row = document.createElement('div');
-                        row.className = 'flex items-center justify-between gap-3 rounded-md border p-2 transition ' +
+                        row.className = 'flex items-center justify-between mb-2 gap-3 rounded-md border p-2 transition ' +
                             (isSelected ? 'border-primary bg-red-50/50' : 'border-slate-200 bg-white hover:border-slate-300');
 
                         const text = document.createElement('div');
@@ -5243,6 +5888,155 @@
                 window.syncRolePermissionsLock();
             }
 
+            const vistaSelectorFieldsets = document.querySelectorAll('[data-vista-selector-fieldset]');
+            const syncVistaSelector = (fieldset) => {
+                if (!fieldset) {
+                    return;
+                }
+
+                if (fieldset.dataset.vistaSelectorReady === '1') {
+                    return;
+                }
+                fieldset.dataset.vistaSelectorReady = '1';
+
+                const search = fieldset.querySelector('[data-vista-search]');
+                const options = Array.from(fieldset.querySelectorAll('[data-vista-option]'));
+                const selectedList = fieldset.querySelector('[data-vista-selected-list]');
+                const checks = Array.from(fieldset.querySelectorAll('[data-vista-checkbox]'));
+                const selectAll = fieldset.querySelector('[data-vista-select-all]');
+                const roleInputs = Array.from(document.querySelectorAll('input[name="role_ids[]"], input[name="role_ids"]'));
+                if (!selectedList || options.length === 0) {
+                    return;
+                }
+
+                const renderSelected = () => {
+                    const selectedOptions = options.filter((option) => {
+                        const checkbox = option.querySelector('[data-vista-checkbox]');
+                        return checkbox?.checked;
+                    });
+
+                    selectedList.innerHTML = '';
+
+                    if (selectedOptions.length === 0) {
+                        const empty = document.createElement('div');
+                        empty.className = 'vista-selected-empty';
+                        empty.dataset.vistaEmpty = 'true';
+                        empty.textContent = 'Todavía no has seleccionado ninguna vista.';
+                        selectedList.appendChild(empty);
+                        return;
+                    }
+
+                    selectedOptions.forEach((option) => {
+                        const checkbox = option.querySelector('[data-vista-checkbox]');
+                        const item = document.createElement('div');
+                        item.className = 'vista-selected-row';
+                        item.dataset.vistaItem = checkbox?.value || '';
+
+                        const nameCell = document.createElement('div');
+                        nameCell.className = 'vista-selected-row-name';
+                        nameCell.textContent = option.dataset.vistaName || (option.querySelector('.vista-selector-option-title')?.textContent || checkbox?.value || '');
+
+                        const detailCell = document.createElement('div');
+                        detailCell.className = 'vista-selected-row-detail';
+                        detailCell.textContent = String(option.dataset.vistaDetail || '').trim() || '-';
+
+                        const stateCell = document.createElement('div');
+                        stateCell.className = 'vista-selected-row-state';
+                        stateCell.textContent = String(option.dataset.vistaState || '').trim() || '-';
+
+                        item.appendChild(nameCell);
+                        item.appendChild(detailCell);
+                        item.appendChild(stateCell);
+                        selectedList.appendChild(item);
+                    });
+
+                    if (selectAll) {
+                        selectAll.checked = selectedOptions.length === options.length;
+                        selectAll.indeterminate = selectedOptions.length > 0 && selectedOptions.length < options.length;
+                    }
+                };
+
+                const applyFilter = () => {
+                    const query = String(search?.value || '').trim().toLowerCase();
+                    options.forEach((option) => {
+                        const text = String(option.dataset.vistaText || '').toLowerCase();
+                        option.classList.toggle('is-hidden', query !== '' && !text.includes(query));
+                    });
+                };
+
+                const sortOptionsBySelection = () => {
+                    const selectorList = fieldset.querySelector('[data-vista-selector-list]');
+                    if (!selectorList) return;
+
+                    const selected = [];
+                    const unselected = [];
+
+                    options.forEach((option) => {
+                        const checkbox = option.querySelector('[data-vista-checkbox]');
+                        if (checkbox?.checked) {
+                            selected.push(option);
+                        } else {
+                            unselected.push(option);
+                        }
+                    });
+
+                    // Reordenar: seleccionados primero, luego no seleccionados
+                    const sorted = [...selected, ...unselected];
+                    sorted.forEach((option) => {
+                        selectorList.appendChild(option);
+                    });
+                };
+
+                const syncOptionState = (option) => {
+                    const checkbox = option.querySelector('[data-vista-checkbox]');
+                    option.classList.toggle('is-selected', !!checkbox?.checked);
+                };
+
+                const clearRoleSelection = () => {
+                    if (!checks.some((checkbox) => checkbox.checked)) {
+                        return;
+                    }
+
+                    roleInputs.forEach((roleInput) => {
+                        if (roleInput.checked) {
+                            roleInput.checked = false;
+                            roleInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    });
+                };
+
+                checks.forEach((checkbox) => {
+                    checkbox.addEventListener('change', () => {
+                        const option = checkbox.closest('[data-vista-option]');
+                        if (option) {
+                            syncOptionState(option);
+                        }
+                        sortOptionsBySelection();
+                        renderSelected();
+                        clearRoleSelection();
+                    });
+                });
+
+                if (selectAll) {
+                    selectAll.addEventListener('change', () => {
+                        clearRoleSelection();
+                    });
+                }
+
+                options.forEach(syncOptionState);
+                if (search) {
+                    search.addEventListener('input', applyFilter);
+                }
+
+                applyFilter();
+                sortOptionsBySelection();
+                renderSelected();
+            };
+
+            vistaSelectorFieldsets.forEach((fieldset) => {
+                syncVistaSelector(fieldset);
+            });
+
             // Encontrar y cambiar el botón original de "Editar" por uno con tipo submit de "Guardar cambios"
             const buttonsDiv = document.querySelector('.mt-6.flex.items-center.justify-end.gap-2');
             
@@ -5262,6 +6056,212 @@
     @endif
 
     <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const vistaSelectorFieldsets = document.querySelectorAll('[data-vista-selector-fieldset]');
+
+            vistaSelectorFieldsets.forEach((fieldset) => {
+                if (!fieldset || fieldset.dataset.vistaSelectorReady === '1') {
+                    return;
+                }
+
+                fieldset.dataset.vistaSelectorReady = '1';
+
+                const search = fieldset.querySelector('[data-vista-search]');
+                const options = Array.from(fieldset.querySelectorAll('[data-vista-option]'));
+                const selectedList = fieldset.querySelector('[data-vista-selected-list]');
+                const checks = Array.from(fieldset.querySelectorAll('[data-vista-checkbox]'));
+                const selectAll = fieldset.querySelector('[data-vista-select-all]');
+                const roleInputs = Array.from(document.querySelectorAll('input[name="role_ids[]"], input[name="role_ids"]'));
+
+                if (!selectedList || options.length === 0) {
+                    return;
+                }
+
+                const getSelectedRoleVistaIds = () => {
+                    const selectedRole = roleInputs.find((input) => input.checked);
+                    if (!selectedRole) {
+                        return [];
+                    }
+
+                    try {
+                        const ids = JSON.parse(selectedRole.dataset.roleVistaIds || '[]');
+                        return Array.isArray(ids) ? ids.map((id) => String(id)) : [];
+                    } catch (error) {
+                        return [];
+                    }
+                };
+
+                const syncSelectedVistasFromRole = () => {
+                    const selectedIds = getSelectedRoleVistaIds();
+                    const selectedSet = new Set(selectedIds);
+
+                    checks.forEach((checkbox) => {
+                        const shouldCheck = selectedSet.has(String(checkbox.value));
+                        checkbox.checked = shouldCheck;
+                        const option = checkbox.closest('[data-vista-option]');
+                        if (option) {
+                            option.classList.toggle('is-selected', shouldCheck);
+                        }
+                    });
+
+                    if (selectAll) {
+                        const checkedCount = checks.filter((checkbox) => checkbox.checked).length;
+                        selectAll.checked = checkedCount === checks.length;
+                        selectAll.indeterminate = checkedCount > 0 && checkedCount < checks.length;
+                    }
+
+                    sortOptionsBySelection();
+                    renderSelected();
+                };
+
+                const renderSelected = () => {
+                    const selectedOptions = options.filter((option) => {
+                        const checkbox = option.querySelector('[data-vista-checkbox]');
+                        return checkbox?.checked;
+                    });
+
+                    selectedList.innerHTML = '';
+
+                    if (selectedOptions.length === 0) {
+                        const empty = document.createElement('div');
+                        empty.className = 'vista-selected-empty';
+                        empty.dataset.vistaEmpty = 'true';
+                        empty.textContent = 'Todavía no has seleccionado ninguna vista.';
+                        selectedList.appendChild(empty);
+                        return;
+                    }
+
+                    const head = document.createElement('div');
+                    head.className = 'vista-selected-head';
+                    head.innerHTML = '<span>Vista</span><span>Detalle</span><span>Estado</span><span></span>';
+                    selectedList.appendChild(head);
+
+                    selectedOptions.forEach((option) => {
+                        const checkbox = option.querySelector('[data-vista-checkbox]');
+                        const row = document.createElement('div');
+                        row.className = 'vista-selected-row';
+                        row.dataset.vistaItem = checkbox?.value || '';
+                        row.dataset.vistaText = String(option.dataset.vistaText || '');
+
+                        const nameCell = document.createElement('div');
+                        nameCell.className = 'vista-selected-row-name';
+                        nameCell.textContent = option.dataset.vistaName || (option.querySelector('.vista-selector-option-title')?.textContent || checkbox?.value || '');
+
+                        const detailCell = document.createElement('div');
+                        detailCell.className = 'vista-selected-row-detail';
+                        detailCell.textContent = String(option.dataset.vistaDetail || '').trim() || '-';
+
+                        const stateCell = document.createElement('div');
+                        stateCell.className = 'vista-selected-row-state';
+                        stateCell.textContent = String(option.dataset.vistaState || '').trim() || '-';
+                        row.appendChild(nameCell);
+                        row.appendChild(detailCell);
+                        row.appendChild(stateCell);
+                        selectedList.appendChild(row);
+                    });
+
+                    if (selectAll) {
+                        selectAll.checked = selectedOptions.length === options.length;
+                        selectAll.indeterminate = selectedOptions.length > 0 && selectedOptions.length < options.length;
+                    }
+                };
+
+                const applyFilter = () => {
+                    const query = String(search?.value || '').trim().toLowerCase();
+                    options.forEach((option) => {
+                        const text = String(option.dataset.vistaText || '').toLowerCase();
+                        option.classList.toggle('is-hidden', query !== '' && !text.includes(query));
+                    });
+                };
+
+                const sortOptionsBySelection = () => {
+                    const selectorList = fieldset.querySelector('[data-vista-selector-list]');
+                    if (!selectorList) return;
+
+                    const selected = [];
+                    const unselected = [];
+
+                    options.forEach((option) => {
+                        const checkbox = option.querySelector('[data-vista-checkbox]');
+                        if (checkbox?.checked) {
+                            selected.push(option);
+                        } else {
+                            unselected.push(option);
+                        }
+                    });
+
+                    // Reordenar: seleccionados primero, luego no seleccionados
+                    const sorted = [...selected, ...unselected];
+                    sorted.forEach((option) => {
+                        selectorList.appendChild(option);
+                    });
+                };
+
+                checks.forEach((checkbox) => {
+                    checkbox.addEventListener('change', () => {
+                        const option = checkbox.closest('[data-vista-option]');
+                        if (option) {
+                            option.classList.toggle('is-selected', !!checkbox.checked);
+                        }
+                        sortOptionsBySelection();
+                        renderSelected();
+                        if (checks.some((item) => item.checked)) {
+                            roleInputs.forEach((roleInput) => {
+                                if (roleInput.checked) {
+                                    roleInput.checked = false;
+                                    roleInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                            });
+                        }
+                    });
+                });
+
+                if (selectAll) {
+                    selectAll.addEventListener('change', () => {
+                        const shouldCheck = !!selectAll.checked;
+                        checks.forEach((checkbox) => {
+                            checkbox.checked = shouldCheck;
+                            const option = checkbox.closest('[data-vista-option]');
+                            if (option) {
+                                option.classList.toggle('is-selected', shouldCheck);
+                            }
+                        });
+                        sortOptionsBySelection();
+                        renderSelected();
+                        if (shouldCheck) {
+                            roleInputs.forEach((roleInput) => {
+                                if (roleInput.checked) {
+                                    roleInput.checked = false;
+                                    roleInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                            });
+                        }
+                    });
+                }
+
+                roleInputs.forEach((roleInput) => {
+                    roleInput.addEventListener('change', () => {
+                        if (roleInput.checked) {
+                            syncSelectedVistasFromRole();
+                        }
+                    });
+                });
+
+                options.forEach((option) => {
+                    const checkbox = option.querySelector('[data-vista-checkbox]');
+                    option.classList.toggle('is-selected', !!checkbox?.checked);
+                });
+
+                if (search) {
+                    search.addEventListener('input', applyFilter);
+                }
+
+                applyFilter();
+                sortOptionsBySelection();
+                renderSelected();
+            });
+        });
+
         function hasAllowedExtension(fileName, allowedExtensions) {
             const extension = String(fileName || '').split('.').pop().toLowerCase();
             return allowedExtensions.includes(extension);
@@ -5358,11 +6358,16 @@
 
             const setLabelText = (labelElement, text) => {
                 if (!labelElement) return;
-                const starSpan = labelElement.querySelector('span');
-                const extraText = starSpan ? ' ' : '';
-                labelElement.textContent = text + extraText;
-                if (starSpan) {
-                    labelElement.appendChild(starSpan);
+
+                // Mantiene el asterisco de requerido sin reusar el contenedor del label.
+                const requiredStar = labelElement.querySelector('.text-red-500');
+                const textContainer = labelElement.querySelector(':scope > span > span')
+                    || labelElement.querySelector(':scope > span')
+                    || labelElement;
+
+                textContainer.textContent = text;
+                if (requiredStar) {
+                    textContainer.appendChild(requiredStar);
                 }
             };
 
@@ -5773,6 +6778,505 @@
                     checkboxDesearelacionarNumero.addEventListener('change', updateNumeroFieldsState);
                     updateNumeroFieldsState(); // Inicializar estado
                 }
+            });
+        </script>
+
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                const quickButton = document.getElementById('quick-detalle-lista-precio-button');
+                if (!quickButton) {
+                    return;
+                }
+
+                const mainForm = document.getElementById('main-crud-form');
+                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+                const parseJson = (value) => {
+                    try {
+                        const parsed = JSON.parse(String(value || '[]'));
+                        return Array.isArray(parsed) ? parsed : [];
+                    } catch {
+                        return [];
+                    }
+                };
+                const formatMoney = (value) => {
+                    const numeric = Number(value);
+                    if (!Number.isFinite(numeric)) {
+                        return 'S/ 0,00';
+                    }
+                    return 'S/ ' + numeric.toLocaleString('es-PE', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                    });
+                };
+                const ensurePayloadInput = (inputName) => {
+                    if (!mainForm) {
+                        return null;
+                    }
+
+                    let input = mainForm.querySelector('input[name="' + inputName + '"]');
+                    if (!input) {
+                        input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = inputName;
+                        input.value = '[]';
+                        mainForm.appendChild(input);
+                    }
+
+                    return input;
+                };
+
+                const ensureSelectedInput = (inputName) => {
+                    if (!mainForm) return null;
+                    const name = String(inputName || 'detalle_lista_precio_selected');
+                    let input = mainForm.querySelector('input[name="' + name + '"]');
+                    if (!input) {
+                        input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = name;
+                        input.value = '';
+                        mainForm.appendChild(input);
+                    }
+                    return input;
+                };
+
+                const modal = document.getElementById('quick-detalle-lista-precio-modal');
+                if (!modal) {
+                    return;
+                }
+
+                if (modal.parentElement !== document.body) {
+                    document.body.appendChild(modal);
+                }
+
+                const listSelect = modal.querySelector('#quick-detalle-lista');
+                const priceInput = modal.querySelector('#quick-detalle-precio');
+                const addButton = modal.querySelector('#quick-detalle-add');
+                const closeButton = modal.querySelector('#quick-detalle-close');
+                const cancelButton = modal.querySelector('#quick-detalle-cancel');
+                const feedback = modal.querySelector('#quick-detalle-feedback');
+                const pendingList = modal.querySelector('#quick-detalle-pending-list');
+                const savedList = modal.querySelector('#quick-detalle-saved-list');
+                const almacenBadge = modal.querySelector('#quick-detalle-almacen');
+                const pendingCount = modal.querySelector('#quick-detalle-pending-count');
+                const savedCount = modal.querySelector('#quick-detalle-saved-count');
+                const searchInput = modal.querySelector('#quick-detalle-search');
+                const mainPriceInput = document.querySelector('input[name="precio"]');
+                let tomSelectInstance = null;
+                let currentPayloadInput = null;
+                let currentPayloadInputName = 'detalle_lista_precio_payload';
+                let currentPendingItems = [];
+                let currentSavedItems = [];
+                let currentListOptions = [];
+                let editingTempId = null;
+                let selectedTempId = null;
+                let selectedInput = null;
+                let suppressMainPriceSync = false;
+
+                const normalizeOptionLabel = (item) => {
+                    const value = String(item?.value ?? item?.id ?? '');
+                    const label = String(item?.label ?? item?.text ?? '');
+                    return {
+                        value: value,
+                        label: label !== '' ? label : ('Lista #' + value),
+                    };
+                };
+
+                const normalizePayloadItem = (item) => {
+                    const listId = String(item?.ListaPrecio_idListaPrecio ?? item?.listaprecio_id ?? item?.idListaPrecio ?? '');
+                    const price = String(item?.precio ?? '').trim();
+                    return {
+                        tempId: String(item?.tempId ?? item?.id ?? ('tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))),
+                        ListaPrecio_idListaPrecio: listId,
+                        listaprecio_nombre: String(item?.listaprecio_nombre ?? item?.label ?? ''),
+                        precio: price,
+                    };
+                };
+
+                const readPayload = () => {
+                    if (!currentPayloadInput) {
+                        return [];
+                    }
+
+                    return parseJson(currentPayloadInput.value).map(normalizePayloadItem).filter((item) => item.ListaPrecio_idListaPrecio !== '');
+                };
+
+                const writePayload = () => {
+                    if (!currentPayloadInput) {
+                        return;
+                    }
+
+                    currentPayloadInput.value = JSON.stringify(currentPendingItems.map((item) => ({
+                        tempId: item.tempId,
+                        ListaPrecio_idListaPrecio: item.ListaPrecio_idListaPrecio,
+                        listaprecio_nombre: item.listaprecio_nombre,
+                        precio: item.precio,
+                    })));
+                };
+
+                const getListLabel = (listId) => {
+                    const match = currentListOptions.find((item) => String(item.value) === String(listId));
+                    if (match) {
+                        return match.label;
+                    }
+
+                    return 'Lista #' + String(listId);
+                };
+
+                const buildRow = (item, type) => {
+                    const label = type === 'saved'
+                        ? String(item.listaprecio_nombre || getListLabel(item.ListaPrecio_idListaPrecio))
+                        : String(item.listaprecio_nombre || getListLabel(item.ListaPrecio_idListaPrecio));
+                    const price = formatMoney(item.precio);
+                    const row = document.createElement('div');
+                    const isSelected = selectedTempId !== null && String(item.tempId) === String(selectedTempId);
+
+                    row.className = 'flex items-center justify-between mb-3 gap-4 rounded-md border p-3 transition ' +
+                        (isSelected ? 'border-primary bg-red-50/50 ring-1 ring-inset ring-red-200' : 'border-slate-200 bg-white hover:border-slate-300');
+
+                    const text = document.createElement('div');
+                    text.className = 'min-w-0 flex-1';
+                    text.innerHTML = '<div class="truncate text-sm font-semibold text-slate-800">' + label + '</div>' +
+                        '<div class="text-xs text-slate-500">Precio: ' + price + '</div>';
+
+                    row.appendChild(text);
+
+                    const populateEditor = () => {
+                        if (tomSelectInstance && typeof tomSelectInstance.setValue === 'function') {
+                            tomSelectInstance.setValue(String(item.ListaPrecio_idListaPrecio), true);
+                        } else if (listSelect) {
+                            listSelect.value = String(item.ListaPrecio_idListaPrecio);
+                        }
+
+                        if (priceInput) {
+                            priceInput.value = String(item.precio ?? '');
+                        }
+
+                        editingTempId = String(item.tempId);
+
+                        if (feedback) {
+                            feedback.textContent = 'Editando detalle seleccionado.';
+                            feedback.className = 'text-sm text-emerald-600';
+                        }
+                    };
+
+                    if (type === 'pending') {
+                        const actions = document.createElement('div');
+                        actions.className = 'flex items-center gap-2';
+
+                        const selectButton = document.createElement('button');
+                        selectButton.type = 'button';
+                        selectButton.className = 'rounded border px-2 py-1 text-[11px] font-semibold shadow-sm transition';
+                        selectButton.textContent = isSelected ? 'Seleccionado' : 'Seleccionar';
+                        if (isSelected) {
+                            selectButton.disabled = true;
+                            selectButton.className += ' bg-primary text-white';
+                        } else {
+                            selectButton.className += ' border-slate-200 bg-white text-slate-700 hover:bg-slate-50';
+                        }
+                        selectButton.addEventListener('click', () => {
+                            const nextSelectedTempId = String(item.tempId);
+                            selectedInput = selectedInput || ensureSelectedInput(currentPayloadInputName + '_selected');
+
+                            if (mainPriceInput) {
+                                suppressMainPriceSync = true;
+                                mainPriceInput.value = String(item.precio ?? '');
+                                mainPriceInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                mainPriceInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                suppressMainPriceSync = false;
+                            }
+
+                            selectedTempId = nextSelectedTempId;
+                            if (selectedInput) selectedInput.value = String(selectedTempId);
+
+                            closeModal();
+                        });
+
+                        actions.appendChild(selectButton);
+
+                        const editButton = document.createElement('button');
+                        editButton.type = 'button';
+                        editButton.className = 'rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100';
+                        editButton.textContent = 'Editar';
+                        editButton.addEventListener('click', populateEditor);
+
+                        const removeButton = document.createElement('button');
+                        removeButton.type = 'button';
+                        removeButton.className = 'rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100';
+                        removeButton.textContent = 'Quitar';
+                        removeButton.addEventListener('click', () => {
+                            currentPendingItems = currentPendingItems.filter((entry) => String(entry.tempId) !== String(item.tempId));
+                            writePayload();
+                            renderLists();
+                        });
+
+                        actions.appendChild(editButton);
+                        actions.appendChild(removeButton);
+                        row.appendChild(actions);
+                    } else {
+                        row.addEventListener('click', populateEditor);
+                        row.classList.add('cursor-pointer', 'transition', 'hover:border-red-300', 'hover:bg-red-50/40');
+                    }
+
+                    return row;
+                };
+
+                const renderLists = () => {
+                    const term = String(searchInput?.value || '').trim().toLowerCase();
+                    const visibleItems = term === ''
+                        ? currentPendingItems
+                        : currentPendingItems.filter((item) => {
+                            const label = String(item.listaprecio_nombre || getListLabel(item.ListaPrecio_idListaPrecio)).toLowerCase();
+                            const price = String(item.precio || '').toLowerCase();
+                            return label.includes(term) || price.includes(term);
+                        });
+
+                    if (pendingCount) {
+                        pendingCount.textContent = String(visibleItems.length);
+                    }
+                    if (savedCount) {
+                        savedCount.textContent = String(currentSavedItems.length);
+                    }
+
+                    const workingList = savedList || pendingList;
+                    if (workingList) {
+                        workingList.innerHTML = '';
+                        if (visibleItems.length === 0) {
+                            workingList.innerHTML = '<div class="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500">Todavía no has agregado detalles de precio.</div>';
+                        } else {
+                            visibleItems.forEach((item) => {
+                                workingList.appendChild(buildRow(item, 'pending'));
+                            });
+                        }
+                    }
+                };
+
+                const initTomSelect = () => {
+                    if (!listSelect || typeof window.TomSelect !== 'function') {
+                        return;
+                    }
+
+                    if (listSelect.tomselect) {
+                        tomSelectInstance = listSelect.tomselect;
+                        return;
+                    }
+
+                    if (tomSelectInstance && typeof tomSelectInstance.destroy === 'function') {
+                        tomSelectInstance.destroy();
+                    }
+
+                    tomSelectInstance = new TomSelect(listSelect, {
+                        create: false,
+                        allowEmptyOption: true,
+                        maxOptions: 1000,
+                        searchField: ['text'],
+                        sortField: { field: 'text', direction: 'asc' },
+                    });
+                };
+
+                const syncTomSelectOptions = () => {
+                    if (!listSelect) {
+                        return;
+                    }
+
+                    const options = currentListOptions.map((item) => ({
+                        value: String(item.value),
+                        text: String(item.label),
+                    }));
+
+                    if (tomSelectInstance) {
+                        if (typeof tomSelectInstance.clear === 'function') {
+                            tomSelectInstance.clear(true);
+                        }
+                        if (typeof tomSelectInstance.clearOptions === 'function') {
+                            tomSelectInstance.clearOptions();
+                        }
+                        options.forEach((option) => {
+                            if (typeof tomSelectInstance.addOption === 'function') {
+                                tomSelectInstance.addOption(option);
+                            }
+                        });
+                        if (typeof tomSelectInstance.refreshOptions === 'function') {
+                            tomSelectInstance.refreshOptions(false);
+                        }
+
+                        const wrapper = listSelect.nextElementSibling;
+                        const dropdownEl = wrapper?.querySelector('.ts-dropdown');
+                        const dropdownContent = dropdownEl?.querySelector('.ts-dropdown-content');
+                        if (dropdownContent) {
+                            dropdownContent.style.maxHeight = '128px';
+                            dropdownContent.style.overflowY = 'auto';
+                        }
+
+                        return;
+                    }
+
+                    listSelect.innerHTML = '<option value="">Selecciona una lista de precio</option>';
+                    options.forEach((option) => {
+                        const element = document.createElement('option');
+                        element.value = option.value;
+                        element.textContent = option.text;
+                        listSelect.appendChild(element);
+                    });
+                };
+
+                const closeModal = () => {
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                    document.body.style.overflow = '';
+                    editingTempId = null;
+                    if (feedback) {
+                        feedback.textContent = '';
+                        feedback.className = 'text-sm text-slate-500';
+                    }
+                };
+
+                const openModal = (button) => {
+                    currentPayloadInputName = button.getAttribute('data-quick-detalle-payload-input') || 'detalle_lista_precio_payload';
+                    currentPayloadInput = ensurePayloadInput(currentPayloadInputName);
+                    currentListOptions = parseJson(button.getAttribute('data-quick-detalle-list-options') || '[]').map(normalizeOptionLabel);
+                    currentSavedItems = parseJson(button.getAttribute('data-quick-detalle-existing') || '[]').map(normalizePayloadItem);
+                    currentPendingItems = readPayload();
+
+                    // Ensure selected input exists and restore selection if any
+                    selectedInput = ensureSelectedInput(currentPayloadInputName + '_selected');
+                    selectedTempId = selectedInput && String(selectedInput.value || '').trim() !== '' ? String(selectedInput.value) : null;
+
+                    if (currentPendingItems.length === 0 && currentSavedItems.length > 0) {
+                        currentPendingItems = currentSavedItems.map((item) => ({
+                            tempId: String(item.tempId),
+                            ListaPrecio_idListaPrecio: String(item.ListaPrecio_idListaPrecio),
+                            listaprecio_nombre: String(item.listaprecio_nombre),
+                            precio: String(item.precio),
+                        }));
+                    }
+
+                    editingTempId = null;
+
+                    if (currentPayloadInput && currentPayloadInput.value.trim() === '') {
+                        currentPayloadInput.value = '[]';
+                    }
+
+                    if (almacenBadge) {
+                        const almacenLabel = String(button.getAttribute('data-quick-detalle-almacen-label') || '').trim();
+                        const almacenId = String(button.getAttribute('data-quick-detalle-almacen-id') || '').trim();
+                        almacenBadge.textContent = almacenLabel !== ''
+                            ? almacenLabel + (almacenId !== '' ? ' (' + almacenId + ')' : '')
+                            : 'Se asignará automáticamente al guardar el almacén.';
+                    }
+
+                    initTomSelect();
+                    syncTomSelectOptions();
+
+                    renderLists();
+
+                    if (priceInput) {
+                        priceInput.value = '';
+                    }
+                    if (listSelect) {
+                        listSelect.value = '';
+                    }
+                    if (feedback) {
+                        feedback.textContent = '';
+                        feedback.className = 'text-sm text-slate-500';
+                    }
+
+                    modal.classList.remove('hidden');
+                    modal.classList.add('flex');
+                    document.body.style.overflow = 'hidden';
+                };
+
+                closeButton?.addEventListener('click', closeModal);
+                cancelButton?.addEventListener('click', closeModal);
+
+                const clearSelectedDetail = () => {
+                    if (suppressMainPriceSync) {
+                        return;
+                    }
+
+                    selectedTempId = null;
+                    if (selectedInput) {
+                        selectedInput.value = '';
+                    }
+                };
+
+                mainPriceInput?.addEventListener('input', clearSelectedDetail);
+                mainPriceInput?.addEventListener('change', clearSelectedDetail);
+
+                addButton?.addEventListener('click', () => {
+                    const listId = String(listSelect?.value ?? '').trim();
+                    const priceValue = String(priceInput?.value ?? '').trim();
+
+                    if (listId === '' || priceValue === '') {
+                        if (feedback) {
+                            feedback.textContent = 'Selecciona una lista de precio y escribe un precio antes de guardar.';
+                            feedback.className = 'text-sm text-red-600';
+                        }
+                        return;
+                    }
+
+                    const label = getListLabel(listId);
+                    const existingIndex = editingTempId !== null
+                        ? currentPendingItems.findIndex((entry) => String(entry.tempId) === String(editingTempId))
+                        : currentPendingItems.findIndex((entry) => String(entry.ListaPrecio_idListaPrecio) === String(listId));
+                    const nextItem = {
+                        tempId: existingIndex >= 0 ? currentPendingItems[existingIndex].tempId : ('tmp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)),
+                        ListaPrecio_idListaPrecio: listId,
+                        listaprecio_nombre: label,
+                        precio: priceValue,
+                    };
+
+                    if (existingIndex >= 0) {
+                        currentPendingItems[existingIndex] = nextItem;
+                    } else {
+                        currentPendingItems.push(nextItem);
+                    }
+
+                    writePayload();
+                    renderLists();
+                    editingTempId = null;
+
+                    // Mark newly created item as selected automatically
+                    selectedTempId = nextItem.tempId;
+                    selectedInput = selectedInput || ensureSelectedInput(currentPayloadInputName + '_selected');
+                    if (selectedInput) selectedInput.value = String(selectedTempId);
+
+                    if (mainPriceInput) {
+                        suppressMainPriceSync = true;
+                        mainPriceInput.value = priceValue;
+                        mainPriceInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        mainPriceInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        suppressMainPriceSync = false;
+                    }
+
+                    if (tomSelectInstance && typeof tomSelectInstance.clear === 'function') {
+                        tomSelectInstance.clear(true);
+                    } else if (listSelect) {
+                        listSelect.value = '';
+                    }
+
+                    if (priceInput) {
+                        priceInput.value = '';
+                    }
+
+                    if (feedback) {
+                        feedback.textContent = 'Detalle agregado a la lista temporal.';
+                        feedback.className = 'text-sm text-emerald-600';
+                    }
+
+                    closeModal();
+                });
+
+                searchInput?.addEventListener('input', () => {
+                    renderLists();
+                });
+
+                quickButton.addEventListener('click', () => {
+                    if (quickButton.disabled) {
+                        return;
+                    }
+
+                    openModal(quickButton);
+                });
             });
         </script>
 @endsection

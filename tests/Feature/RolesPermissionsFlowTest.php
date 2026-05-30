@@ -351,6 +351,71 @@ class RolesPermissionsFlowTest extends TestCase
         $this->get(route('modules.configuracion.ubigeos.index'))->assertForbidden();
     }
 
+    public function test_home_menu_hides_almacen_leaf_when_only_submodules_are_allowed(): void
+    {
+        $this->seedPersonal('44550012');
+        $this->seedUsuario('operador.almacen.menu', 'ClaveQA2!', '44550012');
+
+        $roleId = DB::table('rol')->insertGetId([
+            'nombre' => 'operador-almacen-menu',
+            'estado' => 1,
+            'fechaCreacion' => now(),
+        ]);
+
+        DB::table('detallerol')->insert([
+            'usuario_usuario' => 'operador.almacen.menu',
+            'rol_idrol' => $roleId,
+        ]);
+
+        DB::table('inforol')->insert([
+            ['rol_idrol' => $roleId, 'modulo' => 'almacen.nota_ingreso', 'accion' => 'ver', 'nombre' => 'Ver Nota de ingreso'],
+            ['rol_idrol' => $roleId, 'modulo' => 'almacen.nota_salida', 'accion' => 'ver', 'nombre' => 'Ver Nota de salida'],
+        ]);
+
+        $this->post(route('login.attempt'), [
+            'usuario' => 'operador.almacen.menu',
+            'password' => 'ClaveQA2!',
+        ])->assertRedirect(route('home'));
+
+        $response = $this->get(route('home'));
+        $response->assertOk();
+        $response->assertSee('Nota de ingreso');
+        $response->assertSee('Nota de salida');
+        $response->assertDontSee('href="http://localhost/modulos/almacen" class="side-menu__link');
+    }
+
+    public function test_almacen_nota_salida_no_hereda_acciones_del_nodo_padre(): void
+    {
+        $this->seedPersonal('44550011');
+        $this->seedUsuario('operador.almacen.salida', 'ClaveQA1!', '44550011');
+
+        $roleId = DB::table('rol')->insertGetId([
+            'nombre' => 'operador',
+            'estado' => 1,
+            'fechaCreacion' => now(),
+        ]);
+
+        DB::table('detallerol')->insert([
+            'usuario_usuario' => 'operador.almacen.salida',
+            'rol_idrol' => $roleId,
+        ]);
+
+        DB::table('inforol')->insert([
+            'rol_idrol' => $roleId,
+            'modulo' => 'almacen.nota_salida',
+            'accion' => 'ver',
+            'nombre' => 'Ver Nota de salida',
+        ]);
+
+        $this->post(route('login.attempt'), [
+            'usuario' => 'operador.almacen.salida',
+            'password' => 'ClaveQA1!',
+        ])->assertRedirect(route('home'));
+
+        $this->get(route('modules.almacen.nota-salida.index'))->assertOk();
+        $this->get(route('modules.almacen.nota-salida.create'))->assertForbidden();
+    }
+
     private function withRolesSession(): void
     {
         $this->withSession([

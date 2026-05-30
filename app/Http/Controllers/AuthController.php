@@ -16,7 +16,7 @@ use Throwable;
 
 class AuthController extends Controller
 {
-    private const DEFAULT_MODULES = ['personal', 'roles', 'usuarios', 'clientes', 'configuracion'];
+    private const DEFAULT_MODULES = ['personal', 'roles', 'usuarios', 'clientes', 'configuracion', 'almacen'];
     private const DEFAULT_ACTIONS = ['ver', 'crear', 'editar', 'eliminar'];
     private const LOGIN_MAX_ATTEMPTS = 5;
     private const LOGIN_DECAY_SECONDS = 60;

@@ -61,12 +61,14 @@
             'roles' => ['title' => 'Roles', 'route' => 'modules.roles', 'icon' => 'shield-check'],
             'usuarios' => ['title' => 'Usuarios', 'route' => 'modules.usuarios', 'icon' => 'user-square'],
             'clientes' => ['title' => 'Clientes', 'route' => 'modules.clientes', 'icon' => 'building-2'],
+            'lineas_chips' => ['title' => 'Lineas y Chips', 'route' => 'modules.lineas-chips', 'icon' => 'smartphone'],
             'vehiculos' => ['title' => 'Vehículos', 'route' => 'modules.vehiculos', 'icon' => 'truck'],
             'dispositivo_cliente' => ['title' => 'Dispositivo cliente', 'route' => 'modules.dispositivo-cliente', 'icon' => 'cpu'],
             'servicio_cliente' => ['title' => 'Servicio cliente', 'route' => 'modules.servicio-cliente', 'icon' => 'file-text'],
-            'tickets' => ['title' => 'Tickets', 'route' => 'modules.tickets', 'icon' => 'ticket'],
+            'almacen' => ['title' => 'Almacén', 'route' => 'modules.almacen', 'icon' => 'warehouse'],
+            'tickets' => ['title' => 'Gestiones', 'route' => 'modules.tickets', 'icon' => 'ticket'],
             'configuracion' => ['title' => 'Configuración', 'route' => 'modules.configuracion', 'icon' => 'settings'],
-            'lineas_chips' => ['title' => 'Lineas y Chips', 'route' => 'modules.lineas-chips', 'icon' => 'smartphone'],
+            'sistema' => ['title' => 'Sistema', 'route' => 'modules.sistema', 'icon' => 'settings-2'],
         ];
 
         $isAdmin = $roles->contains('admin');
@@ -76,45 +78,33 @@
                 return true;
             }
 
+            $moduleKey = \App\Support\ErpPermission::permissionKeyToModule($permissionKey) ?? $permissionKey;
+            $allowedActions = $moduleKey === 'tickets'
+                ? collect(['ver', 'ver_flujo'])
+                : collect(['ver']);
+
             $directActions = collect($permissions->get($permissionKey, []))
                 ->map(fn ($value) => \App\Support\ErpPermission::normalizeAction((string) $value))
                 ->filter()
                 ->unique()
                 ->values();
 
-            if ($directActions->isNotEmpty()) {
-                return true;
-            }
-
-            if (!str_contains($permissionKey, '.')) {
-                return false;
-            }
-
-            $parentModule = \App\Support\ErpPermission::permissionKeyToModule($permissionKey);
-            if ($parentModule === null) {
-                return false;
-            }
-
-            $hasGranularPermissions = $permissions->keys()->contains(
-                fn ($key) => is_string($key) && str_starts_with((string) $key, $parentModule . '.')
-            );
-
-            if ($hasGranularPermissions) {
-                return false;
-            }
-
-            $legacyParentActions = collect($permissions->get($parentModule, []))
-                ->map(fn ($value) => \App\Support\ErpPermission::normalizeAction((string) $value))
-                ->filter()
-                ->unique()
-                ->values();
-
-            return $legacyParentActions->isNotEmpty();
+            return $directActions->intersect($allowedActions)->isNotEmpty();
         };
 
         $visibleClientes = [
             'cliente' => $hasAnyAction('clientes.cliente'),
             'grupo_cliente' => $hasAnyAction('clientes.grupo_cliente'),
+            'servicio_cliente' => $hasAnyAction('servicio_cliente'),
+            'vehiculos' => $hasAnyAction('vehiculos'),
+            'dispositivo_cliente' => $hasAnyAction('dispositivo_cliente'),
+        ];
+
+        $visibleAlmacen = [
+            'almacen' => $hasAnyAction('almacen.almacen'),
+            'planes_servicios' => $hasAnyAction('almacen.planes_servicios'),
+            'nota_ingreso' => $hasAnyAction('almacen.nota_ingreso'),
+            'nota_salida' => $hasAnyAction('almacen.nota_salida'),
         ];
 
         $visibleConfiguracion = [
@@ -126,6 +116,10 @@
             'moneda' => $hasAnyAction('configuracion.moneda'),
             'tributo' => $hasAnyAction('configuracion.tributo'),
             'unidad_medida' => $hasAnyAction('configuracion.unidad_medida'),
+            'detalle_lista_precio' => $hasAnyAction('configuracion.detalle_lista_precio'),
+            'elemento_almacen' => $hasAnyAction('configuracion.elemento_almacen'),
+            'empresapropietaria' => $hasAnyAction('configuracion.empresapropietaria'),
+            'modelo' => $hasAnyAction('configuracion.modelo'),
             'marca' => $hasAnyAction('configuracion.marca'),
             'tecnologia' => $hasAnyAction('configuracion.tecnologia'),
             'tipo_gasto' => $hasAnyAction('configuracion.tipo_gasto'),
@@ -148,6 +142,13 @@
             'flujo' => $hasAnyAction('configuracion.flujo'),
             'flujoregla' => $hasAnyAction('configuracion.flujoregla'),
             'historialflujo' => $hasAnyAction('configuracion.historialflujo'),
+        ];
+
+        $visibleSistema = [
+            'vista' => $hasAnyAction('sistema.vista'),
+            'flujo' => $hasAnyAction('sistema.flujo'),
+            'flujoregla' => $hasAnyAction('sistema.flujoregla'),
+            'historialflujo' => $hasAnyAction('sistema.historialflujo'),
         ];
 
         $visibleLineasChips = [
@@ -173,20 +174,17 @@
         if ($hasAnyAction('lineas_chips') || collect($visibleLineasChips)->contains(true)) {
             $visibleModules[] = 'lineas_chips';
         }
-        if ($hasAnyAction('vehiculos')) {
-            $visibleModules[] = 'vehiculos';
-        }
-        if ($hasAnyAction('dispositivo_cliente')) {
-            $visibleModules[] = 'dispositivo_cliente';
-        }
-         if ($hasAnyAction('servicio_cliente')) {
-            $visibleModules[] = 'servicio_cliente';
+        if ($hasAnyAction('almacen') || collect($visibleAlmacen)->contains(true)) {
+            $visibleModules[] = 'almacen';
         }
         if ($hasAnyAction('tickets')) {
             $visibleModules[] = 'tickets';
         }
         if ($hasAnyAction('configuracion') || collect($visibleConfiguracion)->contains(true)) {
             $visibleModules[] = 'configuracion';
+        }
+        if ($hasAnyAction('sistema') || collect($visibleSistema)->contains(true)) {
+            $visibleModules[] = 'sistema';
         }
 
         $userModuleActions = collect($permissions->get('usuarios', []))
@@ -332,9 +330,19 @@
                                                 <div class="side-menu__link__title">{{ $link['title'] }}</div>
                                             </a>
                                         </li>
+                                    @elseif($module === 'usuarios')
+                                        <li>
+                                            <a href="{{ route('modules.usuarios') }}" class="side-menu__link {{ request()->routeIs('modules.usuarios*') ? 'side-menu__link--active' : '' }}">
+                                                <i data-lucide="{{ $link['icon'] }}" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                <div class="side-menu__link__title">{{ $link['title'] }}</div>
+                                            </a>
+                                        </li>
                                     @elseif($module === 'clientes')
                                         @php
-                                            $isClientesActive = request()->routeIs('modules.clientes*');
+                                            $isClientesActive = request()->routeIs('modules.clientes*')
+                                                || request()->routeIs('modules.vehiculos*')
+                                                || request()->routeIs('modules.dispositivo-cliente*')
+                                                || request()->routeIs('modules.servicio-cliente*');
                                         @endphp
                                         <li>
                                             <a href="javascript:;" class="side-menu__link {{ $isClientesActive ? 'side-menu__link--active' : '' }} [&.side-menu__link--active]:side-menu__link--open" data-tw-toggle="collapse" data-tw-target="#side-menu-clientes">
@@ -359,35 +367,31 @@
                                                         </a>
                                                     </li>
                                                 @endif
+                                                @if($visibleClientes['servicio_cliente'])
+                                                    <li>
+                                                        <a href="{{ route('modules.servicio-cliente') }}" class="side-menu__link {{ request()->routeIs('modules.servicio-cliente*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Servicio cliente</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                                @if($visibleClientes['vehiculos'])
+                                                    <li>
+                                                        <a href="{{ route('modules.vehiculos') }}" class="side-menu__link {{ request()->routeIs('modules.vehiculos*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Vehículos</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                                @if($visibleClientes['dispositivo_cliente'])
+                                                    <li>
+                                                        <a href="{{ route('modules.dispositivo-cliente') }}" class="side-menu__link {{ request()->routeIs('modules.dispositivo-cliente*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Dispositivo cliente</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
                                             </ul>
-                                        </li>
-                                    @elseif($module === 'vehiculos')
-                                        <li>
-                                            <a href="{{ route('modules.vehiculos') }}" class="side-menu__link {{ request()->routeIs('modules.vehiculos*') ? 'side-menu__link--active' : '' }}">
-                                                <i data-lucide="{{ $link['icon'] }}" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
-                                                <div class="side-menu__link__title">{{ $link['title'] }}</div>
-                                            </a>
-                                        </li>
-                                    @elseif($module === 'dispositivo_cliente')
-                                        <li>
-                                            <a href="{{ route('modules.dispositivo-cliente') }}" class="side-menu__link {{ request()->routeIs('modules.dispositivo-cliente*') ? 'side-menu__link--active' : '' }}">
-                                                <i data-lucide="{{ $link['icon'] }}" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
-                                                <div class="side-menu__link__title">{{ $link['title'] }}</div>
-                                            </a>
-                                        </li>
-                                    @elseif($module === 'servicio_cliente')
-                                        <li>
-                                            <a href="{{ route('modules.servicio-cliente') }}" class="side-menu__link {{ request()->routeIs('modules.servicio-cliente*') ? 'side-menu__link--active' : '' }}">
-                                                <i data-lucide="{{ $link['icon'] }}" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
-                                                <div class="side-menu__link__title">{{ $link['title'] }}</div>
-                                            </a>
-                                        </li>
-                                    @elseif($module === 'tickets')
-                                        <li>
-                                            <a href="{{ route('modules.tickets') }}" class="side-menu__link {{ request()->routeIs('modules.tickets*') ? 'side-menu__link--active' : '' }}">
-                                                <i data-lucide="{{ $link['icon'] }}" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
-                                                <div class="side-menu__link__title">{{ $link['title'] }}</div>
-                                            </a>
                                         </li>
                                     @elseif($module === 'lineas_chips')
                                         @php
@@ -435,6 +439,58 @@
                                                 @endif
                                             </ul>
                                         </li>
+                                    @elseif($module === 'almacen')
+                                        @php
+                                            $isAlmacenActive = request()->routeIs('modules.almacen*');
+                                        @endphp
+                                        <li>
+                                            <a href="javascript:;" class="side-menu__link {{ $isAlmacenActive ? 'side-menu__link--active' : '' }} [&.side-menu__link--active]:side-menu__link--open" data-tw-toggle="collapse" data-tw-target="#side-menu-almacen">
+                                                <i data-lucide="{{ $link['icon'] }}" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                <div class="side-menu__link__title">{{ $link['title'] }}</div>
+                                                <i data-lucide="chevron-down" class="stroke-[1] w-5 h-5 side-menu__link__chevron"></i>
+                                            </a>
+                                            <ul id="side-menu-almacen" class="side-menu__ul-collapse {{ $isAlmacenActive ? '' : 'hidden' }}">
+                                                @if($visibleAlmacen['almacen'])
+                                                    <li>
+                                                        <a href="{{ route('modules.almacen') }}" class="side-menu__link {{ request()->routeIs('modules.almacen') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Almacén</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                                @if($visibleAlmacen['planes_servicios'])
+                                                    <li>
+                                                        <a href="{{ route('modules.almacen.planes-servicios.index') }}" class="side-menu__link {{ request()->routeIs('modules.almacen.planes-servicios*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Planes y servicios</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                                @if($visibleAlmacen['nota_ingreso'])
+                                                    <li>
+                                                        <a href="{{ route('modules.almacen.nota-ingreso.index') }}" class="side-menu__link {{ request()->routeIs('modules.almacen.nota-ingreso*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Nota de ingreso</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                                @if($visibleAlmacen['nota_salida'])
+                                                    <li>
+                                                        <a href="{{ route('modules.almacen.nota-salida.index') }}" class="side-menu__link {{ request()->routeIs('modules.almacen.nota-salida*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Nota de salida</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                            </ul>
+                                        </li>
+                                    @elseif($module === 'tickets')
+                                        <li>
+                                            <a href="{{ route('modules.tickets') }}" class="side-menu__link {{ request()->routeIs('modules.tickets*') ? 'side-menu__link--active' : '' }}">
+                                                <i data-lucide="{{ $link['icon'] }}" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                <div class="side-menu__link__title">{{ $link['title'] }}</div>
+                                            </a>
+                                        </li>
                                     @elseif($module === 'configuracion')
                                         @php
                                             $isConfiguracionActive = request()->routeIs('modules.configuracion*');
@@ -451,20 +507,20 @@
                                                 $showConfigVehiculos = $visibleConfiguracion['tipo_vehiculo'] || $visibleConfiguracion['operador'];
                                                 $showConfigTicket = $visibleConfiguracion['tipo_operacion'];
                                                 $showConfigFinanzas = $visibleConfiguracion['proveedor'] || $visibleConfiguracion['tipo_cobro'] || $visibleConfiguracion['entidad_bancaria'] || $visibleConfiguracion['tipo_gasto'];
-                                                $showConfigAlmacen = $visibleConfiguracion['marca'] || $visibleConfiguracion['unidad_medida'] || $visibleConfiguracion['tipo_pedido'] || $visibleConfiguracion['tecnologia'] || $visibleConfiguracion['lista_precio'];
+                                                $showConfigAlmacen = $visibleConfiguracion['empresapropietaria'] || $visibleConfiguracion['modelo'] || $visibleConfiguracion['marca'] || $visibleConfiguracion['unidad_medida'] || $visibleConfiguracion['tipo_pedido'] || $visibleConfiguracion['tipo_elemento'] || $visibleConfiguracion['tecnologia'] || $visibleConfiguracion['lista_precio'] || $visibleConfiguracion['detalle_lista_precio'] || $visibleConfiguracion['elemento_almacen'];
                                                 $showConfigFacturacion = $visibleConfiguracion['vigencia_oferta'] || $visibleConfiguracion['moneda'] || $visibleConfiguracion['forma_pago'] || $visibleConfiguracion['certificadosunat'] || $visibleConfiguracion['tributo'] || $visibleConfiguracion['tipo_documento'];
-                                                $showConfigPlataforma = $visibleConfiguracion['tipo_plataforma'] || $visibleConfiguracion['plataforma'] || $visibleConfiguracion['tipo_elemento'];
-                                                $showConfigSistema = $visibleConfiguracion['vista'] || $visibleConfiguracion['flujo'] || $visibleConfiguracion['flujoregla'] || $visibleConfiguracion['historialflujo'];
-
+                                                $showConfigPlataforma = $visibleConfiguracion['tipo_plataforma'] || $visibleConfiguracion['plataforma'] ;
+                                                $showConfigSistema = $visibleSistema['vista'] || $visibleSistema['flujo'] || $visibleSistema['flujoregla'] || $visibleSistema['historialflujo'];
                                                 $isConfigClienteActive = request()->routeIs('modules.configuracion.ubigeos*') || request()->routeIs('modules.configuracion.estados*') || request()->routeIs('modules.configuracion.tipos-contacto*');
                                                 $isConfigPersonalActive = request()->routeIs('modules.configuracion.cargos*');
                                                 $isConfigVehiculosActive = request()->routeIs('modules.configuracion.tipos-vehiculo*') || request()->routeIs('modules.configuracion.operadores*');
                                                 $isConfigTicketActive = request()->routeIs('modules.configuracion.tipos-operacion*');
                                                 $isConfigFinanzasActive = request()->routeIs('modules.configuracion.proveedores*') || request()->routeIs('modules.configuracion.tipos-cobro*') || request()->routeIs('modules.configuracion.entidades-bancarias*') || request()->routeIs('modules.configuracion.tipos-gasto*');
-                                                $isConfigAlmacenActive = request()->routeIs('modules.configuracion.marcas*') || request()->routeIs('modules.configuracion.unidad-medida*') || request()->routeIs('modules.configuracion.tipos-pedido*') || request()->routeIs('modules.configuracion.tecnologias*') || request()->routeIs('modules.configuracion.listas-precio*');
+                                                $isConfigAlmacenActive = request()->routeIs('modules.configuracion.empresapropietaria*') || request()->routeIs('modules.configuracion.modelo*') || request()->routeIs('modules.configuracion.marcas*') || request()->routeIs('modules.configuracion.unidad-medida*') || request()->routeIs('modules.configuracion.tipos-pedido*') || request()->routeIs('modules.configuracion.tipos-elemento*') || request()->routeIs('modules.configuracion.tecnologias*') || request()->routeIs('modules.configuracion.listas-precio*') || request()->routeIs('modules.configuracion.detalle-lista-precio*') || request()->routeIs('modules.configuracion.elemento-almacen*');
                                                 $isConfigFacturacionActive = request()->routeIs('modules.configuracion.vigencias-oferta*') || request()->routeIs('modules.configuracion.monedas*') || request()->routeIs('modules.configuracion.formas-pago*') || request()->routeIs('modules.configuracion.certificados-sunat*') || request()->routeIs('modules.configuracion.tributos*') || request()->routeIs('modules.configuracion.tipos-documento*');
-                                                $isConfigPlataformaActive = request()->routeIs('modules.configuracion.tipos-plataforma*') || request()->routeIs('modules.configuracion.plataforma*') || request()->routeIs('modules.configuracion.tipos-elemento*');
+                                                $isConfigPlataformaActive = request()->routeIs('modules.configuracion.tipos-plataforma*') || request()->routeIs('modules.configuracion.plataforma*');
                                                 $isConfigSistemaActive = request()->routeIs('modules.configuracion.vistas*') || request()->routeIs('modules.configuracion.flujos*') || request()->routeIs('modules.configuracion.flujo-reglas*') || request()->routeIs('modules.configuracion.historial-flujos*');
+                                            
 
                                                 $showAnyGroupedConfig = $showConfigCliente || $showConfigPersonal || $showConfigVehiculos || $showConfigTicket || $showConfigFinanzas || $showConfigAlmacen || $showConfigFacturacion || $showConfigPlataforma || $showConfigSistema;
                                             @endphp
@@ -547,8 +603,6 @@
                                                         </ul>
                                                     </li>
                                                 @endif
-
-
                                                 @if($showConfigFacturacion)
                                                     <li>
                                                         <a href="javascript:;" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ $isConfigFacturacionActive ? 'side-menu__link--active' : '' }} [&.side-menu__link--active]:side-menu__link--open" data-tw-toggle="collapse" data-tw-target="#side-menu-config-facturacion">
@@ -643,14 +697,6 @@
                                                                     </a>
                                                                 </li>
                                                             @endif
-                                                            @if($visibleConfiguracion['tipo_elemento'])
-                                                                <li>
-                                                                    <a href="{{ route('modules.configuracion.tipos-elemento.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.tipos-elemento*') ? 'side-menu__link--active' : '' }}">
-                                                                        <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
-                                                                        <div class="side-menu__link__title">Tipo de Elemento</div>
-                                                                    </a>
-                                                                </li>
-                                                            @endif
                                                             @if($visibleConfiguracion['tipo_plataforma'])
                                                                 <li>
                                                                     <a href="{{ route('modules.configuracion.tipos-plataforma.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.tipos-plataforma*') ? 'side-menu__link--active' : '' }}">
@@ -662,54 +708,11 @@
                                                         </ul>
                                                     </li>
                                                 @endif
-                                                @if($showConfigSistema)
-                                                    <li>
-                                                        <a href="javascript:;" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ $isConfigSistemaActive ? 'side-menu__link--active' : '' }} [&.side-menu__link--active]:side-menu__link--open" data-tw-toggle="collapse" data-tw-target="#side-menu-config-sistema">
-                                                            <i data-lucide="settings-2" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
-                                                            <div class="side-menu__link__title">Sistema</div>
-                                                            <i data-lucide="chevron-down" class="stroke-[1] w-3 h-3 side-menu__link__chevron"></i>
-                                                        </a>
-                                                        <ul id="side-menu-config-sistema" class="side-menu__ul-collapse {{ $isConfigSistemaActive ? '' : 'hidden' }}">
-                                                            @if($visibleConfiguracion['vista'])
-                                                                <li>
-                                                                    <a href="{{ route('modules.configuracion.vistas.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.vistas*') ? 'side-menu__link--active' : '' }}">
-                                                                        <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
-                                                                        <div class="side-menu__link__title">Vista</div>
-                                                                    </a>
-                                                                </li>
-                                                            @endif
-                                                            @if($visibleConfiguracion['flujo'])
-                                                                <li>
-                                                                    <a href="{{ route('modules.configuracion.flujos.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.flujos*') ? 'side-menu__link--active' : '' }}">
-                                                                        <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
-                                                                        <div class="side-menu__link__title">Flujo</div>
-                                                                    </a>
-                                                                </li>
-                                                            @endif
-                                                            @if($visibleConfiguracion['flujoregla'])
-                                                                <li>
-                                                                    <a href="{{ route('modules.configuracion.flujo-reglas.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.flujo-reglas*') ? 'side-menu__link--active' : '' }}">
-                                                                        <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
-                                                                        <div class="side-menu__link__title">Flujo Regla</div>
-                                                                    </a>
-                                                                </li>
-                                                            @endif
-                                                            @if($visibleConfiguracion['historialflujo'])
-                                                                <li>
-                                                                    <a href="{{ route('modules.configuracion.historial-flujos.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.historial-flujos*') ? 'side-menu__link--active' : '' }}">
-                                                                        <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
-                                                                        <div class="side-menu__link__title">Historial Flujo</div>
-                                                                    </a>
-                                                                </li>
-                                                            @endif
-                                                        </ul>
-                                                    </li>
-                                                @endif
                                                 @if($showConfigTicket)
                                                     <li>
                                                         <a href="javascript:;" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ $isConfigTicketActive ? 'side-menu__link--active' : '' }} [&.side-menu__link--active]:side-menu__link--open" data-tw-toggle="collapse" data-tw-target="#side-menu-config-ticket">
                                                             <i data-lucide="ticket" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
-                                                            <div class="side-menu__link__title">Ticket</div>
+                                                            <div class="side-menu__link__title">Gestion</div>
                                                             <i data-lucide="chevron-down" class="stroke-[1] w-3 h-3 side-menu__link__chevron"></i>
                                                         </a>
                                                         <ul id="side-menu-config-ticket" class="side-menu__ul-collapse {{ $isConfigTicketActive ? '' : 'hidden' }}">
@@ -724,7 +727,6 @@
                                                         </ul>
                                                     </li>
                                                 @endif
-                                                
                                                 @if($showConfigAlmacen)
                                                     <li>
                                                         <a href="javascript:;" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ $isConfigAlmacenActive ? 'side-menu__link--active' : '' }} [&.side-menu__link--active]:side-menu__link--open" data-tw-toggle="collapse" data-tw-target="#side-menu-config-almacen">
@@ -733,6 +735,38 @@
                                                             <i data-lucide="chevron-down" class="stroke-[1] w-3 h-3 side-menu__link__chevron"></i>
                                                         </a>
                                                         <ul id="side-menu-config-almacen" class="side-menu__ul-collapse {{ $isConfigAlmacenActive ? '' : 'hidden' }}">
+                                                            @if($visibleConfiguracion['detalle_lista_precio'])
+                                                                <li>
+                                                                    <a href="{{ route('modules.configuracion.detalle-lista-precio.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.detalle-lista-precio*') ? 'side-menu__link--active' : '' }}">
+                                                                        <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
+                                                                        <div class="side-menu__link__title">Detalle Lista de Precio</div>
+                                                                    </a>
+                                                                </li>
+                                                            @endif
+                                                            @if($visibleConfiguracion['empresapropietaria'])
+                                                                <li>
+                                                                    <a href="{{ route('modules.configuracion.empresapropietaria.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.empresapropietaria*') ? 'side-menu__link--active' : '' }}">
+                                                                        <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
+                                                                        <div class="side-menu__link__title">Empresa Propietaria</div>
+                                                                    </a>
+                                                                </li>
+                                                            @endif
+                                                            @if($visibleConfiguracion['elemento_almacen'])
+                                                                <li>
+                                                                    <a href="{{ route('modules.configuracion.elemento-almacen.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.elemento-almacen*') ? 'side-menu__link--active' : '' }}">
+                                                                        <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
+                                                                        <div class="side-menu__link__title">Elemento Almacén</div>
+                                                                    </a>
+                                                                </li>
+                                                            @endif
+                                                            @if($visibleConfiguracion['lista_precio'])
+                                                                <li>
+                                                                    <a href="{{ route('modules.configuracion.listas-precio.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.listas-precio*') ? 'side-menu__link--active' : '' }}">
+                                                                        <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
+                                                                        <div class="side-menu__link__title">Lista de Precio</div>
+                                                                    </a>
+                                                                </li>
+                                                            @endif
                                                             @if($visibleConfiguracion['marca'])
                                                                 <li>
                                                                     <a href="{{ route('modules.configuracion.marcas.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.marcas*') ? 'side-menu__link--active' : '' }}">
@@ -741,19 +775,11 @@
                                                                     </a>
                                                                 </li>
                                                             @endif
-                                                            @if($visibleConfiguracion['unidad_medida'])
+                                                            @if($visibleConfiguracion['modelo'])
                                                                 <li>
-                                                                    <a href="{{ route('modules.configuracion.unidad-medida.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.unidad-medida*') ? 'side-menu__link--active' : '' }}">
+                                                                    <a href="{{ route('modules.configuracion.modelo.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.modelo*') ? 'side-menu__link--active' : '' }}">
                                                                         <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
-                                                                        <div class="side-menu__link__title">Unidad de Medida</div>
-                                                                    </a>
-                                                                </li>
-                                                            @endif
-                                                            @if($visibleConfiguracion['tipo_pedido'])
-                                                                <li>
-                                                                    <a href="{{ route('modules.configuracion.tipos-pedido.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.tipos-pedido*') ? 'side-menu__link--active' : '' }}">
-                                                                        <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
-                                                                        <div class="side-menu__link__title">Tipo de Pedido</div>
+                                                                        <div class="side-menu__link__title">Modelo</div>
                                                                     </a>
                                                                 </li>
                                                             @endif
@@ -765,11 +791,28 @@
                                                                     </a>
                                                                 </li>
                                                             @endif
-                                                            @if($visibleConfiguracion['lista_precio'])
+                                                            @if($visibleConfiguracion['tipo_elemento'])
                                                                 <li>
-                                                                    <a href="{{ route('modules.configuracion.listas-precio.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.listas-precio*') ? 'side-menu__link--active' : '' }}">
+                                                                    <a href="{{ route('modules.configuracion.tipos-elemento.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.tipos-elemento*') ? 'side-menu__link--active' : '' }}">
                                                                         <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
-                                                                        <div class="side-menu__link__title">Lista de Precio</div>
+                                                                        <div class="side-menu__link__title">Tipo de Elemento</div>
+                                                                    </a>
+                                                                </li>
+                                                            @endif
+                                                            @if($visibleConfiguracion['tipo_pedido'])
+                                                                <li>
+                                                                    <a href="{{ route('modules.configuracion.tipos-pedido.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.tipos-pedido*') ? 'side-menu__link--active' : '' }}">
+                                                                        <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
+                                                                        <div class="side-menu__link__title">Tipo de Pedido</div>
+                                                                    </a>
+                                                                </li>
+                                                            @endif
+                                                            
+                                                            @if($visibleConfiguracion['unidad_medida'])
+                                                                <li>
+                                                                    <a href="{{ route('modules.configuracion.unidad-medida.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.unidad-medida*') ? 'side-menu__link--active' : '' }}">
+                                                                        <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
+                                                                        <div class="side-menu__link__title">Unidad de Medida</div>
                                                                     </a>
                                                                 </li>
                                                             @endif
@@ -811,6 +854,51 @@
                                                         <a href="{{ route('modules.configuracion.auditoria.index') }}" class="ml-2 border-slate-200/20 pl-2 side-menu__link {{ request()->routeIs('modules.configuracion.auditoria*') ? 'side-menu__link--active' : '' }}">
                                                             <i data-lucide="file-text" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
                                                             <div class="side-menu__link__title">Auditoría</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                            </ul>
+                                        </li>
+                                    @elseif($module === 'sistema')
+                                        @php
+                                            $isSistemaActive = request()->routeIs('modules.sistema*');
+                                        @endphp
+                                        <li>
+                                            <a href="javascript:;" class="side-menu__link {{ $isSistemaActive ? 'side-menu__link--active' : '' }} [&.side-menu__link--active]:side-menu__link--open" data-tw-toggle="collapse" data-tw-target="#side-menu-sistema">
+                                                <i data-lucide="settings-2" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                <div class="side-menu__link__title">Sistema</div>
+                                                <i data-lucide="chevron-down" class="stroke-[1] w-5 h-5 side-menu__link__chevron"></i>
+                                            </a>
+                                            <ul id="side-menu-sistema" class="side-menu__ul-collapse {{ $isSistemaActive ? '' : 'hidden' }}">
+                                                @if($visibleSistema['vista'])
+                                                    <li>
+                                                        <a href="{{ route('modules.sistema.vistas.index') }}" class="side-menu__link ml-2 {{ request()->routeIs('modules.sistema.vistas*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Vista</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                                @if($visibleSistema['flujo'])
+                                                    <li>
+                                                        <a href="{{ route('modules.sistema.flujos.index') }}" class="side-menu__link ml-2 {{ request()->routeIs('modules.sistema.flujos*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Flujo</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                                @if($visibleSistema['flujoregla'])
+                                                    <li>
+                                                        <a href="{{ route('modules.sistema.flujo-reglas.index') }}" class="side-menu__link ml-2 {{ request()->routeIs('modules.sistema.flujo-reglas*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Flujo Regla</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                                @if($visibleSistema['historialflujo'])
+                                                    <li>
+                                                        <a href="{{ route('modules.sistema.historial-flujos.index') }}" class="side-menu__link ml-2 {{ request()->routeIs('modules.sistema.historial-flujos*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right" class="stroke-[1] w-3 h-3 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Historial Flujo</div>
                                                         </a>
                                                     </li>
                                                 @endif
@@ -901,7 +989,6 @@
                             <a class="flex items-center rounded-xl px-3 py-2.5 hover:bg-slate-100/80" href="#">
                                 <div>
                                     <div class="image-fit h-11 w-11 overflow-hidden rounded-full border-2 border-slate-200/70">
-                                        <img src="{{ asset('tailwise/images/users/user3-50x50.jpg') }}" alt="Usuario">
                                     </div>
                                 </div>
                                 <div class="sm:ml-5">
@@ -914,7 +1001,6 @@
                             <a class="flex items-center rounded-xl px-3 py-2.5 hover:bg-slate-100/80" href="#">
                                 <div>
                                     <div class="image-fit h-11 w-11 overflow-hidden rounded-full border-2 border-slate-200/70">
-                                        <img src="{{ asset('tailwise/images/users/user3-50x50.jpg') }}" alt="Usuario">
                                     </div>
                                 </div>
                                 <div class="sm:ml-5">
@@ -923,13 +1009,10 @@
                                     <div class="my-3.5 w-40 rounded-[0.6rem] border bg-slate-50/80 p-1 sm:w-56">
                                         <div class="grid grid-cols-3 overflow-hidden rounded-[0.6rem]">
                                             <div class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                                <img src="{{ asset('tailwise/images/projects/project3-400x400.jpg') }}" alt="Proyecto">
                                             </div>
                                             <div class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                                <img src="{{ asset('tailwise/images/projects/project3-400x400.jpg') }}" alt="Proyecto">
                                             </div>
                                             <div class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                                <img src="{{ asset('tailwise/images/projects/project2-400x400.jpg') }}" alt="Proyecto">
                                             </div>
                                         </div>
                                     </div>
@@ -940,7 +1023,6 @@
                             <a class="flex items-center rounded-xl px-3 py-2.5 hover:bg-slate-100/80" href="#">
                                 <div>
                                     <div class="image-fit h-11 w-11 overflow-hidden rounded-full border-2 border-slate-200/70">
-                                        <img src="{{ asset('tailwise/images/users/user3-50x50.jpg') }}" alt="Usuario">
                                     </div>
                                 </div>
                                 <div class="sm:ml-5">
@@ -949,13 +1031,10 @@
                                     <div class="my-3.5 w-40 rounded-[0.6rem] border bg-slate-50/80 p-1 sm:w-56">
                                         <div class="grid grid-cols-3 overflow-hidden rounded-[0.6rem]">
                                             <div class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                                <img src="{{ asset('tailwise/images/projects/project7-400x400.jpg') }}" alt="Proyecto">
                                             </div>
                                             <div class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                                <img src="{{ asset('tailwise/images/projects/project9-400x400.jpg') }}" alt="Proyecto">
                                             </div>
                                             <div class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                                <img src="{{ asset('tailwise/images/projects/project6-400x400.jpg') }}" alt="Proyecto">
                                             </div>
                                         </div>
                                     </div>
@@ -966,7 +1045,6 @@
                             <a class="flex items-center rounded-xl px-3 py-2.5 hover:bg-slate-100/80" href="#">
                                 <div>
                                     <div class="image-fit h-11 w-11 overflow-hidden rounded-full border-2 border-slate-200/70">
-                                        <img src="{{ asset('tailwise/images/users/user3-50x50.jpg') }}" alt="Usuario">
                                     </div>
                                 </div>
                                 <div class="sm:ml-5">
@@ -975,13 +1053,10 @@
                                     <div class="my-3.5 w-40 rounded-[0.6rem] border bg-slate-50/80 p-1 sm:w-56">
                                         <div class="grid grid-cols-3 overflow-hidden rounded-[0.6rem]">
                                             <div class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                                <img src="{{ asset('tailwise/images/projects/project3-400x400.jpg') }}" alt="Proyecto">
                                             </div>
                                             <div class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                                <img src="{{ asset('tailwise/images/projects/project2-400x400.jpg') }}" alt="Proyecto">
                                             </div>
                                             <div class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                                <img src="{{ asset('tailwise/images/projects/project3-400x400.jpg') }}" alt="Proyecto">
                                             </div>
                                         </div>
                                     </div>
@@ -992,7 +1067,6 @@
                             <a class="flex items-center rounded-xl px-3 py-2.5 hover:bg-slate-100/80" href="#">
                                 <div>
                                     <div class="image-fit h-11 w-11 overflow-hidden rounded-full border-2 border-slate-200/70">
-                                        <img src="{{ asset('tailwise/images/users/user3-50x50.jpg') }}" alt="Usuario">
                                     </div>
                                 </div>
                                 <div class="sm:ml-5">
@@ -1006,7 +1080,6 @@
                             <a class="flex items-center rounded-xl px-3 py-2.5 hover:bg-slate-100/80" href="#">
                                 <div>
                                     <div class="image-fit h-11 w-11 overflow-hidden rounded-full border-2 border-slate-200/70">
-                                        <img src="{{ asset('tailwise/images/users/user3-50x50.jpg') }}" alt="Usuario">
                                     </div>
                                 </div>
                                 <div class="sm:ml-5">
@@ -1015,13 +1088,10 @@
                                     <div class="my-3.5 w-40 rounded-[0.6rem] border bg-slate-50/80 p-1 sm:w-56">
                                         <div class="grid grid-cols-3 overflow-hidden rounded-[0.6rem]">
                                             <div class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                                <img src="{{ asset('tailwise/images/projects/project9-400x400.jpg') }}" alt="Proyecto">
                                             </div>
                                             <div class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                                <img src="{{ asset('tailwise/images/projects/project8-400x400.jpg') }}" alt="Proyecto">
                                             </div>
                                             <div class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                                <img src="{{ asset('tailwise/images/projects/project3-400x400.jpg') }}" alt="Proyecto">
                                             </div>
                                         </div>
                                     </div>

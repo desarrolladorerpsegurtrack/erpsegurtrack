@@ -11,6 +11,18 @@ use Illuminate\Support\Facades\DB;
 
 class RolesService
 {
+    public function getVistasCatalog(): Collection
+    {
+        return DB::table('vista')
+            ->select('idvista', 'nombre', 'detalle', 'estado')
+            ->orderBy('nombre')
+            ->get()
+            ->map(function ($vista) {
+                $vista->view_name = 'vistas.vista_' . $vista->idvista;
+                return $vista;
+            });
+    }
+
     public function getRoleList(Request $request, int $perPage): LengthAwarePaginator
     {
         $query = $this->applyFilters($this->buildBaseQuery(), $this->extractFilters($request));
@@ -48,11 +60,11 @@ class RolesService
         return [
             ['key' => 'nombre', 'label' => 'Nombre'],
             ['key' => 'fechaCreacion', 'label' => 'Fecha Creación'],
-            ['key' => 'estado', 'label' => 'Estado', 'value' => fn ($role) => $role->estado === '1' ? 'Activo' : 'Inactivo'],
+            ['key' => 'estado', 'label' => 'Estado', 'value' => fn ($role) => $role->estado == '1'  ? 'Activo' : 'Inactivo'],
         ];
     }
 
-    public function buildRoleFields(array $permissionsMatrix): array
+    public function buildRoleFields(array $permissionsMatrix, Collection $vistasCatalog, array $selectedVistaIds = []): array
     {
         return [
             [
@@ -60,23 +72,35 @@ class RolesService
                 'type' => 'text',
                 'label' => 'Nombre',
                 'required' => true,
-                'maxlength' => 50,
+                'minlength' => 2,
+                'maxlength' => 15,
             ],
             [
                 'name' => 'estado',
                 'type' => 'select',
                 'label' => 'Estado',
-                'required' => false,
+                'required' => true,
                 'options' => ['1' => 'Activo', '0' => 'Inactivo'],
             ],
             [
                 'name' => 'permissions',
                 'type' => 'permissions-matrix',
                 'label' => 'Permisos del rol',
-                'required' => true,
+                'required' => false,
                 'modules' => RolePermissionMatrix::modules(),
                 'actions' => RolePermissionMatrix::actions(),
                 'value' => $permissionsMatrix,
+                'colSpan' => 2,
+            ],
+            [
+                'name' => 'vista_permissions',
+                'type' => 'vista-permissions',
+                'label' => 'Acciones permitidas',
+                'required' => false,
+                'optionsData' => $vistasCatalog,
+                'optionKey' => 'idvista',
+                'optionLabel' => 'nombre',
+                'value' => $selectedVistaIds,
                 'colSpan' => 2,
             ],
         ];
@@ -102,6 +126,62 @@ class RolesService
         return RolePermissionMatrix::buildInforolRows($roleId, $permissionPairs);
     }
 
+    public function getStoredVistaIdsByRoleId(int $roleId): array
+    {
+        return DB::table('inforol')
+            ->where('rol_idrol', $roleId)
+            ->where('accion', 'ver')
+            ->where('modulo', 'like', 'ticket.vista.%')
+            ->pluck('modulo')
+            ->map(function ($module) {
+                $module = (string) $module;
+                return (int) str_replace('ticket.vista.', '', $module);
+            })
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    public function extractSelectedVistaIds(array $vistaInput): array
+    {
+        return collect($vistaInput)
+            ->map(fn ($id) => is_numeric($id) ? (int) $id : null)
+            ->filter(fn ($id) => $id !== null && $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    public function buildVistaInforolRows(int $roleId, array $vistaIds): array
+    {
+        if ($vistaIds === []) {
+            return [];
+        }
+
+        $vistasById = $this->getVistasCatalog()->keyBy(fn ($vista) => (int) $vista->idvista);
+        $rows = [];
+
+        foreach ($vistaIds as $vistaId) {
+            $vistaId = (int) $vistaId;
+            if ($vistaId <= 0) {
+                continue;
+            }
+
+            $vista = $vistasById->get($vistaId);
+            $vistaName = $vista !== null ? (string) $vista->nombre : 'Vista ' . $vistaId;
+
+            $rows[] = [
+                'rol_idrol' => $roleId,
+                'modulo' => 'ticket.vista.' . $vistaId,
+                'accion' => 'ver',
+                'nombre' => 'Ver vista ' . $vistaName,
+            ];
+        }
+
+        return $rows;
+    }
+
     public function validateRolePermissionDependencies(array $permissionPairs): ?string
     {
         return RolePermissionMatrix::validateDependencies($permissionPairs);
@@ -117,9 +197,9 @@ class RolesService
         return DB::table('inforol')->where('rol_idrol', $id)->select('modulo', 'accion')->get();
     }
 
-    public function createRole(array $validated, array $permissionPairs): int
+    public function createRole(array $validated, array $permissionPairs, array $vistaIds): int
     {
-        return DB::transaction(function () use ($validated, $permissionPairs) {
+        return DB::transaction(function () use ($validated, $permissionPairs, $vistaIds) {
             $roleId = DB::table('rol')->insertGetId([
                 'nombre' => $validated['nombre'],
                 'estado' => $validated['estado'] ?? null,
@@ -127,22 +207,33 @@ class RolesService
                 'fechaCreacion' => now(),
             ]);
 
-            DB::table('inforol')->insert($this->buildInforolRows($roleId, $permissionPairs));
+            $permissionRows = $this->buildInforolRows($roleId, $permissionPairs);
+            $vistaRows = $this->buildVistaInforolRows($roleId, $vistaIds);
+
+            if ($permissionRows !== [] || $vistaRows !== []) {
+                DB::table('inforol')->insert(array_merge($permissionRows, $vistaRows));
+            }
 
             return $roleId;
         });
     }
 
-    public function updateRole(int $id, array $validated, array $permissionPairs): void
+    public function updateRole(int $id, array $validated, array $permissionPairs, array $vistaIds): void
     {
-        DB::transaction(function () use ($id, $validated, $permissionPairs) {
+        DB::transaction(function () use ($id, $validated, $permissionPairs, $vistaIds) {
             DB::table('rol')->where('idrol', $id)->update([
                 'nombre' => $validated['nombre'],
                 'estado' => $validated['estado'] ?? null,
             ]);
 
             DB::table('inforol')->where('rol_idrol', $id)->delete();
-            DB::table('inforol')->insert($this->buildInforolRows($id, $permissionPairs));
+
+            $permissionRows = $this->buildInforolRows($id, $permissionPairs);
+            $vistaRows = $this->buildVistaInforolRows($id, $vistaIds);
+
+            if ($permissionRows !== [] || $vistaRows !== []) {
+                DB::table('inforol')->insert(array_merge($permissionRows, $vistaRows));
+            }
         });
     }
 

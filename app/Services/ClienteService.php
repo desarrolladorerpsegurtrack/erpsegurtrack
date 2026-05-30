@@ -24,7 +24,7 @@ class ClienteService
             ->withQueryString();
 
         $paginated->setCollection(
-            $paginated->getCollection()->map(fn ($row) => $this->hydrateRow($row, true))
+            $paginated->getCollection()->map(fn ($row) => $this->hydrateRow($row, true, true))
         );
 
         return $paginated;
@@ -55,7 +55,7 @@ class ClienteService
             ->orderByDesc('c.fechaIngreso')
             ->orderBy('c.idcliente')
             ->get()
-            ->map(fn ($row) => $this->hydrateRow($row, false));
+            ->map(fn ($row) => $this->hydrateRow($row, false, false));
     }
 
     public function getExportColumns(): array
@@ -147,7 +147,7 @@ class ClienteService
         ];
     }
 
-    private function hydrateRow(object $row, bool $useHtml): object
+    private function hydrateRow(object $row, bool $useHtml, bool $includeRelations): object
     {
         $direccion = trim((string) ($row->direccionTexto ?? ''));
         $ubigeoText = trim("{$row->departamento} / {$row->provincia} / {$row->distrito}", ' /');
@@ -165,8 +165,122 @@ class ClienteService
         }
 
         $row->grupo_asignado = $row->grupoNombre ?? 'Sin grupo';
+        $row->relation_groups = $includeRelations ? $this->buildRelationGroups((string) ($row->idcliente ?? '')) : [];
 
         return $row;
+    }
+
+    private function buildRelationGroups(string $clienteId): array
+    {
+        $clienteId = trim($clienteId);
+        if ($clienteId === '') {
+            return [];
+        }
+
+        $groups = [];
+
+        $servicios = DB::table('serviciocliente as sc')
+            ->leftJoin('vehiculo as v', 'v.placa', '=', 'sc.vehiculo_placa')
+            ->leftJoin('almacen as a', 'a.idalmacen', '=', 'sc.almacen_idalmacen')
+            ->select([
+                'sc.idservicioCliente',
+                'sc.vehiculo_placa',
+                'sc.fechaInicio',
+                'sc.fecheVencimiento',
+                'sc.monto',
+                'sc.estado',
+                'sc.docReferencia',
+                DB::raw('COALESCE(v.marca, "") as vehiculo_marca'),
+                DB::raw('COALESCE(v.modelo, "") as vehiculo_modelo'),
+                DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
+            ])
+            ->where('sc.cliente_idcliente', $clienteId)
+            ->orderByDesc('sc.idservicioCliente')
+            ->get();
+
+        if ($servicios->isNotEmpty()) {
+            $groups[] = [
+                'key' => 'servicio_cliente',
+                'label' => 'Servicio cliente',
+                'columns' => [
+                    ['key' => 'idservicioCliente', 'label' => 'ID'],
+                    ['key' => 'vehiculo_placa', 'label' => 'Vehículo'],
+                    ['key' => 'almacen_detalle', 'label' => 'Almacén'],
+                    ['key' => 'fechaInicio', 'label' => 'Inicio'],
+                    ['key' => 'fecheVencimiento', 'label' => 'Vencimiento'],
+                    ['key' => 'monto', 'label' => 'Monto'],
+                    ['key' => 'estado', 'label' => 'Estado'],
+                    ['key' => 'docReferencia', 'label' => 'Documento'],
+                ],
+                'records' => $servicios->map(fn ($row) => (array) $row)->all(),
+            ];
+        }
+
+        $vehiculos = DB::table('vehiculo as v')
+            ->leftJoin('tipovehiculo as tv', 'tv.idtipoVehiculo', '=', 'v.tipoUnidad_idtable1')
+            ->select([
+                'v.placa',
+                'v.tipoUnidad_idtable1',
+                'v.anio',
+                'v.color',
+                'v.marca',
+                'v.modelo',
+                'v.tracto',
+                DB::raw('COALESCE(tv.nombre, "") as tipo_vehiculo'),
+            ])
+            ->where('v.cliente_idcliente', $clienteId)
+            ->orderBy('v.placa')
+            ->get();
+
+        if ($vehiculos->isNotEmpty()) {
+            $groups[] = [
+                'key' => 'vehiculos',
+                'label' => 'Vehículos',
+                'columns' => [
+                    ['key' => 'placa', 'label' => 'Placa'],
+                    ['key' => 'tipo_vehiculo', 'label' => 'Tipo'],
+                    ['key' => 'anio', 'label' => 'Año'],
+                    ['key' => 'marca', 'label' => 'Marca'],
+                    ['key' => 'modelo', 'label' => 'Modelo'],
+                    ['key' => 'color', 'label' => 'Color'],
+                    ['key' => 'tracto', 'label' => 'Tracto'],
+                ],
+                'records' => $vehiculos->map(fn ($row) => (array) $row)->all(),
+            ];
+        }
+
+        $dispositivos = DB::table('dispositivocliente as d')
+            ->select([
+                'd.iddispositivoCliente',
+                'd.vehiculo_placa',
+                'd.marcaDispositivo',
+                'd.modeloDispositivo',
+                'd.fechaInstalacion',
+                'd.fechaBaja',
+                'd.estado',
+            ])
+            ->whereIn('d.vehiculo_placa', DB::table('vehiculo')->where('cliente_idcliente', $clienteId)->select('placa'))
+            ->orderBy('d.iddispositivoCliente')
+            ->get();
+
+        if ($dispositivos->isNotEmpty()) {
+            $groups[] = [
+                'key' => 'dispositivo_cliente',
+                'label' => 'Dispositivo cliente',
+                'columns' => [
+                    ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo'],
+                    ['key' => 'vehiculo_placa', 'label' => 'Vehículo'],
+                    ['key' => 'marcaDispositivo', 'label' => 'Marca'],
+                    ['key' => 'modeloDispositivo', 'label' => 'Modelo'],
+                    ['key' => 'fechaInstalacion', 'label' => 'Fecha instalación'],
+                    ['key' => 'fechaBaja', 'label' => 'Fecha baja'],
+                    ['key' => 'estado', 'label' => 'Estado'],
+                ],
+                'records' => $dispositivos->map(fn ($row) => (array) $row)->all(),
+            ];
+        }
+
+        return $groups;
     }
 
     public function getEstados(): Collection

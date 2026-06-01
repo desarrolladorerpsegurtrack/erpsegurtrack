@@ -4839,6 +4839,7 @@ class ConfiguracionController extends Controller
     {
         $baseQuery = DB::table('detallelistaprecio as d')
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'd.almacen_idalmacen')
+            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
             ->leftJoin('listaprecio as lp', 'lp.idListaPrecio', '=', 'd.ListaPrecio_idListaPrecio')
             ->select([
                 'd.iddetalleListaPrecio',
@@ -4846,6 +4847,7 @@ class ConfiguracionController extends Controller
                 'd.ListaPrecio_idListaPrecio',
                 'd.precio',
                 DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
+                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(ep.razonSocial), ""), "Sin empresa"), " - ", COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
                 DB::raw('COALESCE(lp.nombreLista, "") as listaprecio_nombre'),
             ]);
             $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -4858,6 +4860,7 @@ class ConfiguracionController extends Controller
                     ->where('d.iddetalleListaPrecio', 'like', $term)
                     ->orWhere('d.almacen_idalmacen', 'like', $term)
                     ->orWhere('d.ListaPrecio_idListaPrecio', 'like', $term)
+                    ->orWhere('ep.razonSocial', 'like', $term)
                     ->orWhere('a.detalle', 'like', $term)
                     ->orWhere('lp.nombreLista', 'like', $term)
                     ->orWhere('d.precio', 'like', $term);
@@ -4875,7 +4878,7 @@ class ConfiguracionController extends Controller
             'items' => $items,
             'columns' => [
                 ['key' => 'iddetalleListaPrecio', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'almacen_detalle', 'label' => 'Almacén', 'type' => 'text'],
+                ['key' => 'almacen_label', 'label' => 'Almacén', 'type' => 'text', 'wrap' => true],
                 ['key' => 'listaprecio_nombre', 'label' => 'Lista de precio', 'type' => 'text'],
                 ['key' => 'precio', 'label' => 'Precio', 'type' => 'text'],
             ],
@@ -4916,7 +4919,7 @@ class ConfiguracionController extends Controller
                     'placeholder' => 'Selecciona un almacén',
                     'optionsData' => $this->almacenOptions(),
                     'optionKey' => 'idalmacen',
-                    'optionLabel' => 'detalle',
+                    'optionLabel' => 'label',
                 ],
                 [
                     'name' => 'ListaPrecio_idListaPrecio',
@@ -4985,7 +4988,7 @@ class ConfiguracionController extends Controller
                     'placeholder' => 'Selecciona un almacén',
                     'optionsData' => $this->almacenOptions(),
                     'optionKey' => 'idalmacen',
-                    'optionLabel' => 'detalle',
+                    'optionLabel' => 'label',
                 ],
                 [
                     'name' => 'ListaPrecio_idListaPrecio',
@@ -5071,6 +5074,7 @@ class ConfiguracionController extends Controller
         $baseQuery = DB::table('detallelistaprecio as d')
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'd.almacen_idalmacen')
             ->leftJoin('listaprecio as lp', 'lp.idListaPrecio', '=', 'd.ListaPrecio_idListaPrecio')
+            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
             ->select([
                 'd.iddetalleListaPrecio',
                 'd.almacen_idalmacen',
@@ -5078,6 +5082,7 @@ class ConfiguracionController extends Controller
                 'd.precio',
                 DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
                 DB::raw('COALESCE(lp.nombreLista, "") as listaprecio_nombre'),
+                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(ep.razonSocial), ""), "Sin empresa"), " - ", COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
             ]);
             $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
@@ -5089,6 +5094,7 @@ class ConfiguracionController extends Controller
                     ->where('d.iddetalleListaPrecio', 'like', $term)
                     ->orWhere('d.almacen_idalmacen', 'like', $term)
                     ->orWhere('d.ListaPrecio_idListaPrecio', 'like', $term)
+                    ->orWhere('ep.razonSocial', 'like', $term)
                     ->orWhere('a.detalle', 'like', $term)
                     ->orWhere('lp.nombreLista', 'like', $term)
                     ->orWhere('d.precio', 'like', $term);
@@ -5101,7 +5107,7 @@ class ConfiguracionController extends Controller
 
         $columns = [
             ['key' => 'iddetalleListaPrecio', 'label' => 'ID'],
-            ['key' => 'almacen_detalle', 'label' => 'Almacén'],
+            ['key' => 'almacen_label', 'label' => 'Almacén'],
             ['key' => 'listaprecio_nombre', 'label' => 'Lista de precio'],
             ['key' => 'precio', 'label' => 'Precio'],
         ];
@@ -5119,6 +5125,7 @@ class ConfiguracionController extends Controller
     {
         $baseQuery = DB::table('elementoalmacen as e')
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'e.dispositivo_iddispositivo')
+            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
             ->select([
                 'e.imei',
                 'e.dispositivo_iddispositivo',
@@ -5126,6 +5133,7 @@ class ConfiguracionController extends Controller
                 'e.estado',
                 'e.idAuxiliar',
                 DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
+                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(ep.razonSocial), ""), "Sin empresa"), " - ", COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
                 DB::raw('CASE WHEN e.estado = 1 THEN "Activo" ELSE "Inactivo" END as estado_label'),
             ]);
             $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -5138,6 +5146,7 @@ class ConfiguracionController extends Controller
                     ->where('e.imei', 'like', $term)
                     ->orWhere('e.dispositivo_iddispositivo', 'like', $term)
                     ->orWhere('a.detalle', 'like', $term)
+                    ->orWhere('ep.razonSocial', 'like', $term)
                     ->orWhere('e.fechaIngreso', 'like', $term)
                     ->orWhere('e.estado', 'like', $term)
                     ->orWhere('e.idAuxiliar', 'like', $term);
@@ -5155,7 +5164,7 @@ class ConfiguracionController extends Controller
             'items' => $items,
             'columns' => [
                 ['key' => 'imei', 'label' => 'IMEI', 'type' => 'text'],
-                ['key' => 'almacen_detalle', 'label' => 'Dispositivo', 'type' => 'text'],
+                ['key' => 'almacen_label', 'label' => 'Dispositivo', 'type' => 'text', 'wrap' => true],
                 ['key' => 'fechaIngreso', 'label' => 'Fecha ingreso', 'type' => 'date'],
                 ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
                 ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar', 'type' => 'text'],
@@ -5208,7 +5217,7 @@ class ConfiguracionController extends Controller
                     'placeholder' => 'Selecciona un dispositivo de Almacén',
                     'optionsData' => $this->almacenOptions(),
                     'optionKey' => 'idalmacen',
-                    'optionLabel' => 'detalle',
+                    'optionLabel' => 'label',
                 ],
                 [
                     'name' => 'estado',
@@ -5293,7 +5302,7 @@ class ConfiguracionController extends Controller
                     'placeholder' => 'Selecciona un dispositivo de almacén',
                     'optionsData' => $this->almacenOptions(),
                     'optionKey' => 'idalmacen',
-                    'optionLabel' => 'detalle',
+                    'optionLabel' => 'label',
                 ],
                 [
                     'name' => 'estado',
@@ -5383,6 +5392,7 @@ class ConfiguracionController extends Controller
 
         $baseQuery = DB::table('elementoalmacen as e')
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'e.dispositivo_iddispositivo')
+            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
             ->select([
                 'e.imei',
                 'e.dispositivo_iddispositivo',
@@ -5391,6 +5401,7 @@ class ConfiguracionController extends Controller
                 'e.idAuxiliar',
                 DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
                 DB::raw('CASE WHEN e.estado = 1 THEN "Activo" ELSE "Inactivo" END as estado_label'),
+                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(ep.razonSocial), ""), "Sin empresa"), " - ", COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
             ]);
             $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
@@ -5403,6 +5414,7 @@ class ConfiguracionController extends Controller
                     ->orWhere('e.dispositivo_iddispositivo', 'like', $term)
                     ->orWhere('a.detalle', 'like', $term)
                     ->orWhere('e.fechaIngreso', 'like', $term)
+                    ->orWhere('ep.razonSocial', 'like', $term)
                     ->orWhere('e.estado', 'like', $term)
                     ->orWhere('e.idAuxiliar', 'like', $term);
             });
@@ -5414,7 +5426,7 @@ class ConfiguracionController extends Controller
 
         $columns = [
             ['key' => 'imei', 'label' => 'IMEI'],
-            ['key' => 'almacen_detalle', 'label' => 'Almacén'],
+            ['key' => 'almacen_label', 'label' => 'Almacén'],
             ['key' => 'fechaIngreso', 'label' => 'Fecha ingreso'],
             ['key' => 'estado_label', 'label' => 'Estado'],
             ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar'],
@@ -5431,10 +5443,29 @@ class ConfiguracionController extends Controller
 
     private function almacenOptions()
     {
-        return DB::table('almacen')
-            ->select(['idalmacen', 'detalle'])
-            ->orderBy('detalle')
-            ->get();
+        return DB::table('almacen as a')
+            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
+            ->select([
+                'a.idalmacen',
+                'a.detalle',
+                'ep.razonSocial',
+            ])
+            ->orderBy('ep.razonSocial')
+            ->orderBy('a.detalle')
+            ->get() 
+            ->map(fn ($row): array => [
+                'value' => (string) $row->idalmacen,
+                'label' => trim(
+                    (string) (
+                        trim((string) ($row->razonSocial ?? '')) !== ''
+                            ? trim((string) $row->razonSocial)
+                            : 'Sin empresa'
+                    ) . ' - ' . trim((string) ($row->detalle ?? 'Sin detalle'))
+                ),
+                'idalmacen' => (int) $row->idalmacen,
+                'detalle' => trim((string) ($row->detalle ?? 'Sin detalle')),
+                'razonSocial' => trim((string) ($row->razonSocial ?? '')),
+            ]);
     }
 
     private function listaprecioOptions()

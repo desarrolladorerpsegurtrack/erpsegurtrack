@@ -20,6 +20,7 @@ class AlmacenNotaSalidaController extends Controller
 
     private const LOCK_RESOURCE = 'almacen.nota_salida';
     private const LAST_REPORT_SESSION_KEY = 'almacen_nota_salida_last_report';
+    private const LAST_REPORT_VISIBLE_FLASH_KEY = 'almacen_nota_salida_show_last_report';
 
     public function index(Request $request): View
     {
@@ -41,7 +42,7 @@ class AlmacenNotaSalidaController extends Controller
             'singularTitle' => 'Nota de salida',
             'items' => $items,
             'createRoute' => route('modules.almacen.nota-salida.create'),
-            'createButtonLabel' => 'Dar de baja elementos',
+            'createButtonLabel' => 'Nota de salida',
             'editRoute' => null,
             'showRoute' => null,
             'destroyRoute' => null,
@@ -51,8 +52,8 @@ class AlmacenNotaSalidaController extends Controller
             'showActionsColumn' => false,
             'columns' => [
                 ['key' => 'imei', 'label' => 'IMEI', 'type' => 'text'],
-                ['key' => 'almacen_detalle', 'label' => 'Dispositivo', 'type' => 'text', 'wrap' => true],
-                ['key' => 'fecha_ingreso_label', 'label' => 'Fecha ingreso', 'type' => 'text'],
+                ['key' => 'almacen_label', 'label' => 'Dispositivo', 'type' => 'text', 'wrap' => true],
+                ['key' => 'fecha_ingreso_label', 'label' => 'Fecha salida', 'type' => 'text'],
                 ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
                 ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar', 'type' => 'text'],
             ],
@@ -99,8 +100,8 @@ class AlmacenNotaSalidaController extends Controller
 
         $columns = [
             ['key' => 'imei', 'label' => 'IMEI'],
-            ['key' => 'almacen_detalle', 'label' => 'Dispositivo'],
-            ['key' => 'fecha_ingreso_label', 'label' => 'Fecha ingreso'],
+            ['key' => 'almacen_label', 'label' => 'Dispositivo'],
+            ['key' => 'fecha_ingreso_label', 'label' => 'Fecha salida'],
             ['key' => 'estado', 'label' => 'Estado'],
             ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar'],
         ];
@@ -130,8 +131,13 @@ class AlmacenNotaSalidaController extends Controller
             return $row;
         });
 
-        $report = session(self::LAST_REPORT_SESSION_KEY, []);
+        $showReport = session()->pull(self::LAST_REPORT_VISIBLE_FLASH_KEY, false);
+        $report = $showReport ? session(self::LAST_REPORT_SESSION_KEY, []) : [];
         $report = is_array($report) ? $report : [];
+
+        if (! $showReport) {
+            session()->forget(self::LAST_REPORT_SESSION_KEY);
+        }
 
         return view('almacen.nota-salida.operar', [
             'title' => 'Dar de baja elementos',
@@ -144,8 +150,8 @@ class AlmacenNotaSalidaController extends Controller
             'report' => $report,
             'columns' => [
                 ['key' => 'imei', 'label' => 'IMEI', 'type' => 'text'],
-                ['key' => 'almacen_detalle', 'label' => 'Dispositivo', 'type' => 'text', 'wrap' => true],
-                ['key' => 'fecha_ingreso_label', 'label' => 'Fecha ingreso', 'type' => 'text'],
+                ['key' => 'almacen_label', 'label' => 'Dispositivo', 'type' => 'text', 'wrap' => true],
+                ['key' => 'fecha_ingreso_label', 'label' => 'Fecha Ingreso', 'type' => 'text'],
                 ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
                 ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar', 'type' => 'text'],
             ],
@@ -184,9 +190,8 @@ class AlmacenNotaSalidaController extends Controller
         $rows = collect($report['rows'])->map(function ($row) {
             return (object) [
                 'imei' => (string) ($row['imei'] ?? ''),
-                'almacen_detalle' => (string) ($row['almacen_detalle'] ?? ''),
-                'estado_anterior' => (string) ($row['estado_anterior'] ?? ''),
-                'estado_nuevo' => (string) ($row['estado_nuevo'] ?? ''),
+                'almacen_label' => (string) ($row['almacen_label'] ?? ''),
+                'fecha' => (string) ($row['fecha'] ?? ''),
                 'resultado' => (string) ($row['resultado'] ?? ''),
                 'mensaje' => (string) ($row['mensaje'] ?? ''),
             ];
@@ -194,9 +199,8 @@ class AlmacenNotaSalidaController extends Controller
 
         $columns = [
             ['key' => 'imei', 'label' => 'IMEI'],
-            ['key' => 'almacen_detalle', 'label' => 'Dispositivo'],
-            ['key' => 'estado_anterior', 'label' => 'Estado anterior'],
-            ['key' => 'estado_nuevo', 'label' => 'Estado nuevo'],
+            ['key' => 'almacen_label', 'label' => 'Dispositivo'],
+            ['key' => 'fecha', 'label' => 'Fecha Salida'],
             ['key' => 'resultado', 'label' => 'Resultado'],
             ['key' => 'mensaje', 'label' => 'Mensaje'],
         ];
@@ -229,6 +233,7 @@ class AlmacenNotaSalidaController extends Controller
 
         $selectedRows = DB::table('elementoalmacen as e')
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'e.dispositivo_iddispositivo')
+            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
             ->whereIn('e.imei', $selectedImeis->all())
             ->select([
                 'e.imei',
@@ -237,6 +242,7 @@ class AlmacenNotaSalidaController extends Controller
                 'e.fechaIngreso',
                 'e.idAuxiliar',
                 DB::raw('COALESCE(a.detalle, "Sin dispositivo") as almacen_detalle'),
+                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(ep.razonSocial), ""), "Sin empresa"), " - ", COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
             ])
             ->get()
             ->keyBy('imei');
@@ -263,9 +269,8 @@ class AlmacenNotaSalidaController extends Controller
                     $summary['omitidos']++;
                     $reportRows[] = [
                         'imei' => $imei,
-                        'almacen_detalle' => 'Sin coincidencia',
-                        'estado_anterior' => '-',
-                        'estado_nuevo' => '-',
+                        'almacen_label' => 'Sin coincidencia',
+                        'fecha' => '-',
                         'resultado' => 'Omitido',
                         'mensaje' => 'El elemento no existe o ya no está disponible.',
                     ];
@@ -277,27 +282,29 @@ class AlmacenNotaSalidaController extends Controller
                     $summary['omitidos']++;
                     $reportRows[] = [
                         'imei' => (string) $record->imei,
-                        'almacen_detalle' => (string) ($record->almacen_detalle ?? 'Sin dispositivo'),
-                        'estado_anterior' => 'Inactivo',
-                        'estado_nuevo' => 'Inactivo',
+                        'almacen_label' => (string) ($record->almacen_label ?? 'Sin dispositivo'),
+                        'fecha' => '-',
                         'resultado' => 'Omitido',
                         'mensaje' => 'El elemento ya estaba inactivo.',
                     ];
                     continue;
                 }
 
+                $fechaSalida = now()->format('Y-m-d H:i:s');
                 $affected = DB::table('elementoalmacen')
                     ->where('imei', $imei)
                     ->where('estado', 1)
-                    ->update(['estado' => 0]);
+                    ->update([
+                        'estado' => 0,
+                        'fechaIngreso' => $fechaSalida,
+                    ]);
 
                 if ($affected < 1) {
                     $summary['omitidos']++;
                     $reportRows[] = [
                         'imei' => (string) $record->imei,
-                        'almacen_detalle' => (string) ($record->almacen_detalle ?? 'Sin dispositivo'),
-                        'estado_anterior' => 'Activo',
-                        'estado_nuevo' => 'Activo',
+                        'almacen_label' => (string) ($record->almacen_label ?? 'Sin dispositivo'),
+                        'fecha' => '-',
                         'resultado' => 'Omitido',
                         'mensaje' => 'El estado cambió antes de ejecutar la baja.',
                     ];
@@ -307,9 +314,8 @@ class AlmacenNotaSalidaController extends Controller
                 $summary['bajados']++;
                 $reportRows[] = [
                     'imei' => (string) $record->imei,
-                    'almacen_detalle' => (string) ($record->almacen_detalle ?? 'Sin dispositivo'),
-                    'estado_anterior' => 'Activo',
-                    'estado_nuevo' => 'Inactivo',
+                    'almacen_label' => (string) ($record->almacen_label ?? 'Sin dispositivo'),
+                    'fecha' => $this->formatDateTime($fechaSalida),
                     'resultado' => 'Dado de baja',
                     'mensaje' => 'Cambio de estado ejecutado correctamente.',
                 ];
@@ -338,7 +344,8 @@ class AlmacenNotaSalidaController extends Controller
 
         return redirect()
             ->route('modules.almacen.nota-salida.create')
-            ->with('success', $message);
+            ->with('success', $message)
+            ->with(self::LAST_REPORT_VISIBLE_FLASH_KEY, true);
     }
 
     public function edit(string $id): View|RedirectResponse
@@ -366,6 +373,7 @@ class AlmacenNotaSalidaController extends Controller
     {
         $query = DB::table('elementoalmacen as e')
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'e.dispositivo_iddispositivo')
+            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
             ->select([
                 'e.imei',
                 'e.dispositivo_iddispositivo',
@@ -373,6 +381,7 @@ class AlmacenNotaSalidaController extends Controller
                 'e.estado',
                 'e.idAuxiliar',
                 DB::raw('COALESCE(a.detalle, "Sin dispositivo") as almacen_detalle'),
+                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(ep.razonSocial), ""), "Sin empresa"), " - ", COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
             ])
             ->where('e.estado', $estado);
 
@@ -383,6 +392,7 @@ class AlmacenNotaSalidaController extends Controller
                     ->where('e.imei', 'like', $term)
                     ->orWhere('e.dispositivo_iddispositivo', 'like', $term)
                     ->orWhere('a.detalle', 'like', $term)
+                    ->orWhere('ep.razonSocial', 'like', $term)
                     ->orWhere('e.fechaIngreso', 'like', $term)
                     ->orWhere('e.estado', 'like', $term)
                     ->orWhere('e.idAuxiliar', 'like', $term);
@@ -402,15 +412,28 @@ class AlmacenNotaSalidaController extends Controller
 
     private function almacenOptions(): Collection
     {
-        return DB::table('almacen')
-            ->select(['idalmacen', 'detalle'])
-            ->orderBy('detalle')
-            ->get()
+        return DB::table('almacen as a')
+            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
+            ->select([
+                'a.idalmacen',
+                'a.detalle',
+                'ep.razonSocial',
+            ])
+            ->orderBy('ep.razonSocial')
+            ->orderBy('a.detalle')
+            ->get() 
             ->map(fn ($row): array => [
                 'value' => (string) $row->idalmacen,
-                'label' => trim((string) ($row->detalle ?? 'Sin detalle')),
+                'label' => trim(
+                    (string) (
+                        trim((string) ($row->razonSocial ?? '')) !== ''
+                            ? trim((string) $row->razonSocial)
+                            : 'Sin empresa'
+                    ) . ' - ' . trim((string) ($row->detalle ?? 'Sin detalle'))
+                ),
                 'idalmacen' => (int) $row->idalmacen,
                 'detalle' => trim((string) ($row->detalle ?? 'Sin detalle')),
+                'razonSocial' => trim((string) ($row->razonSocial ?? '')),
             ]);
     }
 

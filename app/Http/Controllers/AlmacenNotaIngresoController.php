@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
 class AlmacenNotaIngresoController extends Controller
@@ -54,7 +55,7 @@ class AlmacenNotaIngresoController extends Controller
             'showActionsColumn' => true,
             'columns' => [
                 ['key' => 'imei', 'label' => 'IMEI', 'type' => 'text'],
-                ['key' => 'almacen_detalle', 'label' => 'Dispositivo', 'type' => 'text', 'wrap' => true],
+                ['key' => 'almacen_label', 'label' => 'Dispositivo', 'type' => 'text', 'wrap' => true],
                 ['key' => 'fecha_ingreso_label', 'label' => 'Fecha ingreso', 'type' => 'text'],
                 ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
                 ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar', 'type' => 'text'],
@@ -112,7 +113,7 @@ class AlmacenNotaIngresoController extends Controller
 
         $columns = [
             ['key' => 'imei', 'label' => 'IMEI'],
-            ['key' => 'almacen_detalle', 'label' => 'Dispositivo'],
+            ['key' => 'almacen_label', 'label' => 'Dispositivo'],
             ['key' => 'fecha_ingreso_label', 'label' => 'Fecha ingreso'],
             ['key' => 'estado', 'label' => 'Estado'],
             ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar'],
@@ -143,13 +144,18 @@ class AlmacenNotaIngresoController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        $validated = $this->validateElementoAlmacen($request, true);
+        $validated = $request->validate([
+            'imei' => ['required', 'string', 'max:30', 'regex:/^[0-9]+$/'],
+            'dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
+            'fechaIngreso' => ['nullable', 'date'],
+            'estado' => ['nullable', 'integer', 'in:0,1'],
+            'idAuxiliar' => ['nullable', 'string', 'max:30'],
+        ]);
         $payload = $this->preparePayload($validated, true);
+        
 
-        DB::transaction(function () use ($payload): void {
-            DB::table('elementoalmacen')->insert($payload);
-            $this->publishResourceEvent(self::LOCK_RESOURCE, (string) $payload['imei'], 'created');
-        });
+        DB::table('elementoalmacen')->insert($payload);
+        $this->publishResourceEvent('', (string) $payload['imei'], 'created');
 
         return redirect()
             ->route('modules.almacen.nota-ingreso.index')
@@ -205,7 +211,13 @@ class AlmacenNotaIngresoController extends Controller
             return $redirect;
         }
 
-        $validated = $this->validateElementoAlmacen($request, false);
+        $validated = $request->validate([
+            'imei' => ['required', 'string', 'max:30', 'regex:/^[0-9]+$/', Rule::unique('elementoalmacen', 'imei')->ignore($id, 'imei')],
+            'dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
+            'fechaIngreso' => ['nullable', 'date'],
+            'estado' => ['nullable', 'integer', 'in:0,1'],
+            'idAuxiliar' => ['nullable', 'string', 'max:30'],
+        ]);
         $payload = $this->preparePayload($validated, false);
 
         DB::transaction(function () use ($payload, $request, $id): void {
@@ -244,6 +256,7 @@ class AlmacenNotaIngresoController extends Controller
     {
         $query = DB::table('elementoalmacen as e')
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'e.dispositivo_iddispositivo')
+            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
             ->select([
                 'e.imei',
                 'e.dispositivo_iddispositivo',
@@ -251,6 +264,7 @@ class AlmacenNotaIngresoController extends Controller
                 'e.estado',
                 'e.idAuxiliar',
                 DB::raw('COALESCE(a.detalle, "Sin dispositivo") as almacen_detalle'),
+                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(ep.razonSocial), ""), "Sin empresa"), " - ", COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
             ]);
 
         $query->where('e.estado', 1);
@@ -262,6 +276,7 @@ class AlmacenNotaIngresoController extends Controller
                     ->where('e.imei', 'like', $term)
                     ->orWhere('e.dispositivo_iddispositivo', 'like', $term)
                     ->orWhere('a.detalle', 'like', $term)
+                    ->orWhere('ep.razonSocial', 'like', $term)
                     ->orWhere('e.fechaIngreso', 'like', $term)
                     ->orWhere('e.estado', 'like', $term)
                     ->orWhere('e.idAuxiliar', 'like', $term);
@@ -305,7 +320,7 @@ class AlmacenNotaIngresoController extends Controller
                 'tomSelect' => true,
                 'optionsData' => $this->almacenOptions(),
                 'optionKey' => 'idalmacen',
-                'optionLabel' => 'detalle',
+                'optionLabel' => 'label',
                 'placeholder' => 'Selecciona un dispositivo de almacén',
             ],
             [
@@ -352,6 +367,7 @@ class AlmacenNotaIngresoController extends Controller
     private function preparePayload(array $validated, bool $isCreate): array
     {
         $payload = [
+            'imei' => (string) $validated['imei'],
             'dispositivo_iddispositivo' => (int) $validated['dispositivo_iddispositivo'],
             'estado' => (int) ($validated['estado'] ?? 1),
             'idAuxiliar' => $this->nullableString($validated['idAuxiliar'] ?? null),
@@ -368,15 +384,28 @@ class AlmacenNotaIngresoController extends Controller
 
     private function almacenOptions(): Collection
     {
-        return DB::table('almacen')
-            ->select(['idalmacen', 'detalle'])
-            ->orderBy('detalle')
-            ->get()
+        return DB::table('almacen as a')
+            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
+            ->select([
+                'a.idalmacen',
+                'a.detalle',
+                'ep.razonSocial',
+            ])
+            ->orderBy('ep.razonSocial')
+            ->orderBy('a.detalle')
+            ->get() 
             ->map(fn ($row): array => [
                 'value' => (string) $row->idalmacen,
-                'label' => trim((string) ($row->detalle ?? 'Sin detalle')),
+                'label' => trim(
+                    (string) (
+                        trim((string) ($row->razonSocial ?? '')) !== ''
+                            ? trim((string) $row->razonSocial)
+                            : 'Sin empresa'
+                    ) . ' - ' . trim((string) ($row->detalle ?? 'Sin detalle'))
+                ),
                 'idalmacen' => (int) $row->idalmacen,
                 'detalle' => trim((string) ($row->detalle ?? 'Sin detalle')),
+                'razonSocial' => trim((string) ($row->razonSocial ?? '')),
             ]);
     }
 

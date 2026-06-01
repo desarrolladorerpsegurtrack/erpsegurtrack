@@ -72,12 +72,14 @@
             @if(session('success'))
                 <div class="mt-4 rounded-lg border px-4 py-3 text-base font-semibold relative" style="border-color:#16a34a;background-color:#dcfce7;color:#14532d;">
                     ✓ {{ session('success') }}
+                    <button type="button" class="absolute top-0 right-0 mt-2 mr-2 text-lg font-bold text-gray-600 hover:text-gray-800" onclick="this.parentElement.style.display='none';">&times;</button>
                 </div>
             @endif
 
             @if(session('error'))
                 <div class="mt-4 rounded-lg border px-4 py-3 text-base font-semibold relative" style="border-color:#a31616;background-color:#fcdcdc;color:#531414;">
                     ✕ {{ session('error') }}
+                    <button type="button" class="absolute top-0 right-0 mt-2 mr-2 text-lg font-bold text-gray-600 hover:text-gray-800" onclick="this.parentElement.style.display='none';">&times;</button>
                 </div>
             @endif
 
@@ -93,16 +95,18 @@
 
             @if(!empty($reportRows))
                 <div class="mt-4 box box--stacked flex flex-col p-5">
-                    <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div class="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
                         <div>
                             <div class="text-lg font-semibold text-slate-800">Informe final de ejecución</div>
                             <div class="mt-1 text-sm text-slate-500">Generado el {{ $report['generatedAt'] ?? '-' }}</div>
                         </div>
                         <div class="flex flex-wrap gap-2">
-                            <a href="{{ $reportExportPdfRoute ?? '#' }}" class="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50">
+                            <a href="{{ $reportExportPdfRoute ?? '#' }}" class="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50 transition duration-200 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none" style="border-color:#000000;color:#000000;">
+                                <i data-tw-merge="" data-lucide="download" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
                                 Descargar PDF
                             </a>
-                            <a href="{{ $reportExportRoute ?? '#' }}" class="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50">
+                            <a href="{{ $reportExportRoute ?? '#' }}" class="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50 transition duration-200 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none" style="border-color:#000000;color:#000000;">
+                                <i data-tw-merge="" data-lucide="download" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
                                 Descargar XLSX
                             </a>
                         </div>
@@ -142,6 +146,7 @@
                     <div class="inline-flex flex-wrap items-center gap-3">
                         <div class="w-[260px] shrink-0">
                             <div class="relative">
+                                <i data-tw-merge="" data-lucide="search" class="absolute inset-y-0 left-0 z-10 my-auto ml-3 h-4 w-4 stroke-[1.3] text-slate-500"></i>
                                 <input id="nota-salida-imei-input" type="text" name="imei" value="" autocomplete="off" placeholder="Buscar IMEI" class="disabled:bg-slate-100 disabled:cursor-not-allowed dark:disabled:bg-darkmode-800/50 dark:disabled:border-transparent [&amp;[readonly]]:bg-slate-100 [&amp;[readonly]]:cursor-not-allowed [&amp;[readonly]]:dark:bg-darkmode-800/50 [&amp;[readonly]]:dark:border-transparent transition duration-200 ease-in-out w-full pr-10 text-sm border-slate-200 shadow-sm placeholder:text-slate-400/90 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 dark:placeholder:text-slate-500/80 rounded-[0.5rem] pl-9">
                                 <span class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
                                     <lucide-search class="w-4 h-4"></lucide-search>
@@ -149,107 +154,70 @@
                             </div>
                         </div>
                         
-                        <label class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm whitespace-nowrap shrink-0">
-                            <input type="checkbox" id="nota-salida-select-visible" class="h-4 w-4 rounded border-slate-300 text-danger focus:ring-danger/30">
+                        <label tabindex="0" class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm whitespace-nowrap shrink-0 transition duration-200 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none">
+                            <input type="checkbox" id="nota-salida-select-visible" class="h-4 w-4 rounded text-danger focus:ring-danger/30 transition duration-200 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none">
                             Seleccionar visibles
                         </label>
                         
-                        <button type="button" id="nota-salida-clear-selection" class="inline-flex items-center justify-center rounded-lg border border-danger bg-white px-4 py-2 text-sm font-semibold text-danger shadow-sm transition hover:bg-red-50 whitespace-nowrap shrink-0">Limpiar selección</button>
+                        <button type="button" id="nota-salida-clear-selection" class="inline-flex items-center justify-center rounded-lg border border-danger bg-white px-4 py-2 text-sm font-semibold text-danger shadow-sm transition hover:bg-red-50 whitespace-nowrap shrink-0 transition duration-200 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none">Limpiar selección</button>
                         
                     </div>
                 </div>
 
-                    <div id="nota-salida-selection-error" class="mt-4 hidden rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"></div>
+                <div id="nota-salida-selection-error" class="mt-4 hidden rounded-lg border px-4 py-3 text-base font-semibold relative" style="border-color:#a31616;background-color:#fcdcdc;color:#531414;"></div>
 
-                    <div class="mt-4 overflow-hidden rounded-[0.85rem] border border-slate-200">
-                        <div id="nota-salida-table-scroll" class="max-h-[22rem] overflow-auto" style="max-height:21rem;">
-                            <table class="w-full text-left text-sm">
-                                <thead class="sticky top-0 z-10 bg-slate-100 text-slate-600">
+                <div class="mt-4 overflow-hidden rounded-[0.85rem] border border-slate-200">
+                    <div id="nota-salida-table-scroll" class="max-h-[22rem] overflow-auto" style="max-height:25rem;">
+                        <table class="w-full text-left text-sm">
+                            <thead class="sticky top-0 z-10 bg-slate-100 text-slate-600">
+                                <tr>
+                                    <th class="px-3 py-3 w-12"></th>
+                                    @foreach($columns as $column)
+                                        <th class="px-3 py-3">{{ $column['label'] ?? '' }}</th>
+                                    @endforeach
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @forelse($items as $item)
+                                    <tr class="border-t border-slate-100 bg-white hover:bg-slate-50" data-ns-row data-nota-salida-row data-imei-value="{{ strtolower($item->imei ?? '') }}" data-device-id="{{ $item->dispositivo_iddispositivo ?? '' }}">
+                                        <td class="px-3 py-3 align-top">
+                                            <input type="checkbox" name="selectedImeis[]" value="{{ $item->imei }}" data-nota-salida-imei class="h-4 w-4 rounded border-slate-300 text-danger focus:ring-danger/30 transition duration-200 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none">
+                                        </td>
+                                        <td class="px-3 py-3 font-medium text-slate-800">{{ $item->imei }}</td>
+                                        <td class="px-3 py-3 text-slate-700">{{ $item->almacen_label ??  '-' }}</td>
+                                        <td class="px-3 py-3 text-slate-700">{{ $item->fecha_ingreso_label ?? '-' }}</td>
+                                        <td class="px-3 py-3">
+                                            <span class="inline-flex items-center rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-danger">
+                                                <i data-tw-merge="" data-lucide="database" class="mr-1 h-3.5 w-3.5 stroke-[1.7] text-danger"></i>
+                                                Activo
+                                            </span>
+                                        </td>
+                                        <td class="px-3 py-3 text-slate-700">{{ $item->idAuxiliar ?? '-' }}</td>
+                                    </tr>
+                                @empty
                                     <tr>
-                                        <th class="px-3 py-3 w-12"></th>
-                                        @foreach($columns as $column)
-                                            <th class="px-3 py-3">{{ $column['label'] ?? '' }}</th>
-                                        @endforeach
+                                        <td colspan="6" class="px-3 py-8 text-center text-slate-500">No hay elementos activos para dar de baja.</td>
                                     </tr>
-                                </thead>
-                                <tbody>
-                                    @forelse($items as $item)
-                                        <tr class="border-t border-slate-100 bg-white hover:bg-slate-50" data-ns-row data-nota-salida-row data-imei-value="{{ strtolower($item->imei ?? '') }}" data-device-id="{{ $item->dispositivo_iddispositivo ?? '' }}">
-                                            <td class="px-3 py-3 align-top">
-                                                <input type="checkbox" name="selectedImeis[]" value="{{ $item->imei }}" data-nota-salida-imei class="h-4 w-4 rounded border-slate-300 text-danger focus:ring-danger/30">
-                                            </td>
-                                            <td class="px-3 py-3 font-medium text-slate-800">{{ $item->imei }}</td>
-                                            <td class="px-3 py-3 text-slate-700">{{ $item->almacen_detalle ?? '-' }}</td>
-                                            <td class="px-3 py-3 text-slate-700">{{ $item->fecha_ingreso_label ?? '-' }}</td>
-                                                <td class="px-3 py-3">
-                                                    <span class="inline-flex items-center rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-danger">
-                                                        <i data-tw-merge="" data-lucide="database" class="mr-1 h-3.5 w-3.5 stroke-[1.7] text-danger"></i>
-                                                        Activo
-                                                    </span>
-                                                </td>
-                                            <td class="px-3 py-3 text-slate-700">{{ $item->idAuxiliar ?? '-' }}</td>
-                                        </tr>
-                                    @empty
-                                        <tr>
-                                            <td colspan="6" class="px-3 py-8 text-center text-slate-500">No hay elementos activos para dar de baja.</td>
-                                        </tr>
-                                    @endforelse
-                                    <tr id="nota-salida-no-results-row" class="hidden">
-                                        <td colspan="6" class="px-3 py-6 text-center text-slate-500">No hay resultados que coincidan con la búsqueda.</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
+                                @endforelse
+                                <tr id="nota-salida-no-results-row" class="hidden">
+                                    <td colspan="6" class="px-3 py-6 text-center text-slate-500">No hay resultados que coincidan con la búsqueda.</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
+                </div>
 
-                    <div class="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                        <div class="text-sm text-slate-600">
-                            <span class="font-semibold text-slate-800" id="nota-salida-selected-count">0</span> elemento(s) seleccionado(s).
-                            <span class="ml-2 text-slate-500" id="nota-salida-selected-summary">Ninguno</span>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-3">
-                            <a href="{{ $backRoute ?? route('modules.almacen.nota-salida.index') }}" class="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50">Cancelar</a>
-                            <button type="button" id="nota-salida-open-confirm" class="inline-flex items-center justify-center rounded-lg border border-danger px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90" style="background-color:#c71010;border-color:#c71010;">Dar de baja seleccionados</button>
-                        </div>
+                <div class="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div class="text-sm text-slate-600">
+                        <span class="font-semibold text-slate-800" id="nota-salida-selected-count">0</span> elemento(s) seleccionado(s).
+                        <span class="ml-2 text-slate-500" id="nota-salida-selected-summary">Ninguno</span>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <a href="{{ $backRoute ?? route('modules.almacen.nota-salida.index') }}" class="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 transition duration-200 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none" style="border-color:#000000;color:#000000;">Cancelar</a>
+                        <button type="button" id="nota-salida-open-confirm" class="inline-flex items-center justify-center rounded-lg border border-danger px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 transition duration-200 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none" style="background-color:#c71010;border-color:#c71010;">Dar de baja seleccionados</button>
+                    </div>
                 </div>
             </form>
-        </div>
-    </div>
-
-    <div id="nota-salida-confirm-modal" class="fixed inset-0 hidden items-center justify-center px-4 py-6" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.72);" role="dialog" aria-modal="true" aria-labelledby="nota-salida-confirm-title">
-        <div class="w-full max-w-2xl overflow-hidden rounded-[1.25rem] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.16)]">
-            <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
-                <div>
-                    <h3 id="nota-salida-confirm-title" class="text-lg font-semibold text-slate-800">Confirmar baja final</h3>
-                    <p class="mt-1 text-sm text-slate-500">Esta acción cambiará el estado de los elementos seleccionados a inactivo.</p>
-                </div>
-                <button type="button" data-close-nota-salida-confirm class="ml-auto rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700">×</button>
-            </div>
-            <div class="px-6 py-5">
-                <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <div class="rounded-[0.75rem] border border-slate-200 bg-slate-50 p-4">
-                        <div class="text-sm text-slate-500">Seleccionados</div>
-                        <div class="mt-1 text-2xl font-semibold text-slate-800" id="nota-salida-confirm-count">0</div>
-                    </div>
-                    <div class="rounded-[0.75rem] border border-slate-200 bg-slate-50 p-4">
-                        <div class="text-sm text-slate-500">Acción</div>
-                        <div class="mt-1 text-base font-semibold text-emerald-700">Activo → Inactivo</div>
-                    </div>
-                    <div class="rounded-[0.75rem] border border-slate-200 bg-slate-50 p-4">
-                        <div class="text-sm text-slate-500">Informe</div>
-                        <div class="mt-1 text-base font-semibold text-slate-800">Disponible al finalizar</div>
-                    </div>
-                </div>
-
-                <div class="mt-4 rounded-[0.85rem] border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-600">
-                    Revisa la selección y confirma solo si estás seguro. Después de ejecutar, podrás descargar el informe final desde esta misma pantalla.
-                </div>
-
-                <div class="mt-5 flex flex-wrap items-center justify-end gap-2">
-                    <button type="button" data-close-nota-salida-confirm class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50">Cancelar</button>
-                    <button type="button" id="nota-salida-confirm-submit" class="rounded-lg border border-danger px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90" style="background-color:#c71010;border-color:#c71010;">Confirmar baja</button>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -275,6 +243,9 @@
             const dataRows = Array.from(document.querySelectorAll('[data-nota-salida-row]'));
             const noResultsRow = document.getElementById('nota-salida-no-results-row');
             let tomSelectInstance = null;
+
+            // Esta pantalla debe iniciar sin selecciones previas al recargar.
+            localStorage.removeItem(storageKey);
 
             const initTomSelect = () => {
                 if (!tomSelectElement || typeof window.TomSelect !== 'function') {
@@ -503,6 +474,7 @@
             if (confirmSubmitButton && form) {
                 confirmSubmitButton.addEventListener('click', () => {
                     syncHiddenInputs();
+                    localStorage.removeItem(storageKey);
                     form.submit();
                 });
             }
@@ -541,3 +513,39 @@
         });
     </script>
 @endsection
+
+@push('modals')
+    <div id="nota-salida-confirm-modal" class="hidden" style="position: fixed; top: 0px; left: 0px; width: 100vw; height: 100vh; z-index: 9999; background: rgba(0, 0, 0, 0.8); align-items: center; justify-content: center;" role="dialog" aria-modal="true" aria-labelledby="nota-salida-confirm-title">
+        <div style="width:720px;max-width:92%;margin:0 auto;position:relative;border-radius:10px;background:#ffffff;box-shadow:0 20px 40px rgba(2,6,23,0.12);overflow:hidden;">
+            <button type="button" data-close-nota-salida-confirm style="position:absolute;right:16px;top:16px;height:44px;width:44px;border-radius:9999px;border:1px solid #e6e9ee;background:#fff;color:#6b7280;display:inline-flex;align-items:center;justify-content:center;" aria-label="Cerrar">
+                <i data-lucide="x" style="width:16px;height:16px"></i>
+            </button>
+            <div style="padding:40px 48px;text-align:left;">
+                <div style="margin:0 auto 24px;display:flex;height:64px;width:64px;align-items:center;justify-content:center;border-radius:9999px;border:1px solid #0ea5e9;background:#eff6ff;color:#0ea5e9;">
+                    <i data-lucide="help-circle" style="width:22px;height:22px"></i>
+                </div>
+                <h3 id="nota-salida-confirm-title" style="font-size:22px;font-weight:600;margin:0;color:#111827;">¿Estás seguro?</h3>
+                <p style="margin-top:12px;color:#6b7280;font-size:14px;line-height:1.6;">Esta acción cambiará el estado de los elementos seleccionados a inactivo.</p>
+                <div class=" mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div class="rounded-[0.75rem] border border-slate-200 bg-slate-50 p-4">
+                        <div class="text-sm text-slate-500">Seleccionados</div>
+                        <div class="mt-1 text-2xl font-semibold text-slate-800" id="nota-salida-confirm-count">0</div>
+                    </div>
+                    <div class="rounded-[0.75rem] border border-slate-200 bg-slate-50 p-4">
+                        <div class="text-sm text-slate-500">Acción</div>
+                        <div class="mt-1 text-base font-semibold text-emerald-700">Activo → Inactivo</div>
+                    </div>
+                    <div class="rounded-[0.75rem] border border-slate-200 bg-slate-50 p-4">
+                        <div class="text-sm text-slate-500">Informe</div>
+                        <div class="mt-1 text-base font-semibold text-slate-800">Disponible al finalizar</div>
+                    </div>
+                </div>
+                <p style="margin-top:12px;color:#6b7280;font-size:14px;line-height:1.6;">Revisa la selección y confirma solo si estás seguro. Después de ejecutar, podrás descargar el informe final desde esta misma pantalla.</p>
+                <div style="margin-top:26px;display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;align-items:center;">
+                    <button type="button" data-close-nota-salida-confirm class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50" style="border-color:#000000;color:#000000;">Cancelar</button>
+                    <button type="button" id="nota-salida-confirm-submit" class="rounded-lg border border-danger px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90" style="background-color:#c71010;border-color:#c71010;">Confirmar baja</button>
+                </div>
+            </div>
+        </div>
+    </div>
+@endpush

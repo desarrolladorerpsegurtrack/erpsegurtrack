@@ -1,7 +1,7 @@
 import http from 'http';
 import { WebSocketServer } from 'ws';
 
-const host = process.env.WS_SERVER_HOST || '127.0.0.1';
+const host = process.env.WS_SERVER_HOST || '192.168.1.72';
 const port = Number(process.env.WS_SERVER_PORT || 6001);
 
 const subscriptions = new Map();

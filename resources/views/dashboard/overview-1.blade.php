@@ -307,7 +307,7 @@
 
                                 <li>
                                     <a href="{{ route('home') }}" class="side-menu__link {{ request()->routeIs('home') ? 'side-menu__link--active' : '' }}">
-                                        <i data-lucide="gauge-circle" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                        <i data-lucide="home" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
                                         <div class="side-menu__link__title">Inicio</div>
                                     </a>
                                 </li>
@@ -445,7 +445,7 @@
                                         @endphp
                                         <li>
                                             <a href="javascript:;" class="side-menu__link {{ $isAlmacenActive ? 'side-menu__link--active' : '' }} [&.side-menu__link--active]:side-menu__link--open" data-tw-toggle="collapse" data-tw-target="#side-menu-almacen">
-                                                <i data-lucide="{{ $link['icon'] }}" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                <i data-lucide="package" class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
                                                 <div class="side-menu__link__title">{{ $link['title'] }}</div>
                                                 <i data-lucide="chevron-down" class="stroke-[1] w-5 h-5 side-menu__link__chevron"></i>
                                             </a>

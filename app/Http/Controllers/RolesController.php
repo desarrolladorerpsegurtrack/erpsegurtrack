@@ -45,9 +45,15 @@ class RolesController extends Controller
             'label' => 'Almacen',
             'submodules' => [
                 'almacen' => 'Almacen',
-                'almacen.planes_servicios' => 'Planes y servicios',
+                'almacen.elemento_almacen' => 'Elemento de almacén',
                 'almacen.nota_ingreso' => 'Nota de ingreso',
                 'almacen.nota_salida' => 'Nota de salida',
+            ],
+        ],
+        'ventas' => [
+            'label' => 'Ventas',
+            'submodules' => [
+                'ventas.planes_servicios' => 'Planes y servicios',
             ],
         ],
         'configuracion' => [

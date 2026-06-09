@@ -170,7 +170,7 @@ class ClienteService
         return $row;
     }
 
-    private function buildRelationGroups(string $clienteId): array
+    public function buildRelationGroups(string $clienteId): array
     {
         $clienteId = trim($clienteId);
         if ($clienteId === '') {
@@ -667,5 +667,253 @@ class ClienteService
         }
 
         return $tempIdMap;
+    }
+
+    public function getSelectedClientExportRows(array $selectedIds): Collection
+    {
+        $rows = collect();
+
+        // Obtener clientes seleccionados
+        $clientes = $this->buildBaseQuery()
+            ->whereIn('c.idcliente', $selectedIds)
+            ->orderByDesc('c.fechaIngreso')
+            ->orderBy('c.idcliente')
+            ->get()
+            ->map(fn ($row) => $this->hydrateRow($row, false, false));
+
+        foreach ($clientes as $cliente) {
+            // Agregar fila del cliente
+            $rows->push((object) [
+                'tipo' => 'Cliente',
+                'idcliente' => $cliente->idcliente ?? '',
+                'nombreComercial' => $cliente->nombreComercial ?? '',
+                'razonSocial' => $cliente->razonSocial ?? '',
+                'grupo_asignado' => $cliente->grupo_asignado ?? '',
+                'rubro' => $cliente->rubro ?? '',
+                'direccion_completa' => $cliente->direccion_completa ?? '',
+                'estadoDetalle' => $cliente->estadoDetalle ?? '',
+            ]);
+
+            $clienteId = (string) ($cliente->idcliente ?? '');
+            if ($clienteId === '') {
+                continue;
+            }
+
+            // Agregar servicios del cliente
+            $servicios = DB::table('serviciocliente as sc')
+                ->leftJoin('vehiculo as v', 'v.placa', '=', 'sc.vehiculo_placa')
+                ->leftJoin('almacen as a', 'a.idalmacen', '=', 'sc.almacen_idalmacen')
+                ->select([
+                    'sc.idservicioCliente',
+                    'sc.vehiculo_placa',
+                    'sc.fechaInicio',
+                    'sc.fecheVencimiento',
+                    'sc.monto',
+                    'sc.estado',
+                    'sc.docReferencia',
+                    DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
+                ])
+                ->where('sc.cliente_idcliente', $clienteId)
+                ->orderByDesc('sc.idservicioCliente')
+                ->get();
+
+            foreach ($servicios as $servicio) {
+                $rows->push((object) [
+                    'tipo' => 'Servicio',
+                    'idcliente' => $clienteId,
+                    'nombreComercial' => $cliente->nombreComercial ?? '',
+                    'idservicioCliente' => $servicio->idservicioCliente ?? '',
+                    'vehiculo_placa' => $servicio->vehiculo_placa ?? '',
+                    'almacen_detalle' => $servicio->almacen_detalle ?? '',
+                    'fechaInicio' => $servicio->fechaInicio ?? '',
+                    'fecheVencimiento' => $servicio->fecheVencimiento ?? '',
+                    'monto' => $servicio->monto ?? '',
+                    'estadoServicio' => $servicio->estado ?? '',
+                    'docReferencia' => $servicio->docReferencia ?? '',
+                ]);
+            }
+
+            // Agregar vehículos del cliente
+            $vehiculos = DB::table('vehiculo as v')
+                ->leftJoin('tipovehiculo as tv', 'tv.idtipoVehiculo', '=', 'v.tipoUnidad_idtable1')
+                ->select([
+                    'v.placa',
+                    'v.anio',
+                    'v.color',
+                    'v.marca',
+                    'v.modelo',
+                    'v.tracto',
+                    DB::raw('COALESCE(tv.nombre, "") as tipo_vehiculo'),
+                ])
+                ->where('v.cliente_idcliente', $clienteId)
+                ->orderBy('v.placa')
+                ->get();
+
+            foreach ($vehiculos as $vehiculo) {
+                $rows->push((object) [
+                    'tipo' => 'Vehículo',
+                    'idcliente' => $clienteId,
+                    'nombreComercial' => $cliente->nombreComercial ?? '',
+                    'placa' => $vehiculo->placa ?? '',
+                    'tipo_vehiculo' => $vehiculo->tipo_vehiculo ?? '',
+                    'anio' => $vehiculo->anio ?? '',
+                    'marca' => $vehiculo->marca ?? '',
+                    'modelo' => $vehiculo->modelo ?? '',
+                    'color' => $vehiculo->color ?? '',
+                    'tracto' => $vehiculo->tracto ?? '',
+                ]);
+            }
+
+            // Agregar dispositivos del cliente
+            $dispositivos = DB::table('dispositivocliente as d')
+                ->select([
+                    'd.iddispositivoCliente',
+                    'd.vehiculo_placa',
+                    'd.marcaDispositivo',
+                    'd.modeloDispositivo',
+                    'd.fechaInstalacion',
+                    'd.fechaBaja',
+                    'd.estado',
+                ])
+                ->whereIn('d.vehiculo_placa', DB::table('vehiculo')->where('cliente_idcliente', $clienteId)->select('placa'))
+                ->orderBy('d.iddispositivoCliente')
+                ->get();
+
+            foreach ($dispositivos as $dispositivo) {
+                $rows->push((object) [
+                    'tipo' => 'Dispositivo',
+                    'idcliente' => $clienteId,
+                    'nombreComercial' => $cliente->nombreComercial ?? '',
+                    'iddispositivoCliente' => $dispositivo->iddispositivoCliente ?? '',
+                    'vehiculo_placa' => $dispositivo->vehiculo_placa ?? '',
+                    'marcaDispositivo' => $dispositivo->marcaDispositivo ?? '',
+                    'modeloDispositivo' => $dispositivo->modeloDispositivo ?? '',
+                    'fechaInstalacion' => $dispositivo->fechaInstalacion ?? '',
+                    'fechaBaja' => $dispositivo->fechaBaja ?? '',
+                    'estadoDispositivo' => $dispositivo->estado ?? '',
+                ]);
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Retorna grupos por cliente con sus servicios, vehiculos y dispositivos.
+     * Cada grupo: ['cliente' => object, 'servicios' => Collection, 'vehiculos' => Collection, 'dispositivos' => Collection]
+     */
+    public function getSelectedClientExportGroups(array $selectedIds): array
+    {
+        $groups = [];
+
+        $clientes = $this->buildBaseQuery()
+            ->whereIn('c.idcliente', $selectedIds)
+            ->orderByDesc('c.fechaIngreso')
+            ->orderBy('c.idcliente')
+            ->get()
+            ->map(fn ($row) => $this->hydrateRow($row, false, false));
+
+        foreach ($clientes as $cliente) {
+            $clienteId = (string) ($cliente->idcliente ?? '');
+            if ($clienteId === '') {
+                continue;
+            }
+
+            $servicios = DB::table('serviciocliente as sc')
+                ->leftJoin('vehiculo as v', 'v.placa', '=', 'sc.vehiculo_placa')
+                ->leftJoin('almacen as a', 'a.idalmacen', '=', 'sc.almacen_idalmacen')
+                ->select([
+                    'sc.idservicioCliente',
+                    'sc.vehiculo_placa',
+                    'sc.fechaInicio',
+                    'sc.fecheVencimiento',
+                    'sc.monto',
+                    'sc.estado',
+                    'sc.docReferencia',
+                    DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
+                ])
+                ->where('sc.cliente_idcliente', $clienteId)
+                ->orderByDesc('sc.idservicioCliente')
+                ->get();
+
+            $vehiculos = DB::table('vehiculo as v')
+                ->leftJoin('tipovehiculo as tv', 'tv.idtipoVehiculo', '=', 'v.tipoUnidad_idtable1')
+                ->select([
+                    'v.placa',
+                    'v.anio',
+                    'v.color',
+                    'v.marca',
+                    'v.modelo',
+                    'v.tracto',
+                    DB::raw('COALESCE(tv.nombre, "") as tipo_vehiculo'),
+                ])
+                ->where('v.cliente_idcliente', $clienteId)
+                ->orderBy('v.placa')
+                ->get();
+
+            $dispositivos = DB::table('dispositivocliente as d')
+                ->select([
+                    'd.iddispositivoCliente',
+                    'd.vehiculo_placa',
+                    'd.marcaDispositivo',
+                    'd.modeloDispositivo',
+                    'd.fechaInstalacion',
+                    'd.fechaBaja',
+                    'd.estado',
+                ])
+                ->whereIn('d.vehiculo_placa', DB::table('vehiculo')->where('cliente_idcliente', $clienteId)->select('placa'))
+                ->orderBy('d.iddispositivoCliente')
+                ->get()
+                ->map(function ($d) {
+                    $d->estado = ((string) $d->estado === '1' || (string) $d->estado === 'Activo' || (string) $d->estado === 'activo') ? 'Activo' : 'Inactivo';
+                    return $d;
+                });
+
+            $group = [
+                'cliente' => $cliente,
+                'servicios' => $servicios->values()->all(),
+                'vehiculos' => $vehiculos->values()->all(),
+                'dispositivos' => $dispositivos->values()->all(),
+            ];
+
+            $groups[] = $group;
+        }
+
+        return $groups;
+    }
+
+    public function getExpandedExportColumns(): array
+    {
+        return [
+            ['key' => 'tipo', 'label' => 'Tipo'],
+            ['key' => 'idcliente', 'label' => 'RUC/DNI Cliente'],
+            ['key' => 'nombreComercial', 'label' => 'Nombre Comercial'],
+            ['key' => 'razonSocial', 'label' => 'Razón Social'],
+            ['key' => 'grupo_asignado', 'label' => 'Grupo Asignado'],
+            ['key' => 'rubro', 'label' => 'Rubro'],
+            ['key' => 'direccion_completa', 'label' => 'Dirección'],
+            ['key' => 'estadoDetalle', 'label' => 'Estado Cliente'],
+            ['key' => 'idservicioCliente', 'label' => 'ID Servicio'],
+            ['key' => 'vehiculo_placa', 'label' => 'Placa Vehículo'],
+            ['key' => 'almacen_detalle', 'label' => 'Almacén'],
+            ['key' => 'fechaInicio', 'label' => 'Fecha Inicio Servicio'],
+            ['key' => 'fecheVencimiento', 'label' => 'Fecha Vencimiento'],
+            ['key' => 'monto', 'label' => 'Monto'],
+            ['key' => 'estadoServicio', 'label' => 'Estado Servicio'],
+            ['key' => 'docReferencia', 'label' => 'Documento Referencia'],
+            ['key' => 'placa', 'label' => 'Placa'],
+            ['key' => 'tipo_vehiculo', 'label' => 'Tipo Vehículo'],
+            ['key' => 'anio', 'label' => 'Año'],
+            ['key' => 'marca', 'label' => 'Marca'],
+            ['key' => 'modelo', 'label' => 'Modelo'],
+            ['key' => 'color', 'label' => 'Color'],
+            ['key' => 'tracto', 'label' => 'Tracto'],
+            ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo'],
+            ['key' => 'marcaDispositivo', 'label' => 'Marca Dispositivo'],
+            ['key' => 'modeloDispositivo', 'label' => 'Modelo Dispositivo'],
+            ['key' => 'fechaInstalacion', 'label' => 'Fecha Instalación'],
+            ['key' => 'fechaBaja', 'label' => 'Fecha Baja Dispositivo'],
+            ['key' => 'estadoDispositivo', 'label' => 'Estado Dispositivo'],
+        ];
     }
 }

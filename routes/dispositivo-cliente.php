@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('erp.module:dispositivo_cliente')->group(function () {
     Route::get('/modulos/dispositivo-cliente', [DispositivoClienteController::class, 'index'])->name('modules.dispositivo-cliente');
     Route::get('/modulos/dispositivo-cliente/export/{format}', [DispositivoClienteController::class, 'export'])->name('modules.dispositivo-cliente.export')->where('format', 'pdf|xlsx');
+    Route::post('/modulos/dispositivo-cliente/export/{format}', [DispositivoClienteController::class, 'export'])->name('modules.dispositivo-cliente.export.post')->where('format', 'pdf|xlsx');
     Route::get('/modulos/dispositivo-cliente/crear', [DispositivoClienteController::class, 'create'])->name('modules.dispositivo-cliente.create');
     Route::post('/modulos/dispositivo-cliente', [DispositivoClienteController::class, 'store'])->name('modules.dispositivo-cliente.store');
     Route::get('/modulos/dispositivo-cliente/{id}/editar', [DispositivoClienteController::class, 'edit'])->name('modules.dispositivo-cliente.edit');

@@ -87,7 +87,9 @@ class UsuariosController extends Controller
             abort(404);
         }
 
-        $rows = $this->usuarioService->getUserExportRows($request);
+        $selectedIds = $request->input('selectedIds', []);
+        
+        $rows = $this->usuarioService->getUserExportRows($request, $selectedIds);
         $columns = $this->usuarioService->getExportColumns();
         $filename = 'usuarios_export_' . now()->format('Ymd_His') . '.' . $format;
 

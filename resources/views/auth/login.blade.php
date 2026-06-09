@@ -14,7 +14,9 @@
                         <form method="POST" action="{{ route('login.attempt') }}">
                             @csrf
                             @error('usuario')
-                                <span class="mb-3 block rounded-lg bg-red-50 px-4 py-2 text-xs text-red-600">{{ $message }}</span>
+                                <div class="mb-4 rounded-md border px-4 py-3 text-base font-semibold" style="border-color:#a31616;background-color:#fcdcdc;color:#531414;">
+                                    {{ $message }}
+                                </div>
                             @enderror
                             <div class="mt-3 text-center xl:mt-5 xl:text-left">
                                 <input id="usuario-input" data-tw-merge="" type="text" name="usuario" value="{{ old('usuario') }}" autocomplete="username" required autofocus placeholder="Usuario" class="disabled:bg-slate-100 disabled:cursor-not-allowed dark:disabled:bg-darkmode-800/50 dark:disabled:border-transparent [&[readonly]]:bg-slate-100 [&[readonly]]:cursor-not-allowed [&[readonly]]:dark:bg-darkmode-800/50 [&[readonly]]:dark:border-transparent transition duration-200 ease-in-out w-full text-sm shadow-sm placeholder:text-slate-400/90 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 dark:placeholder:text-slate-500/80 [&[type='file']]:border file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:border-r-[1px] file:border-slate-100/10 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-500/70 hover:file:bg-200 group-[.form-inline]:flex-1 group-[.input-group]:rounded-none group-[.input-group]:[&:not(:first-child)]:border-l-transparent group-[.input-group]:first:rounded-l group-[.input-group]:last:rounded-r group-[.input-group]:z-10 block rounded-[0.6rem] border-slate-300/80 px-4 py-3.5">
@@ -32,7 +34,7 @@
                                     </button>
                                 </div>
                                 @error('password')
-                                    <span id="password-error" class="mt-2 block text-xs text-red-600">La contraseña debe tener al menos 8 caracteres.</span>
+                                    <span id="password-error" class="mt-2 block text-xs text-red-600 hidden">La contraseña debe tener al menos 8 caracteres.</span>
                                 @enderror
                             </div>
                             <div class="mt-5 text-center xl:mt-8 xl:text-left">
@@ -60,13 +62,15 @@
         function validarFormulario() {
             const isUserValid = userInp.value.length >= 2;
             const isPassValid = passInp.value.length >= 8;
-
-            if (passInp.value.length > 0 && passInp.value.length < 8) {
-                passError.classList.remove('hidden');
-            } else {
-                passError.classList.add('hidden');
+            
+            if(passError) {
+                if (passInp.value.length > 0 && passInp.value.length < 8) {
+                    passError.classList.remove('hidden');
+                } else {
+                    passError.classList.add('hidden');
+                }
             }
-
+            
             // Habilitar o deshabilitar botón
             if (isUserValid && isPassValid) {
                 submitBtn.disabled = false;

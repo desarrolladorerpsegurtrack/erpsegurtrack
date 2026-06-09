@@ -77,6 +77,50 @@ class VehiculosController extends Controller
 
         $items = $query->orderBy('v.placa')->paginate($this->resolvePerPage($request))->withQueryString();
 
+        // Adjuntar relation_groups por cada fila para que el listado pueda
+        // desplegar las relaciones (dispositivos) usando el partial cliente.relation-panel
+        $placas = collect($items->items())->pluck('placa')->filter()->unique()->values()->all();
+        if (!empty($placas)) {
+            $dispositivosRows = DB::table('dispositivocliente')
+                ->whereIn('vehiculo_placa', $placas)
+                ->select('iddispositivoCliente', 'marcaDispositivo', 'modeloDispositivo', 'fechaInstalacion', 'fechaBaja', 'estado', 'vehiculo_placa')
+                ->get();
+
+            $grouped = $dispositivosRows->groupBy('vehiculo_placa')->map(function ($group) {
+                return $group->map(function ($d) {
+                    return (array) $d;
+                })->all();
+            })->all();
+
+            $newCollection = $items->getCollection()->map(function ($row) use ($grouped) {
+                $placa = data_get($row, 'placa');
+                $devices = $grouped[$placa] ?? [];
+
+                $relationGroups = [
+                    [
+                        'key' => 'dispositivo_cliente',
+                        'label' => 'Dispositivos cliente',
+                        'columns' => [
+                            ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo', 'type' => 'text'],
+                            ['key' => 'marcaDispositivo', 'label' => 'Marca', 'type' => 'text'],
+                            ['key' => 'modeloDispositivo', 'label' => 'Modelo', 'type' => 'text'],
+                            ['key' => 'fechaInstalacion', 'label' => 'Fecha de instalación', 'type' => 'date'],
+                            ['key' => 'fechaBaja', 'label' => 'Fecha de baja', 'type' => 'date'],
+                            ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
+                        ],
+                        'records' => $devices,
+                    ],
+                ];
+
+                $rowArr = (array) $row;
+                $rowArr['relation_groups'] = $relationGroups;
+
+                return (object) $rowArr;
+            });
+
+            $items->setCollection($newCollection);
+        }
+
         return view('vehiculo.vehiculos', [
             'title' => 'Módulo Vehículos',
             'singularTitle' => 'Vehículo',
@@ -128,6 +172,7 @@ class VehiculosController extends Controller
             'showRoute' => 'modules.vehiculos.edit',
             'destroyRoute' => 'modules.vehiculos.destroy',
             'lockResource' => self::LOCK_RESOURCE,
+            'relationPanelView' => 'cliente.relation-panel',
             'exportRoutes' => [
                 'pdf' => route('modules.vehiculos.export', ['format' => 'pdf']),
                 'xlsx' => route('modules.vehiculos.export', ['format' => 'xlsx']),
@@ -142,10 +187,8 @@ class VehiculosController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
-
-        $rows = $this->baseQuery()
-            ->orderBy('v.placa')
-            ->get();
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $columns = [
             ['key' => 'placa', 'label' => 'Placa'],
@@ -159,6 +202,18 @@ class VehiculosController extends Controller
         ];
 
         $filename = 'vehiculos_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $this->baseQuery()->whereIn('v.placa', array_values($selectedIds))->orderBy('v.placa')->get();
+
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Vehículos', $filename);
+        }
+
+        $rows = $this->baseQuery()->orderBy('v.placa')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -303,7 +358,7 @@ class VehiculosController extends Controller
 
         $dispositivos = DB::table('dispositivocliente')
             ->where('vehiculo_placa', $placa)
-            ->select('iddispositivoCliente', 'marcaDispositivo', 'modeloDispositivo')
+            ->select('iddispositivoCliente', 'marcaDispositivo', 'modeloDispositivo', 'fechaInstalacion', 'fechaBaja', 'estado')
             ->get();
 
         return view('vehiculo.vehiculos-form', [

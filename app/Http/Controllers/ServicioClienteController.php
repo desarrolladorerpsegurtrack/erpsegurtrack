@@ -85,9 +85,8 @@ class ServicioClienteController extends Controller
             abort(404);
         }
 
-        $rows = $this->baseQuery()
-            ->orderByDesc('sc.idservicioCliente')
-            ->get();
+         // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $columns = [
             ['key' => 'idservicioCliente', 'label' => 'ID'],
@@ -102,6 +101,18 @@ class ServicioClienteController extends Controller
         ];
 
         $filename = 'servicio_cliente_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $this->baseQuery()->whereIn('idgrupoCliente', array_values($selectedIds))->orderBy('idgrupoCliente')->get();
+
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Grupos de Cliente', $filename);
+        }
+
+        $rows = $this->baseQuery()->orderByDesc('sc.idservicioCliente')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -126,6 +137,7 @@ class ServicioClienteController extends Controller
                     'type' => 'select',
                     'label' => 'Cliente',
                     'required' => true,
+                    'tomSelect' => true,
                     'optionsData' => $this->clienteOptions(),
                     'optionKey' => 'idcliente',
                     'optionLabel' => 'cliente_label',
@@ -136,6 +148,7 @@ class ServicioClienteController extends Controller
                     'type' => 'select',
                     'label' => 'Vehículo',
                     'required' => true,
+                    'tomSelect' => true,
                     'optionsData' => $this->vehiculoOptions(),
                     'optionKey' => 'placa',
                     'optionLabel' => 'vehiculo_label',
@@ -146,6 +159,7 @@ class ServicioClienteController extends Controller
                     'type' => 'select',
                     'label' => 'Almacén',
                     'required' => true,
+                    'tomSelect' => true,
                     'optionsData' => $this->almacenOptions(),
                     'optionKey' => 'idalmacen',
                     'optionLabel' => 'detalle',
@@ -153,19 +167,18 @@ class ServicioClienteController extends Controller
                 ],
                 [
                     'name' => 'fechaInicio',
-                    'type' => 'text',
+                    'type' => 'date',
                     'label' => 'Fecha inicio',
-                    'required' => false,
-                    'placeholder' => 'YYYY-MM-DD HH:MM:SS',
-                    'maxlength' => 19,
+                    'required' => true,
+                    'placeholder' => 'YYYY-MM-DD',
+                    'value' => now()->format('Y-m-d'),
                 ],
                 [
                     'name' => 'fecheVencimiento',
-                    'type' => 'text',
+                    'type' => 'date',
                     'label' => 'Fecha vencimiento',
                     'required' => false,
-                    'placeholder' => 'YYYY-MM-DD HH:MM:SS',
-                    'maxlength' => 19,
+                    'placeholder' => 'YYYY-MM-DD',
                 ],
                 [
                     'name' => 'monto',
@@ -198,8 +211,8 @@ class ServicioClienteController extends Controller
             'cliente_idcliente' => ['required', 'exists:cliente,idcliente'],
             'vehiculo_placa' => ['required', 'exists:vehiculo,placa'],
             'almacen_idalmacen' => ['required', 'exists:almacen,idalmacen'],
-            'fechaInicio' => ['nullable', 'date_format:Y-m-d H:i:s'],
-            'fecheVencimiento' => ['nullable', 'date_format:Y-m-d H:i:s'],
+            'fechaInicio' => ['required', 'date_format:Y-m-d'],
+            'fecheVencimiento' => ['nullable', 'date_format:Y-m-d'],
             'monto' => ['nullable', 'numeric', 'min:0'],
             'estado' => ['nullable', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
             'detalle' => ['required', 'string', 'max:100', 'unique:serviciocliente,detalle'],
@@ -238,6 +251,7 @@ class ServicioClienteController extends Controller
                     'type' => 'select',
                     'label' => 'Cliente',
                     'required' => true,
+                    'tomSelect' => true,
                     'optionsData' => $this->clienteOptions(),
                     'optionKey' => 'idcliente',
                     'optionLabel' => 'cliente_label',
@@ -248,6 +262,7 @@ class ServicioClienteController extends Controller
                     'type' => 'select',
                     'label' => 'Vehículo',
                     'required' => true,
+                    'tomSelect' => true,
                     'optionsData' => $this->vehiculoOptions(),
                     'optionKey' => 'placa',
                     'optionLabel' => 'vehiculo_label',
@@ -258,6 +273,7 @@ class ServicioClienteController extends Controller
                     'type' => 'select',
                     'label' => 'Almacén',
                     'required' => true,
+                    'tomSelect' => true,
                     'optionsData' => $this->almacenOptions(),
                     'optionKey' => 'idalmacen',
                     'optionLabel' => 'detalle',
@@ -265,17 +281,18 @@ class ServicioClienteController extends Controller
                 ],
                 [
                     'name' => 'fechaInicio',
-                    'type' => 'text',
+                    'type' => 'date',
                     'label' => 'Fecha inicio',
-                    'placeholder' => 'YYYY-MM-DD HH:MM:SS',
-                    'maxlength' => 19,
+                    'required' => true,
+                    'placeholder' => 'YYYY-MM-DD',
+                    'value' => now()->format('Y-m-d'),
                 ],
                 [
                     'name' => 'fecheVencimiento',
-                    'type' => 'text',
+                    'type' => 'date',
                     'label' => 'Fecha vencimiento',
-                    'placeholder' => 'YYYY-MM-DD HH:MM:SS',
-                    'maxlength' => 19,
+                    'required' => false,
+                    'placeholder' => 'YYYY-MM-DD',
                 ],
                 [
                     'name' => 'monto',

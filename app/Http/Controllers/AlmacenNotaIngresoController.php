@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Export\ExportableList;
 use App\Http\Controllers\Permission\HandlesResourceLock;
-use Illuminate\Database\QueryException;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -15,8 +15,8 @@ use Illuminate\View\View;
 
 class AlmacenNotaIngresoController extends Controller
 {
-    use ExportableList;
     use HandlesResourceLock;
+    use ExportableList;
 
     protected const SAFE_TEXT_REGEX = '/^[^;<>`]+$/u';
 
@@ -25,21 +25,58 @@ class AlmacenNotaIngresoController extends Controller
     public function index(Request $request): View
     {
         $baseQuery = $this->baseQuery($request);
-        $statsQuery = clone $baseQuery;
+
+        $queryParams = $request->except('page');
 
         $items = $baseQuery
-            ->orderBy('e.imei')
+            ->orderByDesc('c.fechaRealizacion')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
 
         $items->through(function ($row) {
-            $row->fecha_ingreso_label = $this->formatDateTime($row->fechaIngreso ?? null);
-            $row->estado_label = ((string) ($row->estado ?? '0')) === '1' ? 'Activo' : 'Inactivo';
+            $row->fecha_label = $this->formatDateTime($row->fechaRealizacion ?? null);
+            $row->download_link = '<a href="' . route('modules.almacen.nota-ingreso.pdf', ['id' => $row->idcompras]) . '" class="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 hover:bg-slate-50" title="Descargar PDF"><i data-lucide="download" class="mr-1 h-4 w-4 stroke-[1.3]"></i>Descargar</a>';
+            // Cargar dispositivos e IMEIs asociados para mostrar en el panel expandible
+            try {
+                $deviceRows = DB::table('detallemovalmacen as dm')
+                    ->join('elementoalmacen as e', 'dm.elementoAlmacen_imei', '=', 'e.imei')
+                    ->join('almacen as a', 'e.dispositivo_iddispositivo', '=', 'a.idalmacen')
+                    ->where('dm.compras_idcompras', $row->idcompras)
+                    ->select(['a.idalmacen', 'a.detalle as dispositivo', 'e.imei'])
+                    ->orderBy('a.detalle')
+                    ->orderBy('e.imei')
+                    ->get();
+
+                if ($deviceRows->isNotEmpty()) {
+                    $grouped = $deviceRows->groupBy('idalmacen')->map(function ($group, $idalmacen) {
+                        $first = $group->first();
+                        $imeis = $group->pluck('imei')->all();
+                        return [
+                            'idalmacen' => $idalmacen,
+                            'dispositivo' => $first->dispositivo,
+                            'cantidad' => count($imeis),
+                            'imeis' => implode(', ', $imeis),
+                        ];
+                    })->values()->all();
+
+                    $row->relation_groups = [
+                        [
+                            'key' => 'almacen',
+                            'label' => 'Dispositivos',
+                            'columns' => [
+                                ['key' => 'dispositivo', 'label' => 'Dispositivo'],
+                                ['key' => 'cantidad', 'label' => 'Cantidad'],
+                                ['key' => 'imeis', 'label' => 'IMEIs'],
+                            ],
+                            'records' => $grouped,
+                        ],
+                    ];
+                }
+            } catch (\Throwable $e) {
+                // No bloquear listado por errores al cargar relations; dejar vacío si falla
+            }
             return $row;
         });
-
-        $total = (clone $statsQuery)->count();
-        $activos = (clone $statsQuery)->where('e.estado', 1)->count();
 
         return view('almacen.nota-ingreso.index', [
             'title' => 'Nota de ingreso',
@@ -50,82 +87,110 @@ class AlmacenNotaIngresoController extends Controller
             'showRoute' => 'modules.almacen.nota-ingreso.edit',
             'destroyRoute' => 'modules.almacen.nota-ingreso.destroy',
             'bulkDestroyRoute' => route('modules.almacen.nota-ingreso.bulk-destroy'),
-            'identifierKey' => 'imei',
+            'identifierKey' => 'idcompras',
             'lockResource' => self::LOCK_RESOURCE,
             'showActionsColumn' => true,
+            'relationPanelView' => 'cliente.relation-panel',
             'columns' => [
-                ['key' => 'imei', 'label' => 'IMEI', 'type' => 'text'],
-                ['key' => 'almacen_label', 'label' => 'Dispositivo', 'type' => 'text', 'wrap' => true],
-                ['key' => 'fecha_ingreso_label', 'label' => 'Fecha ingreso', 'type' => 'text'],
-                ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
-                ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar', 'type' => 'text'],
+                ['key' => 'idcompras', 'label' => 'ID', 'type' => 'text'],
+                ['key' => 'usuario_usuario', 'label' => 'Usuario', 'type' => 'text'],
+                ['key' => 'tipoDocumento_nombre', 'label' => 'Tipo documento', 'type' => 'text'],
+                ['key' => 'fecha_label', 'label' => 'Fecha', 'type' => 'text'],
+                ['key' => 'cantidadTotal', 'label' => 'Cantidad', 'type' => 'text'],
+                ['key' => 'motivo', 'label' => 'Motivo', 'type' => 'text'],
+                ['key' => 'download_link', 'label' => 'Descargar', 'type' => 'custom'],
             ],
             'stats' => [
-                ['label' => 'Total de nota de ingreso', 'value' => $activos],
+                ['label' => 'Total de notas', 'value' => (clone $baseQuery)->count()],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.almacen.nota-ingreso.export', array_merge(['format' => 'pdf'], $queryParams)),
+                'xlsx' => route('modules.almacen.nota-ingreso.export', array_merge(['format' => 'xlsx'], $queryParams)),
             ],
             'filters' => [
                 [
-                    'name' => 'imei',
-                    'label' => 'IMEI',
+                    'name' => 'idcompras',
+                    'label' => 'ID',
                     'type' => 'text',
-                    'placeholder' => 'Buscar IMEI',
+                    'placeholder' => 'Buscar por ID',
                 ],
                 [
-                    'name' => 'dispositivo_iddispositivo',
-                    'label' => 'Dispositivo',
-                    'options' => $this->almacenOptions(),
-                    'placeholder' => 'Todos los dispositivos',
+                    'name' => 'usuario_usuario',
+                    'label' => 'Usuario',
+                    'type' => 'text',
+                    'placeholder' => 'Usuario',
                 ],
                 [
-                    'name' => 'estado',
-                    'label' => 'Estado',
-                    'type' => 'select',
-                    'options' => [
-                        ['value' => '1', 'label' => 'Activo'],
-                        ['value' => '0', 'label' => 'Inactivo'],
-                    ],
-                    'placeholder' => 'Todos los estados',
+                    'name' => 'tipoDocumento_idtipoDocumento',
+                    'label' => 'Tipo documento',
+                    'options' => $this->tipoDocumentoOptions(),
+                    'placeholder' => 'Todos los tipos',
                 ],
-            ],
-            'exportRoutes' => [
-                'pdf' => route('modules.almacen.nota-ingreso.export', ['format' => 'pdf']),
-                'xlsx' => route('modules.almacen.nota-ingreso.export', ['format' => 'xlsx']),
+                [
+                    'name' => 'fechaRealizacion',
+                    'label' => 'Fecha Realización',
+                    'type' => 'date',
+                    'placeholder' => 'Fecha',
+                ],
+                [
+                    'name' => 'cantidadTotal',
+                    'label' => 'Cantidad',
+                    'type' => 'text',
+                    'placeholder' => 'Cantidad total',
+                ],
             ],
         ]);
     }
 
-    public function export(Request $request, string $format)
+    public function downloadPdf(string $id)
     {
-        $format = strtolower($format);
+        $note = DB::table('compras as c')
+            ->leftJoin('tipodocumento as td', 'c.tipoDocumento_idtipoDocumento', '=', 'td.idtipoDocumento')
+            ->where('c.idcompras', $id)
+            ->select([
+                'c.idcompras',
+                'c.usuario_usuario',
+                'c.fechaRealizacion',
+                'c.motivo',
+                'c.docReferencia',
+                'c.cantidadTotal',
+                'td.detalle as tipoDocumento_nombre',
+            ])
+            ->first();
 
-        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+        if (!$note) {
             abort(404);
         }
 
-        $rows = $this->baseQuery($request)
+        $items = DB::table('detallemovalmacen as dm')
+            ->join('elementoalmacen as e', 'dm.elementoAlmacen_imei', '=', 'e.imei')
+            ->join('almacen as a', 'e.dispositivo_iddispositivo', '=', 'a.idalmacen')
+            ->where('dm.compras_idcompras', $id)
+            ->select([
+                'a.detalle as dispositivo',
+                'e.imei',
+            ])
+            ->orderBy('a.detalle')
             ->orderBy('e.imei')
-            ->get()
-            ->map(function ($row) {
-                $row->fecha_ingreso_label = $this->formatDateTime($row->fechaIngreso ?? null);
-                $row->estado_label = ((string) ($row->estado ?? '0')) === '1' ? 'Activo' : 'Inactivo';
-                return $row;
-            });
+            ->get();
 
-        $columns = [
-            ['key' => 'imei', 'label' => 'IMEI'],
-            ['key' => 'almacen_label', 'label' => 'Dispositivo'],
-            ['key' => 'fecha_ingreso_label', 'label' => 'Fecha ingreso'],
-            ['key' => 'estado', 'label' => 'Estado'],
-            ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar'],
-        ];
+        $groupedItems = $items
+            ->groupBy('dispositivo')
+            ->map(function ($group, $dispositivo) {
+                return [
+                    'dispositivo' => $dispositivo,
+                    'cantidad' => $group->count(),
+                    'imeis' => $group->pluck('imei')->all(),
+                ];
+            })
+            ->values();
 
-        $filename = 'nota_ingreso_export_' . now()->format('Ymd_His') . '.' . $format;
+        $pdf = Pdf::loadView('almacen.nota-ingreso.pdf', [
+            'note' => $note,
+            'items' => $groupedItems,
+        ]);
 
-        if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
-        }
-
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Nota de ingreso', $filename);
+        return $pdf->download('nota_ingreso_' . $id . '.pdf');
     }
 
     public function create(): View
@@ -139,23 +204,188 @@ class AlmacenNotaIngresoController extends Controller
             'record' => null,
             'fields' => $this->buildFields(),
             'readOnly' => false,
+            'tipoDocumentoOptions' => $this->tipoDocumentoOptions(),
+            'almacenOptions' => $this->almacenOptions(),
         ]);
     }
 
     public function store(Request $request): RedirectResponse
     {
-        $validated = $request->validate([
-            'imei' => ['required', 'string', 'max:30', 'regex:/^[0-9]+$/'],
-            'dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
-            'fechaIngreso' => ['nullable', 'date'],
-            'estado' => ['nullable', 'integer', 'in:0,1'],
-            'idAuxiliar' => ['nullable', 'string', 'max:30'],
-        ]);
-        $payload = $this->preparePayload($validated, true);
-        
+        // Soportar dos modos de envío:
+        // - nuevo: 'devices' => array de filas {dispositivo_iddispositivo, cantidad, manual, imeis}
+        // - legado: dispositivo_iddispositivo + selectedImeis (texto/array)
 
-        DB::table('elementoalmacen')->insert($payload);
-        $this->publishResourceEvent('', (string) $payload['imei'], 'created');
+        $baseRules = [
+            'tipoDocumento_idtipoDocumento' => ['required', 'integer', 'exists:tipodocumento,idtipoDocumento'],
+            'fechaRealizacion' => ['nullable', 'date'],
+            'motivo' => ['nullable', 'string', 'max:200'],
+            'docReferencia' => ['nullable', 'string', 'max:50'],
+        ];
+
+        $hasDevices = $request->has('devices');
+
+        if ($hasDevices) {
+            $rules = array_merge($baseRules, [
+                'devices' => ['required', 'array', 'min:1'],
+                'devices.*.dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
+                'devices.*.cantidad' => ['required', 'integer', 'min:1'],
+                'devices.*.manual' => ['nullable', Rule::in(['0', '1', 0, 1, true, false])],
+                'devices.*.imeis' => ['nullable'],
+            ]);
+
+            $validated = $request->validate($rules, [
+                'devices.*.manual.in' => 'El valor seleccionado para Manual IMEIs es inválido.',
+                'devices.*.dispositivo_iddispositivo.required' => 'Debes seleccionar un dispositivo.',
+                'devices.*.cantidad.min' => 'La cantidad debe ser al menos 1.',
+            ]);
+
+            $devices = $validated['devices'];
+
+            // Construir lista global de IMEIs por dispositivo
+            $imeisPerDevice = [];
+            $totalCount = 0;
+
+            foreach ($devices as $index => $row) {
+                $deviceId = (int) $row['dispositivo_iddispositivo'];
+                $cantidad = (int) $row['cantidad'];
+                $manual = isset($row['manual']) && ((string) $row['manual'] === '1' || $row['manual'] === 1 || $row['manual'] === true);
+
+                $collectedImeis = collect();
+                if ($manual) {
+                    $raw = $row['imeis'] ?? '';
+                    if (is_array($raw)) {
+                        $collectedImeis = collect($raw);
+                    } else {
+                        $lines = preg_split('/[\r\n,;]+/', (string) $raw);
+                        $collectedImeis = collect($lines);
+                    }
+
+                    $collectedImeis = $collectedImeis->map(fn ($v) => trim((string) $v))
+                        ->filter(fn ($v) => $v !== '')
+                        ->unique()
+                        ->values();
+
+                    if ($collectedImeis->count() !== $cantidad) {
+                        return redirect()->back()->withInput()->with('error', "La fila #" . ($index + 1) . " requiere exactamente {$cantidad} IMEIs cuando se habilita la entrada manual.");
+                    }
+                } else {
+                    // generar IMEIs aleatorios únicos contra BD
+                    $generated = collect();
+                    while ($generated->count() < $cantidad) {
+                        $candidate = (string) random_int(100000000000000, 999999999999999);
+                        // verificar colisión en BD y en esta colección
+                        $exists = DB::table('elementoalmacen')->where('imei', $candidate)->exists();
+                        if (!$exists && !$generated->contains($candidate)) {
+                            $generated->push($candidate);
+                        }
+                    }
+                    $collectedImeis = $generated;
+                }
+
+                $imeisPerDevice[] = [
+                    'dispositivo_iddispositivo' => $deviceId,
+                    'imeis' => $collectedImeis->all(),
+                ];
+
+                $totalCount += $cantidad;
+            }
+
+            // Crear compra e insertar elementos
+            $newId = 'NI' . time();
+            $currentUser = session('erp_auth.usuario') ?? (auth()->check() ? (string) (auth()->user()->usuario ?? auth()->user()->name ?? 'system') : 'system');
+            DB::transaction(function () use ($validated, $imeisPerDevice, $newId, $currentUser): void {
+                DB::table('compras')->insert([
+                    'idcompras' => $newId,
+                    'usuario_usuario' => $currentUser,
+                    'tipoDocumento_idtipoDocumento' => (int) ($validated['tipoDocumento_idtipoDocumento'] ?? 0),
+                    'compras_idcompras' => 0,
+                    'fechaRealizacion' => $this->normalizeDateTimeInput($validated['fechaRealizacion'] ?? null) ?? now()->format('Y-m-d H:i:s'),
+                    'motivo' => $validated['motivo'] ?? null,
+                    'docReferencia' => $validated['docReferencia'] ?? null,
+                    'cantidadTotal' => array_sum(array_map(fn($d) => count($d['imeis']), $imeisPerDevice)),
+                ]);
+
+                $fecha = now()->format('Y-m-d H:i:s');
+                foreach ($imeisPerDevice as $group) {
+                    foreach ($group['imeis'] as $imei) {
+                        DB::table('elementoalmacen')->insert([
+                            'imei' => $imei,
+                            'dispositivo_iddispositivo' => $group['dispositivo_iddispositivo'],
+                            'fechaIngreso' => $fecha,
+                            'estado' => 1,
+                        ]);
+
+                        DB::table('detallemovalmacen')->insert([
+                            'compras_idcompras' => $newId,
+                            'elementoAlmacen_imei' => $imei,
+                            'tipoMovimiento' => 'I',
+                        ]);
+                    }
+                }
+            });
+
+            return redirect()->route('modules.almacen.nota-ingreso.index')
+                ->with('success', 'Nota de ingreso creada correctamente.')
+                ->with('download_pdf_url', route('modules.almacen.nota-ingreso.pdf', ['id' => $newId]));
+        }
+
+        // Modo legado: single dispositivo + selectedImeis
+        $validated = $request->validate(array_merge($baseRules, [
+            'dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
+            'selectedImeis' => ['required'],
+        ]));
+
+        // Normalizar selectedImeis: aceptar array o texto (uno por línea o separados por comas)
+        $rawSelected = $validated['selectedImeis'];
+        if (is_array($rawSelected)) {
+            $selectedImeis = collect($rawSelected);
+        } else {
+            $lines = preg_split('/[\r\n,;]+/', (string) $rawSelected);
+            $selectedImeis = collect($lines);
+        }
+
+        $selectedImeis = $selectedImeis->map(fn ($v) => trim((string) $v))
+            ->filter(fn ($v) => $v !== '')
+            ->unique()
+            ->values();
+
+        if ($selectedImeis->isEmpty()) {
+            return redirect()->back()->withInput()->with('error', 'Debes indicar al menos un IMEI válido.');
+        }
+
+        $newId = 'NI' . time();
+        $currentUser = session('erp_auth.usuario') ?? (auth()->check() ? (string) (auth()->user()->usuario ?? auth()->user()->name ?? 'system') : 'system');
+
+        DB::transaction(function () use ($validated, $selectedImeis, $newId, $currentUser): void {
+            DB::table('compras')->insert([
+                'idcompras' => $newId,
+                'usuario_usuario' => $currentUser,
+                'tipoDocumento_idtipoDocumento' => (int) $validated['tipoDocumento_idtipoDocumento'],
+                'compras_idcompras' => 0,
+                'fechaRealizacion' => $this->normalizeDateTimeInput($validated['fechaRealizacion'] ?? null) ?? now()->format('Y-m-d H:i:s'),
+                'motivo' => $validated['motivo'] ?? null,
+                'docReferencia' => $validated['docReferencia'] ?? null,
+                'cantidadTotal' => $selectedImeis->count(),
+            ]);
+
+            $fecha = now()->format('Y-m-d H:i:s');
+            foreach ($selectedImeis as $imei) {
+                // insertar elemento en inventario
+                DB::table('elementoalmacen')->insert([
+                    'imei' => $imei,
+                    'dispositivo_iddispositivo' => (int) $validated['dispositivo_iddispositivo'],
+                    'fechaIngreso' => $fecha,
+                    'estado' => 1,
+                ]);
+
+                // registrar en detallemovalmacen
+                DB::table('detallemovalmacen')->insert([
+                    'compras_idcompras' => $newId,
+                    'elementoAlmacen_imei' => $imei,
+                    'tipoMovimiento' => 'I',
+                ]);
+            }
+        });
 
         return redirect()
             ->route('modules.almacen.nota-ingreso.index')
@@ -164,17 +394,18 @@ class AlmacenNotaIngresoController extends Controller
 
     public function edit(string $id): View|RedirectResponse
     {
-        $record = DB::table('elementoalmacen as e')
-            ->leftJoin('almacen as a', 'a.idalmacen', '=', 'e.dispositivo_iddispositivo')
+        $record = DB::table('compras as c')
+            ->leftJoin('tipodocumento as td', 'td.idtipoDocumento', '=', 'c.tipoDocumento_idtipoDocumento')
             ->select([
-                'e.imei',
-                'e.dispositivo_iddispositivo',
-                'e.fechaIngreso',
-                'e.estado',
-                'e.idAuxiliar',
-                DB::raw('COALESCE(a.detalle, "Sin dispositivo") as almacen_detalle'),
+                'c.idcompras',
+                'c.tipoDocumento_idtipoDocumento',
+                'c.fechaRealizacion',
+                'c.motivo',
+                'c.docReferencia',
+                'c.cantidadTotal',
+                DB::raw('COALESCE(td.detalle, "") as tipoDocumento_nombre'),
             ])
-            ->where('e.imei', $id)
+            ->where('c.idcompras', $id)
             ->first();
 
         if (!$record) {
@@ -183,45 +414,38 @@ class AlmacenNotaIngresoController extends Controller
                 ->with('error', 'No se encontro la nota de ingreso solicitada.');
         }
 
-        $record->fechaIngreso = $this->formatDateTimeForFormValue($record->fechaIngreso ?? null);
-
         return view('almacen.nota-ingreso.form', [
             'title' => 'Editar nota de ingreso',
             'moduleTitle' => 'Nota de ingreso',
             'mode' => 'edit',
-            'formAction' => route('modules.almacen.nota-ingreso.update', $record->imei),
+            'formAction' => route('modules.almacen.nota-ingreso.update', $record->idcompras),
             'backRoute' => route('modules.almacen.nota-ingreso.index'),
             'record' => $record,
             'fields' => $this->buildFields($record),
             'readOnly' => true,
-        ] + $this->prepareLockViewData(self::LOCK_RESOURCE, $record->imei));
+        ] + $this->prepareLockViewData(self::LOCK_RESOURCE, $record->idcompras));
     }
 
     public function update(Request $request, string $id): RedirectResponse
     {
-        $exists = DB::table('elementoalmacen')->where('imei', $id)->exists();
-
-        if (!$exists) {
-            return redirect()
-                ->route('modules.almacen.nota-ingreso.index')
-                ->with('error', 'No se encontro la nota de ingreso solicitada.');
-        }
-
         if ($redirect = $this->assertLockAvailable($request, self::LOCK_RESOURCE, $id, 'nota de ingreso', 'modules.almacen.nota-ingreso.index')) {
             return $redirect;
         }
 
         $validated = $request->validate([
-            'imei' => ['required', 'string', 'max:30', 'regex:/^[0-9]+$/', Rule::unique('elementoalmacen', 'imei')->ignore($id, 'imei')],
-            'dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
-            'fechaIngreso' => ['nullable', 'date'],
-            'estado' => ['nullable', 'integer', 'in:0,1'],
-            'idAuxiliar' => ['nullable', 'string', 'max:30'],
+            'motivo' => ['nullable', 'string', 'max:200'],
+            'docReferencia' => ['nullable', 'string', 'max:50'],
+            'selectedImeis' => ['nullable', 'array'],
+            'selectedImeis.*' => ['string', 'max:30'],
         ]);
-        $payload = $this->preparePayload($validated, false);
 
-        DB::transaction(function () use ($payload, $request, $id): void {
-            DB::table('elementoalmacen')->where('imei', $id)->update($payload);
+        DB::transaction(function () use ($validated, $id, $request): void {
+            // sólo actualizar cabecera compras; cambios en items requieren validaciones más completas
+            DB::table('compras')->where('idcompras', $id)->update([
+                'motivo' => $validated['motivo'] ?? null,
+                'docReferencia' => $validated['docReferencia'] ?? null,
+            ]);
+
             $this->publishResourceEvent(self::LOCK_RESOURCE, $id, 'updated');
             $this->releaseLockIfOwned($request, self::LOCK_RESOURCE, $id);
         });
@@ -231,161 +455,263 @@ class AlmacenNotaIngresoController extends Controller
             ->with('success', 'Nota de ingreso actualizada correctamente.');
     }
 
+    public function export(Request $request, string $format)
+    {
+        $format = strtolower($format);
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            abort(404);
+        }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
+
+        $columns = [
+            ['key' => 'idcompras', 'label' => 'ID'],
+            ['key' => 'usuario_usuario', 'label' => 'Usuario'],
+            ['key' => 'tipoDocumento_nombre', 'label' => 'Tipo documento'],
+            ['key' => 'fechaRealizacion', 'label' => 'Fecha'],
+            ['key' => 'cantidadTotal', 'label' => 'Cantidad'],
+            ['key' => 'motivo', 'label' => 'Motivo'],
+        ];
+
+        $filename = 'nota_ingreso_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $this->baseQuery($request)->whereIn('c.idcompras', array_values($selectedIds))->orderBy('c.idcompras')->get();
+
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Notas de Ingreso', $filename);
+        }
+
+        $rows = $this->baseQuery($request)->orderByDesc('c.fechaRealizacion')->get();
+
+        if ($format === 'xlsx') {
+            return $this->exportXlsxResponse($rows, $columns, $filename);
+        }
+
+        return $this->exportPdfResponse($rows, $columns, 'Listado de notas de ingreso', $filename);
+    }
+
     public function destroy(Request $request, string $id): RedirectResponse
     {
         if ($redirect = $this->assertLockAvailable($request, self::LOCK_RESOURCE, $id, 'nota de ingreso', 'modules.almacen.nota-ingreso.index')) {
             return $redirect;
         }
 
-        try {
-            DB::table('elementoalmacen')->where('imei', $id)->delete();
+        $imeis = DB::table('detallemovalmacen')->where('compras_idcompras', $id)->pluck('elementoAlmacen_imei')->values();
+
+        if ($imeis->isEmpty()) {
+            DB::table('compras')->where('idcompras', $id)->delete();
             $this->publishResourceEvent(self::LOCK_RESOURCE, $id, 'deleted');
             $this->releaseLockIfOwned($request, self::LOCK_RESOURCE, $id);
 
-            return redirect()
-                ->route('modules.almacen.nota-ingreso.index')
-                ->with('success', 'Nota de ingreso eliminada correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.almacen.nota-ingreso.index')
-                ->with('error', 'No se puede eliminar la nota de ingreso porque tiene relaciones asociadas.');
+            return redirect()->route('modules.almacen.nota-ingreso.index')->with('success', 'Nota de ingreso eliminada correctamente.');
         }
+
+        $imeisByDevice = DB::table('elementoalmacen')->whereIn('imei', $imeis->all())->select('imei', 'dispositivo_iddispositivo')->get()->groupBy('dispositivo_iddispositivo');
+
+        try {
+            DB::transaction(function () use ($id, $imeis, $imeisByDevice, $request): void {
+                // Verificar stocks actuales con bloqueo por filas y permitir que el stock llegue a 0,
+                // pero NO permitir que quede negativo.
+                foreach ($imeisByDevice as $deviceId => $rowsToRemove) {
+                    $countToRemove = count($rowsToRemove);
+
+                    $existing = DB::table('elementoalmacen')
+                        ->where('dispositivo_iddispositivo', $deviceId)
+                        ->where('estado', 1)
+                        ->select('imei')
+                        ->lockForUpdate()
+                        ->get();
+
+                    $currentStock = $existing->count();
+
+                    if (($currentStock - $countToRemove) < 0) {
+                        throw new \RuntimeException('stock_insuficiente');
+                    }
+                }
+
+                // Si pasaron las comprobaciones, eliminar detalles (hijos) y marcar elementos como inactivos
+                DB::table('detallemovalmacen')->where('compras_idcompras', $id)->delete();
+
+                // No eliminar registros de elementoalmacen para evitar violaciones de FK
+                // (pueden existir otros movimientos históricos que referencien el mismo IMEI).
+                // En lugar de borrar, marcamos el elemento como inactivo (estado = 0) para
+                // reducir el stock disponible.
+                DB::table('elementoalmacen')->whereIn('imei', $imeis->all())->update([
+                    'estado' => 0,
+                    'fechaIngreso' => now(),
+                ]);
+                DB::table('compras')->where('idcompras', $id)->delete();
+
+                $this->publishResourceEvent(self::LOCK_RESOURCE, $id, 'deleted');
+                $this->releaseLockIfOwned($request, self::LOCK_RESOURCE, $id);
+            });
+        } catch (\RuntimeException $e) {
+            if ($e->getMessage() === 'stock_insuficiente') {
+                return redirect()
+                    ->route('modules.almacen.nota-ingreso.index')
+                    ->with('error', 'No se puede eliminar la nota porque la operación dejaría stock negativo para uno o más dispositivos.');
+            }
+            throw $e;
+        }
+
+        return redirect()->route('modules.almacen.nota-ingreso.index')->with('success', 'Nota de ingreso eliminada correctamente.');
     }
 
     private function baseQuery(Request $request)
     {
-        $query = DB::table('elementoalmacen as e')
-            ->leftJoin('almacen as a', 'a.idalmacen', '=', 'e.dispositivo_iddispositivo')
-            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
+        $query = DB::table('compras as c')
+            ->leftJoin('tipodocumento as td', 'td.idtipoDocumento', '=', 'c.tipoDocumento_idtipoDocumento')
             ->select([
-                'e.imei',
-                'e.dispositivo_iddispositivo',
-                'e.fechaIngreso',
-                'e.estado',
-                'e.idAuxiliar',
-                DB::raw('COALESCE(a.detalle, "Sin dispositivo") as almacen_detalle'),
-                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(ep.razonSocial), ""), "Sin empresa"), " - ", COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
+                'c.idcompras',
+                'c.usuario_usuario',
+                'c.fechaRealizacion',
+                'c.motivo',
+                'c.docReferencia',
+                'c.cantidadTotal',
+                DB::raw('COALESCE(td.detalle, "") as tipoDocumento_nombre'),
             ]);
-
-        $query->where('e.estado', 1);
 
         if ($search = trim((string) $request->input('q', ''))) {
             $term = '%' . $search . '%';
             $query->where(function ($builder) use ($term) {
-                $builder
-                    ->where('e.imei', 'like', $term)
-                    ->orWhere('e.dispositivo_iddispositivo', 'like', $term)
-                    ->orWhere('a.detalle', 'like', $term)
-                    ->orWhere('ep.razonSocial', 'like', $term)
-                    ->orWhere('e.fechaIngreso', 'like', $term)
-                    ->orWhere('e.estado', 'like', $term)
-                    ->orWhere('e.idAuxiliar', 'like', $term);
+                $builder->where('c.idcompras', 'like', $term)
+                    ->orWhere('c.usuario_usuario', 'like', $term)
+                    ->orWhere('c.motivo', 'like', $term)
+                    ->orWhere('c.docReferencia', 'like', $term)
+                    ->orWhere('td.detalle', 'like', $term);
             });
         }
 
-        if ($imei = trim((string) $request->input('imei', ''))) {
-            $query->where('e.imei', 'like', '%' . $imei . '%');
+        if ($idcompras = trim((string) $request->input('idcompras', ''))) {
+            $query->where('c.idcompras', 'like', '%' . $idcompras . '%');
         }
 
-        if ($dispositivo = trim((string) $request->input('dispositivo_iddispositivo', ''))) {
-            $query->where('e.dispositivo_iddispositivo', (int) $dispositivo);
+        if ($usuario = trim((string) $request->input('usuario_usuario', ''))) {
+            $query->where('c.usuario_usuario', 'like', '%' . $usuario . '%');
         }
 
-        if ($estado = trim((string) $request->input('estado', ''))) {
-            $query->where('e.estado', (int) $estado);
+        if ($tipo = trim((string) $request->input('tipoDocumento_idtipoDocumento', ''))) {
+            $query->where('c.tipoDocumento_idtipoDocumento', (int) $tipo);
         }
+
+        if ($fechaRealizacion = trim((string) $request->input('fechaRealizacion', ''))) {
+            $query->whereDate('c.fechaRealizacion', $fechaRealizacion);
+        }
+
+        if ($motivo = trim((string) $request->input('motivo', ''))) {
+            $query->where('c.motivo', 'like', '%' . $motivo . '%');
+        }
+
+        if ($docReferencia = trim((string) $request->input('docReferencia', ''))) {
+            $query->where('c.docReferencia', 'like', '%' . $docReferencia . '%');
+        }
+
+        if ($cantidadTotal = trim((string) $request->input('cantidadTotal', ''))) {
+            if (is_numeric($cantidadTotal)) {
+                $query->where('c.cantidadTotal', (int) $cantidadTotal);
+            }
+        }
+
+        // Mostrar únicamente notas de ingreso: filtrar por detalle en tipodocumento que empiece por 'NI'
+        $query->whereRaw("LOWER(TRIM(COALESCE(td.detalle, ''))) LIKE 'ni%'");
 
         return $query;
     }
 
     private function buildFields(?object $record = null): array
     {
+        // Preparar datos iniciales para el partial de devices cuando haya un registro (editar)
+        $devicesData = [];
+        if ($record && isset($record->idcompras)) {
+            $rows = DB::table('detallemovalmacen as dm')
+                ->join('elementoalmacen as e', 'dm.elementoAlmacen_imei', '=', 'e.imei')
+                ->where('dm.compras_idcompras', $record->idcompras)
+                ->select(['e.dispositivo_iddispositivo', 'e.imei'])
+                ->orderBy('e.dispositivo_iddispositivo')
+                ->get();
+
+            if ($rows->isNotEmpty()) {
+                $grouped = $rows->groupBy('dispositivo_iddispositivo');
+                foreach ($grouped as $deviceId => $group) {
+                    $imeis = $group->pluck('imei')->all();
+                    $devicesData[] = [
+                        'dispositivo_iddispositivo' => (int) $deviceId,
+                        'cantidad' => count($imeis),
+                        'manual' => true,
+                        'imeis' => $imeis,
+                    ];
+                }
+            }
+        }
+
         return [
             [
-                'name' => 'imei',
-                'type' => 'text',
-                'label' => 'IMEI',
-                'required' => true,
-                'maxlength' => 30,
-                'pattern' => '^[0-9]+$',
-                'inputmode' => 'numeric',
-                'helpText' => 'Solo números, hasta 30 caracteres.',
-                'disabled' => $record !== null,
-            ],
-            [
-                'name' => 'dispositivo_iddispositivo',
+                'name' => 'tipoDocumento_idtipoDocumento',
                 'type' => 'select',
-                'label' => 'Dispositivo (Almacén)',
+                'label' => 'Tipo documento',
                 'required' => true,
                 'tomSelect' => true,
-                'optionsData' => $this->almacenOptions(),
-                'optionKey' => 'idalmacen',
+                'optionsData' => $this->tipoDocumentoOptions(),
+                'optionKey' => 'value',
                 'optionLabel' => 'label',
-                'placeholder' => 'Selecciona un dispositivo de almacén',
+                'placeholder' => 'Selecciona tipo de documento',
             ],
             [
-                'name' => 'estado',
-                'type' => 'select',
-                'label' => 'Estado',
-                'required' => true,
-                'options' => [
-                    ['value' => '1', 'label' => 'Activo'],
-                    ['value' => '0', 'label' => 'Inactivo'],
-                ],
-                'placeholder' => 'Selecciona estado',
-                'value' => '1',
-            ],
-            [
-                'name' => 'idAuxiliar',
-                'type' => 'text',
-                'label' => 'ID Auxiliar',
+                'name' => 'fechaRealizacion',
+                'type' => 'date',
+                'label' => 'Fecha realización',
                 'required' => false,
-                'maxlength' => 30,
-                'helpText' => 'Identificador auxiliar opcional.',
+                'placeholder' => 'Fecha',
+                'value' => $record ? $this->formatDateTimeForFormValue($record->fechaRealizacion ?? null) : now()->format('Y-m-d\TH:i'),
             ],
+            [
+                'name' => 'motivo',
+                'type' => 'text',
+                'label' => 'Motivo',
+                'required' => false,
+                'maxlength' => 200,
+            ],
+            [
+                'name' => 'docReferencia',
+                'type' => 'text',
+                'label' => 'Documento referencia',
+                'required' => false,
+                'maxlength' => 50,
+            ],
+            [
+                'name' => 'devices_partial',
+                'type' => 'partial',
+                'partial' => 'almacen.partials.devices-form',
+                'data' => array_merge(['almacenOptions' => $this->almacenOptions()], ['devices' => $devicesData]),
+                'colSpan' => 2,
+            ],
+           
         ];
     }
 
-    private function validateElementoAlmacen(Request $request, bool $isCreate = true): array
+    private function validateCompra(Request $request): array
     {
-        $rules = [
+        return $request->validate([
+            'tipoDocumento_idtipoDocumento' => ['required', 'integer', 'exists:tipodocumento,idtipoDocumento'],
+            'fechaRealizacion' => ['nullable', 'date'],
             'dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
-            'fechaIngreso' => ['nullable', 'date'],
-            'estado' => ['nullable', 'integer', 'in:0,1'],
-            'idAuxiliar' => ['nullable', 'string', 'max:30', 'regex:' . self::SAFE_TEXT_REGEX],
-        ];
-
-        if ($isCreate) {
-            $rules['imei'] = ['required', 'string', 'max:30', 'regex:' . self::SAFE_TEXT_REGEX, 'unique:elementoalmacen,imei'];
-        } else {
-            $rules['imei'] = ['nullable', 'string', 'max:30', 'regex:' . self::SAFE_TEXT_REGEX];
-        }
-
-        return $request->validate($rules);
-    }
-
-    private function preparePayload(array $validated, bool $isCreate): array
-    {
-        $payload = [
-            'imei' => (string) $validated['imei'],
-            'dispositivo_iddispositivo' => (int) $validated['dispositivo_iddispositivo'],
-            'estado' => (int) ($validated['estado'] ?? 1),
-            'idAuxiliar' => $this->nullableString($validated['idAuxiliar'] ?? null),
-        ];
-
-        if ($isCreate) {
-            $payload['imei'] = (string) $validated['imei'];
-            $payload['fechaIngreso'] = now()->format('Y-m-d H:i:s');
-            $payload['estado'] = 1;
-        }
-
-        return $payload;
+            'selectedImeis' => ['required', 'string'],
+            'motivo' => ['nullable', 'string', 'max:200'],
+            'docReferencia' => ['nullable', 'string', 'max:50'],
+        ]);
     }
 
     private function almacenOptions(): Collection
     {
         return DB::table('almacen as a')
             ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
+            ->leftJoin('tipoelemento as te', 'a.tipoElemento_idtipoElemento', '=', 'te.idtipoElemento')
+            ->whereRaw("LOWER(TRIM(COALESCE(te.nombre, ''))) NOT LIKE '%plan%'")
+            ->whereRaw("LOWER(TRIM(COALESCE(te.nombre, ''))) NOT LIKE '%servicio%'")
             ->select([
                 'a.idalmacen',
                 'a.detalle',
@@ -407,6 +733,39 @@ class AlmacenNotaIngresoController extends Controller
                 'detalle' => trim((string) ($row->detalle ?? 'Sin detalle')),
                 'razonSocial' => trim((string) ($row->razonSocial ?? '')),
             ]);
+    }
+
+    private function tipoDocumentoOptions(): Collection
+    {
+        return DB::table('tipodocumento as td')
+            ->orderBy('td.detalle')
+            ->orderBy('td.idtipoDocumento')
+            ->get()
+            ->map(function ($row): array {
+                $detalle = trim((string) ($row->detalle ?? ''));
+                return [
+                    'value' => (int) $row->idtipoDocumento,
+                    'label' => trim((string) ($detalle !== '' ? $detalle : 'Sin detalle')),
+                ];
+            });
+    }
+
+    private function normalizeDateTimeInput(?string $value): ?string
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::createFromFormat('Y-m-d\TH:i', $value)->format('Y-m-d H:i:s');
+        } catch (\Throwable) {
+            try {
+                return Carbon::parse($value)->format('Y-m-d H:i:s');
+            } catch (\Throwable) {
+                return null;
+            }
+        }
     }
 
     private function formatDateTime(mixed $value): string

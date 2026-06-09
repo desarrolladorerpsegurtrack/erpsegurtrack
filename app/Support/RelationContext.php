@@ -61,10 +61,10 @@ class RelationContext
         'configuracion.listas-precio' => ['table' => 'listaprecio', 'primaryKey' => 'idlistaPrecio', 'label' => 'Lista de precio'],
         'configuracion.detalle_lista_precio' => ['table' => 'detallelistaprecio', 'primaryKey' => 'iddetalleListaPrecio', 'label' => 'Detalle de lista de precio'],
         'configuracion.detalle-lista-precio' => ['table' => 'detallelistaprecio', 'primaryKey' => 'iddetalleListaPrecio', 'label' => 'Detalle de lista de precio'],
-        'configuracion.elemento_almacen' => ['table' => 'elementoalmacen', 'primaryKey' => 'imei', 'label' => 'Elemento de almacén'],
-        'configuracion.elemento-almacen' => ['table' => 'elementoalmacen', 'primaryKey' => 'imei', 'label' => 'Elemento de almacén'],
-        'almacen.nota_ingreso' => ['table' => 'elementoalmacen', 'primaryKey' => 'imei', 'label' => 'Nota de ingreso'],
-        'almacen.nota_salida' => ['table' => 'elementoalmacen', 'primaryKey' => 'imei', 'label' => 'Nota de salida'],
+        'almacen.elemento_almacen' => ['table' => 'elementoalmacen', 'primaryKey' => 'imei', 'label' => 'Elemento de almacén'],
+        'almacen.elemento-almacen' => ['table' => 'elementoalmacen', 'primaryKey' => 'imei', 'label' => 'Elemento de almacén'],
+        'almacen.nota_ingreso' => ['table' => 'compras', 'primaryKey' => 'idcompras', 'label' => 'Nota de ingreso'],
+        'almacen.nota_salida' => ['table' => 'compras', 'primaryKey' => 'idcompras', 'label' => 'Nota de salida'],
         'configuracion.tipo_pedido' => ['table' => 'tipopedido', 'primaryKey' => 'idtipoPedido', 'label' => 'Tipo de pedido'],
         'configuracion.tipos-pedido' => ['table' => 'tipopedido', 'primaryKey' => 'idtipoPedido', 'label' => 'Tipo de pedido'],
         'configuracion.proveedor' => ['table' => 'proveedor', 'primaryKey' => 'idproveedor', 'label' => 'Proveedor'],
@@ -206,12 +206,40 @@ class RelationContext
                 ->limit(5)
                 ->get();
 
+            // Crear labels y calcular timestamps para detectar el registro vigente (máxima fechaAsignacion)
+            $labels = [];
+            $timestamps = [];
+            foreach ($previewRows as $pr) {
+                $labels[] = self::formatPreviewRecord($table, $pr);
+                $f = data_get($pr, 'fechaAsignacion') ?? data_get($pr, 'fecha_asignacion') ?? null;
+                $ts = null;
+                if (!empty($f)) {
+                    $ts = strtotime($f);
+                    if ($ts === false) $ts = null;
+                }
+                $timestamps[] = $ts;
+            }
+
+            $vigenteIndex = null;
+            if (!empty(array_filter($timestamps, fn($t) => $t !== null))) {
+                $validTs = array_filter($timestamps, fn($t) => $t !== null);
+                $maxTs = max($validTs);
+                foreach ($timestamps as $i => $t) {
+                    if ($t !== null && $t === $maxTs) {
+                        $vigenteIndex = $i;
+                        break;
+                    }
+                }
+            }
+
             $resolvedRelations[] = [
                 'table' => $table,
                 'column' => $column,
                 'label' => self::tableLabel($table),
                 'count' => $count,
-                'records' => $previewRows->map(fn ($row) => self::formatPreviewRecord($table, $row))->filter()->values()->all(),
+                'records' => array_values(array_filter($labels, fn($v) => trim((string)$v) !== '')),
+                'vigente_index' => $vigenteIndex,
+                'vigente_label' => ($vigenteIndex !== null && isset($labels[$vigenteIndex])) ? $labels[$vigenteIndex] : null,
             ];
         }
 

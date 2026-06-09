@@ -33,8 +33,8 @@ class AuthController extends Controller
     public function login(Request $request): RedirectResponse
     {
         $credentials = $request->validate([
-            'usuario' => ['required', 'string', 'min:2', 'max:50', 'regex:/^[A-Za-z0-9._-]+$/'],
-            'password' => ['required', 'string', 'min:8', 'max:500'],
+            'usuario' => ['required', 'string', 'min:2', 'max:20', 'regex:/^[A-Za-z0-9._-]+$/'],
+            'password' => ['required', 'string', 'min:8', 'max:350'],
         ]);
 
         $throttleKey = Str::lower($credentials['usuario']).'|'.$request->ip();
@@ -50,7 +50,7 @@ class AuthController extends Controller
             );
 
             return back()
-                ->withErrors(['usuario' => 'Demasiados intentos. Espera un minuto e intenta nuevamente.'])
+                ->withErrors(['usuario' => 'Demasiados intentos. Espera 1 minuto e intenta nuevamente.'])
                 ->onlyInput('usuario');
         }
 

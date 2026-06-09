@@ -18,7 +18,7 @@ use Illuminate\View\View;
 class ClientesController extends Controller
 {
     use ExportableList;
-    use HandlesResourceLock; 
+    use HandlesResourceLock;
 
     private ClienteService $clienteService;
 
@@ -41,14 +41,16 @@ class ClientesController extends Controller
             'singularTitle' => 'Cliente',
             'items' => $clientes,
             'columns' => [
-                ['key' => 'nombreComercial', 'label' => 'Nombre Comercial', 'type' => 'text'],
-                ['key' => 'razonSocial', 'label' => 'Razón Social', 'type' => 'text'],
+                ['key' => 'idcliente', 'label' => 'RUC/DNI', 'type' => 'text'],
+                ['key' => 'nombreComercial', 'label' => 'Nombre Comercial', 'type' => 'text', 'wrap' => true],
+                ['key' => 'razonSocial', 'label' => 'Razón Social', 'type' => 'text', 'wrap' => true],
                 ['key' => 'grupo_asignado', 'label' => 'Grupo Asignado', 'type' => 'text'],
                 ['key' => 'rubro', 'label' => 'Rubro', 'type' => 'text'],
                 [
                     'key' => 'direccion_completa',
                     'label' => 'Dirección',
                     'type' => 'custom', // Para permitir HTML (salto de línea)
+                    'wrap' => true,
                 ],
                 ['key' => 'estadoDetalle', 'label' => 'Estado', 'type' => 'status'],
             ],
@@ -73,7 +75,7 @@ class ClientesController extends Controller
                 [
                     'name' => 'estado',
                     'label' => 'Estado',
-                    'options' => $estados->map(fn ($estado) => [
+                    'options' => $estados->map(fn($estado) => [
                         'value' => (string) $estado->idestadoCliente,
                         'label' => $estado->detalle,
                     ])->all(),
@@ -107,6 +109,23 @@ class ClientesController extends Controller
             abort(404);
         }
 
+        // Verificar si hay IDs seleccionados (exportación de selección múltiple)
+        $selectedIds = $request->input('selectedIds', []);
+
+        $filename = 'clientes_selection_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds)) {
+            // Obtener grupos por cliente (cliente + servicios + vehiculos + dispositivos)
+            $groups = $this->clienteService->getSelectedClientExportGroups(array_values((array) $selectedIds));
+
+            if ($format === 'xlsx') {
+                return $this->exportSelectedXlsxResponse($groups, $filename);
+            }
+
+            return $this->exportSelectedPdfResponse($groups, $filename);
+        }
+
+        // Exportar todos los filtrados (compatibilidad hacia atrás)
         $rows = $this->clienteService->getClientExportRows($request);
         $columns = $this->clienteService->getExportColumns();
         $filename = 'clientes_export_' . now()->format('Ymd_His') . '.' . $format;
@@ -145,8 +164,8 @@ class ClientesController extends Controller
                     'label' => 'Tipo Cliente',
                     'required' => true,
                     'options' => [
-                        '1' => 'Empresa',
                         '0' => 'Persona Natural',
+                        '1' => 'Empresa',
                     ],
                     'placeholder' => 'Selecciona tipo de cliente',
                     'helpText' => 'Elige Empresa o Persona Natural para validar RUC o DNI.',
@@ -247,9 +266,9 @@ class ClientesController extends Controller
                     'quickCreateUpdateUrlTemplate' => '',
                     'quickCreateDeleteUrlTemplate' => '',
                     'quickCreatePayloadInput' => 'direcciones_payload',
-                    'quickCreateUbigeos' => $ubigeos->map(fn ($ubigeo) => [
+                    'quickCreateUbigeos' => $ubigeos->map(fn($ubigeo) => [
                         'id' => (int) $ubigeo->idubigeo,
-                        'label' => $ubigeo->ubigeo_text,
+                        'label' => trim(((string) $ubigeo->idubigeo) . '-' . ($ubigeo->ubigeo_text ?? '')),
                     ])->values()->all(),
                 ],
                 [
@@ -262,7 +281,7 @@ class ClientesController extends Controller
                     'placeholder' => 'Selecciona contacto',
                     'quickCreateContact' => true,
                     'quickContactMode' => 'create',
-                    'quickContactTipos' => $tiposContacto->map(fn ($tipo) => [
+                    'quickContactTipos' => $tiposContacto->map(fn($tipo) => [
                         'id' => (int) $tipo->idtipoContacto,
                         'label' => (string) ($tipo->detalle ?? ''),
                     ])->values()->all(),
@@ -317,7 +336,7 @@ class ClientesController extends Controller
                 [
                     'name' => 'detraccion',
                     'type' => 'switch',
-                    'label' => 'Detracción',
+                    'label' => 'Retencion',
                     'required' => false,
                     'options' => [
                         '1' => 'No',
@@ -336,7 +355,7 @@ class ClientesController extends Controller
     {
         $authData = $request->session()->get('erp_auth', []);
         $userRoles = collect($authData['roles'] ?? [])
-            ->map(fn ($role) => mb_strtolower(trim((string) $role)))
+            ->map(fn($role) => mb_strtolower(trim((string) $role)))
             ->filter();
 
         if ($userRoles->contains('admin')) {
@@ -344,7 +363,7 @@ class ClientesController extends Controller
         }
 
         $actions = collect($authData['permissions']['clientes.credenciales'] ?? [])
-            ->map(fn ($action) => ErpPermission::normalizeAction((string) $action))
+            ->map(fn($action) => ErpPermission::normalizeAction((string) $action))
             ->filter()
             ->unique();
 
@@ -361,11 +380,11 @@ class ClientesController extends Controller
                 Rule::when($request->input('tipoCliente') === '1', ['digits:11']),
                 'unique:cliente,idcliente',
             ],
-            'razonSocial' => ['nullable', 'string', 'min:2', 'max:200', 'regex:'.self::SAFE_TEXT_REGEX],
-            'nombreComercial' => ['nullable', 'string', 'min:2', 'max:100', 'regex:'.self::SAFE_TEXT_REGEX],
+            'razonSocial' => ['nullable', 'string', 'min:2', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
+            'nombreComercial' => ['nullable', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
             'fechaIngreso' => ['nullable', 'date'],
             'fechaBaja' => ['nullable', 'date', 'after_or_equal:fechaIngreso'],
-            'rubro' => ['nullable', 'string', 'max:50', 'regex:'.self::SAFE_TEXT_REGEX],
+            'rubro' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
             'estadoCliente_idestadoCliente' => ['required', 'integer', 'exists:estadocliente,idestadoCliente'],
             'direccionCliente_iddireccionCliente' => ['required', 'string', 'max:60', 'regex:/^(tmp-\d+|\d+)$/'],
             'grupoCliente_idgrupoCliente' => ['nullable', 'integer', 'exists:grupocliente,idgrupoCliente'],
@@ -379,6 +398,7 @@ class ClientesController extends Controller
         ], [
             'idcliente.unique' => 'El cliente ya está registrado.',
             'idcliente.digits' => 'El cliente debe tener 8 dígitos si es persona natural o 11 si es empresa.',
+            'rubro.max' => 'El rubro no debe tener más de 50 caracteres.',
         ]);
 
         $grupoId = $validated['grupoCliente_idgrupoCliente'] ?? null;
@@ -521,8 +541,8 @@ class ClientesController extends Controller
                     'label' => 'Tipo Cliente',
                     'required' => true,
                     'options' => [
-                        '1' => 'Empresa',
                         '0' => 'Persona Natural',
+                        '1' => 'Empresa',
                     ],
                     'placeholder' => 'Selecciona tipo de cliente',
                     'helpText' => 'Elige Empresa o Persona Natural para validar RUC o DNI.',
@@ -623,9 +643,9 @@ class ClientesController extends Controller
                     'quickCreateDeleteUrlTemplate' => route('modules.clientes.direcciones.eliminar-rapido', '__ID__'),
                     'quickCreateExportPdfUrl' => route('modules.clientes.direcciones.export', [$cliente, 'pdf']),
                     'quickCreateExportXlsxUrl' => route('modules.clientes.direcciones.export', [$cliente, 'xlsx']),
-                    'quickCreateUbigeos' => $ubigeos->map(fn ($ubigeo) => [
+                    'quickCreateUbigeos' => $ubigeos->map(fn($ubigeo) => [
                         'id' => (int) $ubigeo->idubigeo,
-                        'label' => $ubigeo->ubigeo_text,
+                        'label' => trim(((string) $ubigeo->idubigeo) . '-' . ($ubigeo->ubigeo_text ?? '')),
                     ])->values()->all(),
                 ],
                 [
@@ -641,7 +661,7 @@ class ClientesController extends Controller
                     'placeholder' => 'Selecciona contacto',
                     'quickCreateContact' => true,
                     'quickContactMode' => 'edit',
-                    'quickContactTipos' => $tiposContacto->map(fn ($tipo) => [
+                    'quickContactTipos' => $tiposContacto->map(fn($tipo) => [
                         'id' => (int) $tipo->idtipoContacto,
                         'label' => (string) ($tipo->detalle ?? ''),
                     ])->values()->all(),
@@ -704,7 +724,7 @@ class ClientesController extends Controller
                 [
                     'name' => 'detraccion',
                     'type' => 'switch',
-                    'label' => 'Detracción',
+                    'label' => 'Retencion',
                     'required' => false,
                     'options' => [
                         '1' => 'No',
@@ -716,7 +736,17 @@ class ClientesController extends Controller
                     'value' => $record->detraccion === '1' ? ['1'] : [],
                 ],
             ],
+            'extraSections' => [
+                [
+                    'view' => 'cliente.relation-panel',
+                    'data' => [
+                        'relationGroups' => $this->clienteService->buildRelationGroups($cliente),
+                        'row' => (object) ['idcliente' => $cliente],
+                    ],
+                ],
+            ],
         ];
+        
     }
 
     public function lockStatus(string $cliente): JsonResponse
@@ -823,11 +853,11 @@ class ClientesController extends Controller
         $validated = $request->validate([
             'tipoCliente' => ['required', 'in:0,1'],
             'idcliente' => $idclienteRules,
-            'razonSocial' => ['nullable', 'string', 'min:2', 'max:200', 'regex:'.self::SAFE_TEXT_REGEX],
-            'nombreComercial' => ['nullable', 'string', 'min:2', 'max:100', 'regex:'.self::SAFE_TEXT_REGEX],
+            'razonSocial' => ['nullable', 'string', 'min:2', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
+            'nombreComercial' => ['nullable', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
             'fechaIngreso' => ['nullable', 'date'],
             'fechaBaja' => ['nullable', 'date', 'after_or_equal:fechaIngreso'],
-            'rubro' => ['nullable', 'string', 'max:50', 'regex:'.self::SAFE_TEXT_REGEX],
+            'rubro' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
             'estadoCliente_idestadoCliente' => ['required', 'integer', 'exists:estadocliente,idestadoCliente'],
             'direccionCliente_iddireccionCliente' => ['required', 'string', 'max:60', 'regex:/^(tmp-\d+|\d+)$/'],
             'grupoCliente_idgrupoCliente' => ['nullable', 'integer', 'exists:grupocliente,idgrupoCliente'],
@@ -841,12 +871,13 @@ class ClientesController extends Controller
         ], [
             'idcliente.unique' => 'El cliente ya está registrado.',
             'idcliente.digits' => 'El cliente debe tener 8 dígitos si es persona natural o 11 si es empresa.',
+            'rubro.max' => 'El rubro no debe tener más de 50 caracteres.',
         ]);
 
-        if (! $request->filled('contactoSeleccionado')) {
+        if (!$request->filled('contactoSeleccionado')) {
             $validated['contactoSeleccionado'] = null;
         }
-        if (! $request->filled('credencialSeleccionada')) {
+        if (!$request->filled('credencialSeleccionada')) {
             $validated['credencialSeleccionada'] = null;
         }
 
@@ -887,7 +918,7 @@ class ClientesController extends Controller
                 $this->clienteService->syncClientContact($cliente, $selectedContactId);
             }
         });
-        
+
 
         if ($lockInfo && $lockInfo['usuario'] === $currentUser) {
             ResourceLock::release('clientes', $cliente, $currentUser);
@@ -908,7 +939,7 @@ class ClientesController extends Controller
         try {
             // Eliminar relación con grupos
             DB::table('detalleGrupoCliente')->where('cliente_idcliente', $cliente)->delete();
-            
+
             // Eliminar cliente
             DB::table('cliente')->where('idcliente', $cliente)->delete();
 
@@ -926,7 +957,7 @@ class ClientesController extends Controller
 
     public function estadosOpcionesRapidas(): JsonResponse
     {
-        $estados = $this->clienteService->getEstados()->map(fn ($estado) => [
+        $estados = $this->clienteService->getEstados()->map(fn($estado) => [
             'id' => (int) $estado->idestadoCliente,
             'label' => trim(((string) $estado->idestadoCliente) . ' - ' . ((string) ($estado->detalle ?? ''))),
             'detalle' => (string) ($estado->detalle ?? ''),
@@ -941,7 +972,7 @@ class ClientesController extends Controller
     public function estadosCrearRapido(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'detalle' => ['required', 'string', 'max:20', 'regex:'.self::SAFE_TEXT_REGEX],
+            'detalle' => ['required', 'string', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX],
         ]);
 
         $newId = DB::transaction(function () use ($validated) {
@@ -977,7 +1008,7 @@ class ClientesController extends Controller
         }
 
         $validated = $request->validate([
-            'detalle' => ['required', 'string', 'max:20', 'regex:'.self::SAFE_TEXT_REGEX],
+            'detalle' => ['required', 'string', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX],
         ]);
 
         DB::table('estadocliente')
@@ -1029,7 +1060,7 @@ class ClientesController extends Controller
     public function direccionesOpciones(Request $request): JsonResponse
     {
         $cliente = $request->query('cliente');
-        $direcciones = $this->clienteService->getDirecciones($cliente)->map(fn ($direccion) => [
+        $direcciones = $this->clienteService->getDirecciones($cliente)->map(fn($direccion) => [
             'id' => (int) $direccion->iddireccionCliente,
             'label' => (string) $direccion->label_completo,
             'direccion' => (string) ($direccion->direccion ?? ''),
@@ -1051,7 +1082,7 @@ class ClientesController extends Controller
         }
 
         $clienteRow = DB::table('cliente')->select('idcliente', 'nombreComercial')->where('idcliente', $cliente)->first();
-        if (! $clienteRow) {
+        if (!$clienteRow) {
             abort(404);
         }
 
@@ -1064,7 +1095,7 @@ class ClientesController extends Controller
         ];
         $filename = 'direcciones_cliente_' . $cliente . '_' . now()->format('Ymd_His') . '.' . $format;
         $nombreComercial = trim((string) ($clienteRow->nombreComercial ?? ''));
-        $title = 'Direcciones de cliente ' . $nombreComercial . ' ' . $cliente ;
+        $title = 'Direcciones de cliente ' . $nombreComercial . ' ' . $cliente;
 
 
         return $format === 'xlsx'
@@ -1079,7 +1110,7 @@ class ClientesController extends Controller
         }
 
         $clienteRow = DB::table('cliente')->select('idcliente', 'nombreComercial')->where('idcliente', $cliente)->first();
-        if (! $clienteRow) {
+        if (!$clienteRow) {
             abort(404);
         }
 
@@ -1105,7 +1136,7 @@ class ClientesController extends Controller
     public function direccionesCrearRapido(Request $request, string $cliente): JsonResponse
     {
         $exists = DB::table('cliente')->where('idcliente', $cliente)->exists();
-        if (! $exists) {
+        if (!$exists) {
             return response()->json([
                 'ok' => false,
                 'message' => 'No se encontro el cliente solicitado.',
@@ -1117,8 +1148,8 @@ class ClientesController extends Controller
         }
 
         $validated = $request->validate([
-            'tipo' => ['nullable', 'string', 'max:45', 'regex:'.self::SAFE_TEXT_REGEX],
-            'direccion' => ['required', 'string', 'min:5', 'max:200', 'regex:'.self::SAFE_TEXT_REGEX],
+            'tipo' => ['nullable', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+            'direccion' => ['required', 'string', 'min:5', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
             'linkUbicacion' => ['nullable', 'url', 'max:300'],
             'ubigeo_idubigeo' => ['required', 'integer', 'exists:ubigeo,idubigeo'],
         ]);
@@ -1176,8 +1207,8 @@ class ClientesController extends Controller
         }
 
         $validated = $request->validate([
-            'tipo' => ['nullable', 'string', 'max:45', 'regex:'.self::SAFE_TEXT_REGEX],
-            'direccion' => ['required', 'string', 'min:5', 'max:200', 'regex:'.self::SAFE_TEXT_REGEX],
+            'tipo' => ['nullable', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+            'direccion' => ['required', 'string', 'min:5', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
             'linkUbicacion' => ['nullable', 'url', 'max:300'],
             'ubigeo_idubigeo' => ['required', 'integer', 'exists:ubigeo,idubigeo'],
         ]);
@@ -1259,7 +1290,7 @@ class ClientesController extends Controller
             ], 404);
         }
 
-        $contactos = $this->clienteService->getContactosByCliente($cliente)->map(fn ($contacto) => [
+        $contactos = $this->clienteService->getContactosByCliente($cliente)->map(fn($contacto) => [
             'id' => (int) $contacto->idcontacto,
             'label' => (string) $contacto->label_completo,
             'nombreApellido' => (string) ($contacto->nombreApellido ?? ''),
@@ -1293,8 +1324,8 @@ class ClientesController extends Controller
 
         $validated = $request->validate([
             'tipoContacto_idtipoContacto' => ['required', 'integer', 'exists:tipocontacto,idtipoContacto'],
-            'nombreApellido' => ['required', 'string', 'min:5', 'max:100', 'regex:'.self::SAFE_TEXT_REGEX],
-            'cargo' => ['nullable', 'string', 'min:2', 'max:50', 'regex:'.self::SAFE_TEXT_REGEX],
+            'nombreApellido' => ['required', 'string', 'min:5', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
+            'cargo' => ['nullable', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
             'correo' => ['required', 'email', 'max:100'],
             'correo2' => ['nullable', 'email', 'max:100'],
             'numero' => ['required', 'digits:9'],
@@ -1368,8 +1399,8 @@ class ClientesController extends Controller
 
         $validated = $request->validate([
             'tipoContacto_idtipoContacto' => ['required', 'integer', 'exists:tipocontacto,idtipoContacto'],
-            'nombreApellido' => ['required', 'string', 'min:5', 'max:100', 'regex:'.self::SAFE_TEXT_REGEX],
-            'cargo' => ['nullable', 'string', 'min:2', 'max:50', 'regex:'.self::SAFE_TEXT_REGEX],
+            'nombreApellido' => ['required', 'string', 'min:5', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
+            'cargo' => ['nullable', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
             'correo' => ['required', 'email', 'max:100'],
             'correo2' => ['nullable', 'email', 'max:100'],
             'numero' => ['required', 'digits:9'],
@@ -1443,7 +1474,7 @@ class ClientesController extends Controller
     public function credencialesOpciones(string $cliente): JsonResponse
     {
         $exists = DB::table('cliente')->where('idcliente', $cliente)->exists();
-        if (! $exists) {
+        if (!$exists) {
             return response()->json([
                 'ok' => false,
                 'message' => 'No se encontro el cliente solicitado.',
@@ -1451,7 +1482,7 @@ class ClientesController extends Controller
             ], 404);
         }
 
-        $credenciales = $this->clienteService->getCredencialesByCliente($cliente)->map(fn ($credencial) => [
+        $credenciales = $this->clienteService->getCredencialesByCliente($cliente)->map(fn($credencial) => [
             'id' => (int) $credencial->idcredenciales,
             'label' => (string) $credencial->label_completo,
             'usuario' => (string) ($credencial->usuario ?? ''),
@@ -1473,12 +1504,12 @@ class ClientesController extends Controller
         }
 
         $clienteRow = DB::table('cliente')->select('idcliente', 'nombreComercial')->where('idcliente', $cliente)->first();
-        if (! $clienteRow) {
+        if (!$clienteRow) {
             abort(404);
         }
 
         $credenciales = $this->clienteService->getCredencialesByCliente($cliente);
-        
+
         $credencialesFormateadas = $credenciales->map(function ($item) {
             return [
                 'usuario' => $item->usuario ?? '',
@@ -1487,7 +1518,7 @@ class ClientesController extends Controller
                 'estadoRecepcion' => ($item->estadoRecepcion == 1 ? 'Si' : 'No'),
             ];
         });
-        
+
         $columns = [
             ['key' => 'usuario', 'label' => 'Usuario'],
             ['key' => 'clave', 'label' => 'Clave'],
@@ -1506,7 +1537,7 @@ class ClientesController extends Controller
     public function credencialesCrearRapido(Request $request, string $cliente): JsonResponse
     {
         $exists = DB::table('cliente')->where('idcliente', $cliente)->exists();
-        if (! $exists) {
+        if (!$exists) {
             return response()->json([
                 'ok' => false,
                 'message' => 'No se encontro el cliente solicitado.',
@@ -1518,14 +1549,14 @@ class ClientesController extends Controller
         }
 
         $validated = $request->validate([
-            'usuario' => ['required', 'string', 'min:2', 'max:100', 'regex:'.self::SAFE_TEXT_REGEX],
+            'usuario' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
             'clave' => ['required', 'string', 'min:8', 'max:100'],
             'fechaCreacion' => ['nullable', 'date'],
             'estadoRecepcion' => ['required', 'in:0,1'],
         ]);
 
         $usuarioUsuario = $request->session()->get('erp_auth.usuario');
-        if (! $usuarioUsuario) {
+        if (!$usuarioUsuario) {
             return response()->json([
                 'ok' => false,
                 'message' => 'No hay usuario autenticado para crear credenciales.',
@@ -1566,7 +1597,7 @@ class ClientesController extends Controller
     public function credencialesActualizarRapido(Request $request, string $cliente, int $credencial): JsonResponse
     {
         $clienteExists = DB::table('cliente')->where('idcliente', $cliente)->exists();
-        if (! $clienteExists) {
+        if (!$clienteExists) {
             return response()->json([
                 'ok' => false,
                 'message' => 'No se encontro el cliente solicitado.',
@@ -1590,7 +1621,7 @@ class ClientesController extends Controller
         }
 
         $validated = $request->validate([
-            'usuario' => ['required', 'string', 'min:2', 'max:100', 'regex:'.self::SAFE_TEXT_REGEX],
+            'usuario' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
             'clave' => ['required', 'string', 'min:8', 'max:100'],
             'fechaCreacion' => ['nullable', 'date'],
             'estadoRecepcion' => ['required', 'in:0,1'],
@@ -1624,7 +1655,7 @@ class ClientesController extends Controller
     public function credencialesEliminarRapido(Request $request, string $cliente, int $credencial): JsonResponse
     {
         $clienteExists = DB::table('cliente')->where('idcliente', $cliente)->exists();
-        if (! $clienteExists) {
+        if (!$clienteExists) {
             return response()->json([
                 'ok' => false,
                 'message' => 'No se encontro el cliente solicitado.',

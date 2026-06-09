@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('erp.module:clientes')->group(function () {
     Route::get('/modulos/clientes', [ClientesController::class, 'index'])->name('modules.clientes');
     Route::get('/modulos/clientes/export/{format}', [ClientesController::class, 'export'])->name('modules.clientes.export')->where('format', 'pdf|xlsx');
+    Route::post('/modulos/clientes/export/{format}', [ClientesController::class, 'export'])->name('modules.clientes.export.post')->where('format', 'pdf|xlsx');
     Route::get('/modulos/clientes/registros/crear', [ClientesController::class, 'create'])->name('modules.clientes.create');
     Route::post('/modulos/clientes/registros', [ClientesController::class, 'store'])->name('modules.clientes.store');
     Route::get('/modulos/clientes/registros/{cliente}/editar', [ClientesController::class, 'edit'])->name('modules.clientes.edit');
@@ -42,4 +43,5 @@ Route::middleware('erp.module:clientes')->group(function () {
     Route::delete('/modulos/clientes/grupos/bulk-destroy', [BulkDestroyController::class, 'destroy'])->name('modules.clientes.grupos.bulk-destroy');
     Route::delete('/modulos/clientes/grupos/{id}', [GrupoClienteController::class, 'destroy'])->name('modules.clientes.grupos.destroy');
     Route::get('/modulos/clientes/grupos/export/{format}', [GrupoClienteController::class, 'export'])->name('modules.clientes.grupos.export')->where('format', 'pdf|xlsx');
+    Route::post('/modulos/clientes/grupos/export/{format}', [GrupoClienteController::class, 'export'])->name('modules.clientes.grupos.export.post')->where('format', 'pdf|xlsx');
 });

@@ -128,25 +128,34 @@
 				<div id="list-table-wrapper" class="almacen-table-white flex w-full flex-col">
 					<div class="p-5">
 						<form id="list-filter-form" method="GET" action="{{ url()->current() }}" class="almacen-filters-bar">
-							<div class="almacen-filters-row almacen-filters-row--top pl-2">
+							<div class="almacen-filters-row almacen-filters-row--top pl-1">
 								<div class="almacen-filter-item almacen-filter-item--wide almacen-filter-item--search">
 									<label class="almacen-filter-label">Buscar</label>
 									<div class="relative">
-										<input type="text" name="q" autocomplete="off" value="{{ request('q') }}" placeholder="Buscar por ID o detalle..." class="almacen-filter-control almacen-filter-control--search">
+										<input type="text" name="q" autocomplete="off" value="{{ request('q') }}" placeholder="Buscar..." class="almacen-filter-control almacen-filter-control--search">
 									</div>
 								</div>
-
 								<div class="almacen-filters-actions">
+									@if(!empty($exportRoutes))
+										<a href="{{ $exportRoutes['pdf'] ?? '#' }}{{ request()->getQueryString() ? ('?' . request()->getQueryString()) : '' }}" class="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50 transition duration-200 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none" style="border-color:#000000;color:#000000;">
+											<i data-tw-merge="" data-lucide="download" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
+											Descargar PDF
+										</a>
+										<a href="{{ $exportRoutes['xlsx'] ?? '#' }}{{ request()->getQueryString() ? ('?' . request()->getQueryString()) : '' }}" class="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50 transition duration-200 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none" style="border-color:#000000;color:#000000;">
+											<i data-tw-merge="" data-lucide="download" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
+											Descargar XLSX
+										</a>
+									@endif
 									<button type="submit" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 bg-primary border-primary text-white">
 										Aplicar
 									</button>
-									<a href="{{ url()->current() }}" data-list-clear="true" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none border-secondary text-slate-500">
+									<a href="{{ url()->current() }}" data-list-clear="true" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 [&:hover:not(:disabled)]:dark:bg-darkmode-100/10 w-full sm:w-auto">
 										Limpiar
 									</a>
 								</div>
 							</div>
 
-							<div class="almacen-filters-track pl-2">
+							<div class="almacen-filters-track pl-1">
 
 								@foreach($filters as $filter)
 									@php
@@ -1297,7 +1306,7 @@
 			display: flex;
 			flex-direction: column;
 			align-items: stretch;
-			gap: 0.65rem;
+			gap: 1.20rem;
 		}
 
 		.almacen-filters-row {
@@ -1314,7 +1323,7 @@
 
 		.almacen-filters-track {
 			display: flex;
-			gap: 1.5rem;
+			gap: 0.5rem;
 			overflow: visible;
 			justify-content: start;
 			padding-bottom: 0.5rem;
@@ -1569,7 +1578,7 @@
 
 		.almacen-filters-actions {
 			display: flex;
-			gap: 0.5rem;
+			gap: 0.8rem;
 			justify-content: flex-end;
 			margin-top: 0;
 			flex: 0 0 auto;

@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('erp.module:servicio_cliente')->group(function () {
     Route::get('/modulos/servicio-cliente', [ServicioClienteController::class, 'index'])->name('modules.servicio-cliente');
     Route::get('/modulos/servicio-cliente/export/{format}', [ServicioClienteController::class, 'export'])->name('modules.servicio-cliente.export')->where('format', 'pdf|xlsx');
+    Route::post('/modulos/servicio-cliente/export/{format}', [ServicioClienteController::class, 'export'])->name('modules.servicio-cliente.export.post')->where('format', 'pdf|xlsx');
     Route::get('/modulos/servicio-cliente/crear', [ServicioClienteController::class, 'create'])->name('modules.servicio-cliente.create');
     Route::post('/modulos/servicio-cliente', [ServicioClienteController::class, 'store'])->name('modules.servicio-cliente.store');
     Route::get('/modulos/servicio-cliente/{id}/editar', [ServicioClienteController::class, 'edit'])->name('modules.servicio-cliente.edit');

@@ -141,6 +141,8 @@ class PersonalController extends Controller
             abort(404);
         }
 
+        $selectedIds = $request->input('selectedIds', []);
+
         $baseQuery = DB::table('personal as p')
             ->leftJoin('cargopersonal as c', 'p.cargoPersonal_idcargoPersonal', '=', 'c.idcargoPersonal')
             ->select('p.*', 'c.descripcion as cargoDescripcion', DB::raw("CONCAT(p.nombre, ' ', p.apellido) as nombre_completo"));
@@ -185,11 +187,7 @@ class PersonalController extends Controller
             }
         }
 
-        $rows = $baseQuery
-            ->orderBy('p.apellido')
-            ->orderBy('p.nombre')
-            ->get();
-
+        
         $columns = [
             ['key' => 'nombre_completo', 'label' => 'Nombre'],
             ['key' => 'dniPersonal', 'label' => 'DNI'],
@@ -199,6 +197,18 @@ class PersonalController extends Controller
         ];
 
         $filename = 'personal_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('p.idpersonal', array_values($selectedIds))->orderBy('p.apellido')->orderBy('p.nombre')->get();
+
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Personal', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('p.apellido')->orderBy('p.nombre')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);

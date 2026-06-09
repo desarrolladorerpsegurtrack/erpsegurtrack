@@ -8,6 +8,7 @@ Route::middleware('erp.module:personal')->group(function () {
     Route::get('/modulos/personal', [PersonalController::class, 'index'])->name('modules.personal');
     Route::get('/modulos/personal/export/{format}', [PersonalController::class, 'export'])->name('modules.personal.export')->where('format', 'pdf|xlsx');
     Route::get('/modulos/personal/crear', [PersonalController::class, 'create'])->name('modules.personal.create');
+    Route::post('/modulos/personal/export/{format}', [PersonalController::class, 'export'])->name('modules.personal.export.post')->where('format', 'pdf|xlsx');
     Route::post('/modulos/personal', [PersonalController::class, 'store'])->name('modules.personal.store');
     Route::get('/modulos/personal/{dni}/editar', [PersonalController::class, 'edit'])->name('modules.personal.edit');
     Route::put('/modulos/personal/{dni}', [PersonalController::class, 'update'])->name('modules.personal.update');

@@ -59,11 +59,16 @@ class UsuarioService
         ];
     }
 
-    public function getUserExportRows(Request $request): Collection
+    public function getUserExportRows(Request $request, array $selectedIds = []): Collection
     {
-        $rows = $this->applyFilters($this->buildBaseQuery(), $this->extractFilters($request))
-            ->orderBy('u.usuario')
-            ->get();
+        $query = $this->applyFilters($this->buildBaseQuery(), $this->extractFilters($request));
+
+        // Si hay IDs seleccionados, filtramos por ellos ignorando otros filtros (o combinándolos según tu necesidad)
+        if (!empty($selectedIds)) {
+            $query->whereIn('u.usuario', $selectedIds);
+        }
+
+        $rows = $query->orderBy('u.usuario')->get();
 
         return $rows->map(fn ($usuario) => $this->hydrateExportUserRow($usuario));
     }

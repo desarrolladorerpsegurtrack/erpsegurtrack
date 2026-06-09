@@ -7,6 +7,7 @@ use Illuminate\Support\Collection;
 class RolePermissionMatrix
 {
     private const PERMISSION_MODULES = [
+        'tickets' => 'Gestiones',
         'personal' => 'Personal',
         'roles' => 'Roles',
         'usuarios' => 'Usuarios',
@@ -33,16 +34,21 @@ class RolePermissionMatrix
                 'lineas_chips.bajar_numeros' => 'Dar de Baja números',
             ],
         ],
+        'ventas' => [
+            'label' => 'Ventas',
+            'submodules' => [
+                'ventas.planes_servicios' => 'Planes y servicios',
+            ],
+        ],
         'almacen' => [
             'label' => 'Almacen',
             'submodules' => [
                 'almacen.almacen' => 'Almacén',
-                'almacen.planes_servicios' => 'Planes y servicios',
+                'almacen.elemento_almacen' => 'Elemento de almacén',
                 'almacen.nota_ingreso' => 'Nota de ingreso',
                 'almacen.nota_salida' => 'Nota de salida',
             ],
         ],
-        'tickets' => 'Gestiones',
         'configuracion' => [
             'label' => 'Configuracion',
             'submodules' => [
@@ -70,7 +76,6 @@ class RolePermissionMatrix
                 // Almacén módulo de configuración
                 'configuracion.detalle_lista_precio' => 'Detalle de lista de precio',
                 'configuracion.empresapropietaria' => 'Empresa propietaria',
-                'configuracion.elemento_almacen' => 'Elemento de almacén',
                 'configuracion.lista_precio' => 'Lista de precio',
                 'configuracion.marca' => 'Marca',
                 'configuracion.modelo' => 'Modelo',

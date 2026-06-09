@@ -13,8 +13,7 @@
                 <span>{{ isset($mode) && $mode === 'edit' ? 'Editar' : (isset($mode) && $mode === 'create' ? 'Crear' : ($title ?? 'Acción')) }}</span>
             </li>
         </ol>
-    </nav>
-@endsection
+    </nav>@endsection
 
 @php
     $quickDireccionField = collect($fields ?? [])->first(fn ($field) => ($field['quickCreate'] ?? false) === true);
@@ -127,6 +126,15 @@
         }
         .tom-select.tom-select--compact.ts-wrapper .ts-control .item {
             padding: 0 .35rem !important;
+        }
+        /* Truncar textos largos dentro de TomSelect con puntos suspensivos */
+        .tom-select.ts-wrapper .ts-control,
+        .tom-select .ts-control .items,
+        .tom-select .ts-control .item {
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+            max-width: 100%;
         }
         .checkbox-object-content {
             display: flex;
@@ -1875,6 +1883,21 @@
                                 <button type="button" class="absolute top-0 right-0 mt-2 mr-2 text-lg font-bold text-gray-600 hover:text-gray-800" onclick="this.parentElement.style.display='none';">&times;</button>
                             </div>
                         @endif
+                        @if(session('download_pdf_url'))
+                            <script>
+                                document.addEventListener('DOMContentLoaded', function () {
+                                    var url = {!! json_encode(session('download_pdf_url')) !!};
+                                    if (!url) return;
+                                    var a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = '';
+                                    a.style.display = 'none';
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    document.body.removeChild(a);
+                                });
+                            </script>
+                        @endif
                         @if(session('error'))
                             <div class="mb-4 rounded-lg border px-4 py-3 text-lg font-semibold relative" style="border-color:#a31616;background-color:#fcdcdc;color:#531414;">
                                 ⚠️ {{ session('error') }}
@@ -2374,6 +2397,12 @@
                                             </fieldset>
                                         @break
 
+                                        @case('partial')
+                                            <div class="md:col-span-2">
+                                                @include($field['partial'], $field['data'] ?? [])
+                                            </div>
+                                        @break
+
                                         @case('vista-permissions')
                                             @php
                                                 $vistaOptions = $field['optionsData'] ?? [];
@@ -2534,7 +2563,7 @@
                                                     'Almacén' => [
                                                         'configuracion.detalle_lista_precio',
                                                         'configuracion.empresapropietaria',
-                                                        'configuracion.elemento_almacen',
+                                                        'almacen.elemento_almacen',
                                                         'configuracion.lista_precio',
                                                         'configuracion.marca',
                                                         'configuracion.modelo',
@@ -2941,10 +2970,12 @@
                                         <table class="w-full text-left text-sm text-slate-700">
                                             <thead class="bg-slate-50 text-slate-500">
                                                 <tr>
+                                                    <th class="px-3 py-3 font-semibold">RUC/DNI</th>
                                                     <th class="px-3 py-3 font-semibold">Cliente</th>
                                                     <th class="px-3 py-3 font-semibold">Razón social</th>
                                                     <th class="px-3 py-3 font-semibold">Rubro</th>
                                                     <th class="px-3 py-3 font-semibold">Dirección</th>
+                                                    <th class="px-3 py-3 font-semibold">Estado</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -2952,12 +2983,63 @@
                                                     <tr class="border-t border-slate-200 hover:bg-slate-50">
                                                         <td class="px-3 py-3">
                                                             <a href="{{ route('modules.clientes.edit', $cliente->idcliente) }}" class="font-semibold text-slate-900 hover:text-primary hover:underline">
-                                                                {{ $cliente->nombreComercial ?: 'Sin nombre comercial' }}
+                                                                {{ $cliente->idcliente ?? 'Sin RUC/DNI' }}
                                                             </a>
+                                                        </td>
+                                                        <td class="px-3 py-3">
+                                                            {{ $cliente->nombreComercial ?: 'Sin nombre comercial' }}
                                                         </td>
                                                         <td class="px-3 py-3 text-slate-600">{{ $cliente->razonSocial ?? 'Sin razón social' }}</td>
                                                         <td class="px-3 py-3 text-slate-600">{{ $cliente->rubro ?? 'Sin rubro' }}</td>
                                                         <td class="px-3 py-3 text-slate-600">{{ $cliente->direccion_completa ?: 'Sin dirección' }}</td>
+                                                        <td class="px-3 py-3">
+                                                            @if($cliente->estadoCliente_idestadoCliente == 1)
+                                                                <div class="flex items-start justify-start gap-2 text-danger">
+                                                                    <i data-tw-merge data-lucide="database" class="stroke-[1] w-5 h-5"></i>
+                                                                    <span class="font-medium">Activo</span>
+                                                                </div>
+                                                            @else
+                                                                <div class="flex items-start justify-start gap-2 text-slate-400">
+                                                                    <i data-tw-merge data-lucide="database" class="stroke-[1] w-5 h-5"></i>
+                                                                    <span class="font-medium">Inactivo</span>
+                                                                </div>
+                                                            @endif
+                                                        </td>
+                                                    </tr>
+                                                @endforeach
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        @endif
+
+                        <!-- Números de dispositivo relacionados (solo lectura) -->
+                        @if(isset($detnumerosdispositivo) && $detnumerosdispositivo->isNotEmpty())
+                            <div class="mt-8 mb-6">
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">Números de dispositivo</label>
+                                <div class="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+                                    <div class="overflow-x-auto">
+                                        <table class="w-full text-left text-sm text-slate-700">
+                                            <thead class="bg-slate-50 text-slate-500">
+                                                <tr>
+                                                    <th class="px-3 py-3 font-semibold">ID</th>
+                                                    <th class="px-3 py-3 font-semibold">ID Dispositivo</th>
+                                                    <th class="px-3 py-3 font-semibold">Vehículo</th>
+                                                    <th class="px-3 py-3 font-semibold">Cliente</th>
+                                                    <th class="px-3 py-3 font-semibold">Número</th>
+                                                    <th class="px-3 py-3 font-semibold">Fecha asignación</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach($detnumerosdispositivo as $numero)
+                                                    <tr class="border-t border-slate-200 hover:bg-slate-50">
+                                                        <td class="px-3 py-3 font-semibold text-slate-900">{{ $numero->iddetNumerosDispositivo ?? '-' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $numero->dispositivoCliente_iddispositivoCliente ?? '-' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $numero->vehiculo_placa ?? 'Sin placa' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $numero->nombre_cliente ?? 'Sin cliente' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $numero->numeroTelefonico_numeroTelefonico ?? 'N/A' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $numero->fechaAsignacion ? \Carbon\Carbon::parse($numero->fechaAsignacion)->format('d M. Y') : 'N/A' }}</td>
                                                     </tr>
                                                 @endforeach
                                             </tbody>
@@ -2968,6 +3050,19 @@
                         @endif
 
                         <!-- Listado de dispositivos cliente vinculados al vehículo (solo lectura) -->
+                        @php
+                            $maxFechaAsignacionTimestamp = null;
+                            if(isset($detnumerosdispositivo) && $detnumerosdispositivo->isNotEmpty()) {
+                                $timestamps = $detnumerosdispositivo
+                                    ->filter(fn($n) => !empty($n->fechaAsignacion))
+                                    ->map(fn($n) => strtotime($n->fechaAsignacion))
+                                    ->filter()
+                                    ->all();
+                                if(!empty($timestamps)) {
+                                    $maxFechaAsignacionTimestamp = max($timestamps);
+                                }
+                            }
+                        @endphp
                         @if(isset($dispositivos) && count($dispositivos) > 0)
                             <div class="mt-8 mb-6">
                                 <label class="block text-sm font-semibold text-slate-700 mb-2">Dispositivos cliente vinculados</label>
@@ -2979,18 +3074,49 @@
                                                     <th class="px-3 py-3 font-semibold">ID Dispositivo</th>
                                                     <th class="px-3 py-3 font-semibold">Marca</th>
                                                     <th class="px-3 py-3 font-semibold">Modelo</th>
+                                                    <th class="px-3 py-3 font-semibold">Fecha de instalación</th>
+                                                    <th class="px-3 py-3 font-semibold">Fecha de baja</th>
+                                                    <th class="px-3 py-3 font-semibold">Estado</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 @foreach($dispositivos as $dispositivo)
+                                                    @php
+                                                        $isVigente = false;
+                                                        if($maxFechaAsignacionTimestamp && isset($detnumerosdispositivo) && $detnumerosdispositivo->isNotEmpty()) {
+                                                            foreach($detnumerosdispositivo as $n) {
+                                                                if((isset($n->dispositivoCliente_iddispositivoCliente) ? $n->dispositivoCliente_iddispositivoCliente : null) == ($dispositivo->iddispositivoCliente ?? null) && !empty($n->fechaAsignacion)) {
+                                                                    if(strtotime($n->fechaAsignacion) === $maxFechaAsignacionTimestamp) {
+                                                                        $isVigente = true;
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    @endphp
                                                     <tr class="border-t border-slate-200 hover:bg-slate-50">
                                                         <td class="px-3 py-3">
-                                                            <a href="{{ route('modules.dispositivo-cliente.edit', $dispositivo->iddispositivoCliente) }}" class="font-semibold text-slate-900 hover:text-primary hover:underline">
+                                                            <a href="{{ route('modules.dispositivo-cliente.edit', $dispositivo->iddispositivoCliente) }}" class="font-semibold hover:text-primary hover:underline {{ $isVigente ? 'text-red-600' : 'text-slate-900' }}" >
                                                                 {{ $dispositivo->iddispositivoCliente }}
                                                             </a>
                                                         </td>
-                                                        <td class="px-3 py-3 text-slate-600">{{ $dispositivo->marcaDispositivo ?? 'N/A' }}</td>
-                                                        <td class="px-3 py-3 text-slate-600">{{ $dispositivo->modeloDispositivo ?? 'N/A' }}</td>
+                                                        <td class="px-3 py-3 {{ $isVigente ? 'text-red-600' : 'text-slate-600' }}">{{ $dispositivo->marcaDispositivo ?? 'N/A' }}</td>
+                                                        <td class="px-3 py-3 {{ $isVigente ? 'text-red-600' : 'text-slate-600' }}">{{ $dispositivo->modeloDispositivo ?? 'N/A' }}</td>
+                                                        <td class="px-3 py-3 {{ $isVigente ? 'text-red-600' : 'text-slate-600' }}">{{ $dispositivo->fechaInstalacion ? \Carbon\Carbon::parse($dispositivo->fechaInstalacion)->format('d M. Y, H:i') : 'N/A' }}</td>
+                                                        <td class="px-3 py-3 {{ $isVigente ? 'text-red-600' : 'text-slate-600' }}">{{ $dispositivo->fechaBaja ?? 'N/A' }}</td>
+                                                        <td class="px-3 py-3">
+                                                            @if($dispositivo->estado == 1)
+                                                                <div class="flex items-start justify-start gap-2 {{ $isVigente ? 'text-red-600' : 'text-black' }}">
+                                                                    <i data-tw-merge data-lucide="database" class="stroke-[1] w-5 h-5"></i>
+                                                                    <span class="font-medium">Activo</span>
+                                                                </div>
+                                                            @else
+                                                                <div class="flex items-start justify-start gap-2 text-slate-400">
+                                                                    <i data-tw-merge data-lucide="database" class="stroke-[1] w-5 h-5"></i>
+                                                                    <span class="font-medium">Inactivo</span>
+                                                                </div>
+                                                            @endif
+                                                        </td>
                                                     </tr>
                                                 @endforeach
                                             </tbody>
@@ -3278,6 +3404,7 @@
                         sortField: [{ field: 'text', direction: 'asc' }],
                         placeholder: ubigeoSelect.dataset.placeholder || 'Selecciona ubigeo',
                         allowEmptyOption: true,
+                        searchField: ['text', 'value'],
                         render: {
                             item: function(data, escape) {
                                 return '<div>' + escape(data.text) + '</div>';
@@ -3432,8 +3559,9 @@
                     const ubigeo = String(item.ubigeo_text || '').trim();
                     let label = direccion !== '' ? direccion : 'Dirección temporal';
                     if (ubigeo !== '') {
-                        label += ' (' + ubigeo + ')';
+                        label += '(' + ubigeo + ')';
                     }
+
                     return label;
                 };
 
@@ -3458,6 +3586,8 @@
                 let listItems = [];
                 let selectedDireccionId = null;
                 let editingDireccionId = null;
+                const mainForm = document.getElementById('main-crud-form');
+                const mainFormMode = (mainForm && mainForm.querySelector('input[name="_method"]')) ? 'edit' : 'create';
                 const exportPdfBtn = document.getElementById('quick-direccion-export-pdf');
                 const exportXlsxBtn = document.getElementById('quick-direccion-export-xlsx');
 
@@ -3499,7 +3629,14 @@
                     }
 
                     const value = String(item.id);
-                    const label = String(item.label ?? '');
+                    let label = String(item.label ?? '').trim();
+                    if (!label && typeof buildLocalDireccionLabel === 'function') {
+                        try {
+                            label = buildLocalDireccionLabel(item || {});
+                        } catch (e) {
+                            label = '';
+                        }
+                    }                
 
                     const inst = target.tomselect || target.tomSelect || target._tomselect || null;
                     const existingOption = target.querySelector('option[value="' + value + '"]');
@@ -3738,7 +3875,7 @@
                 };
 
                 const loadDirecciones = async () => {
-                    if (!currentStoreUrl) {
+                    if (!currentStoreUrl && mainFormMode === 'create') {
                         const localItems = readLocalDirecciones().map((item, index) => {
                             const id = String(item.tempId || item.id || ('tmp-' + index));
                             return {
@@ -3837,9 +3974,12 @@
                         return;
                     }
 
-                    const filtered = listItems.filter((item) =>
-                        String(item.label || '').toLowerCase().includes(term)
-                    );
+                    const filtered = listItems.filter((item) => {
+                        const label = String(item.label || '').toLowerCase();
+                        const ubigeoText = String(item.ubigeo_text || '').toLowerCase();
+                        const ubigeoId = String(item.ubigeo_idubigeo ?? '').toLowerCase();
+                        return label.includes(term) || ubigeoText.includes(term) || ubigeoId.includes(term);
+                    });
                     renderList(filtered);
                 });
 
@@ -3861,7 +4001,7 @@
                         const isLocal = !currentStoreUrl;
                         const target = document.getElementById(currentSelectId);
 
-                        if (isLocal) {
+                            if (isLocal) {
                             if (!direccionInput.value.trim() || !ubigeoSelect.value) {
                                 throw new Error('Completa la direccion y el ubigeo.');
                             }
@@ -3886,18 +4026,19 @@
                             }
                             writeLocalDirecciones(localItems);
 
-                            if (target) {
-                                let option = target.querySelector('option[value="' + tempId + '"]');
-                                if (!option) {
-                                    option = document.createElement('option');
-                                    option.value = tempId;
-                                    target.appendChild(option);
-                                }
-                                option.textContent = buildLocalDireccionLabel(localItem);
-                                target.value = tempId;
-                                selectedDireccionId = tempId;
-                                target.dispatchEvent(new Event('change', { bubbles: true }));
-                            }
+                            // Construir item en el mismo formato que server
+                            const itemForSelect = {
+                                id: tempId,
+                                label: buildLocalDireccionLabel(localItem),
+                                tipo: localItem.tipo,
+                                direccion: localItem.direccion,
+                                ubigeo_idubigeo: localItem.ubigeo_idubigeo,
+                                ubigeo_text: localItem.ubigeo_text,
+                                linkUbicacion: localItem.linkUbicacion,
+                            };
+
+                            // Usa la función centralizada que maneja TomSelect y fallback DOM
+                            applySelectOption(itemForSelect);
 
                             editingDireccionId = null;
                             if (submitBtn) {
@@ -4264,6 +4405,8 @@
                 let listItems = [];
                 let selectedContactoId = null;
                 let editingContactoId = null;
+                const mainForm = document.getElementById('main-crud-form');
+                const mainFormMode = (mainForm && mainForm.querySelector('input[name="_method"]')) ? 'edit' : 'create';
                 const exportPdfBtn = document.getElementById('quick-contacto-export-pdf');
                 const exportXlsxBtn = document.getElementById('quick-contacto-export-xlsx');
 
@@ -4633,7 +4776,7 @@
                 };
 
                 const loadContacts = async () => {
-                    if (currentMode === 'create') {
+                    if (currentMode === 'create' && mainFormMode === 'create') {
                         const localContacts = readLocalContacts();
                         listItems = localContacts.map((item, index) => {
                             const id = String(item.tempId || item.id || ('tmp-' + index));
@@ -5069,6 +5212,8 @@
                 let listItems = [];
                 let selectedCredencialId = null;
                 let editingCredencialId = null;
+                const mainForm = document.getElementById('main-crud-form');
+                const mainFormMode = (mainForm && mainForm.querySelector('input[name="_method"]')) ? 'edit' : 'create';
                 const exportPdfBtn = document.getElementById('quick-credencial-export-pdf');
                 const exportXlsxBtn = document.getElementById('quick-credencial-export-xlsx');
 
@@ -5541,7 +5686,7 @@
                 };
 
                 const loadCredenciales = async () => {
-                    if (currentMode === 'create' && !currentStoreUrl) {
+                    if (currentMode === 'create' && !currentStoreUrl && mainFormMode === 'create') {
                         const localCredenciales = readLocalCredenciales();
                         listItems = localCredenciales.map((item, index) => {
                             const id = String(item.tempId || item.id || ('tmp-' + index));
@@ -6352,6 +6497,186 @@
             const initialTipoValue = String(tipoSelect.value ?? '').trim();
             const initialIdValue = String(idInput.value ?? '').trim();
 
+            // Crear botón de consulta junto al label del identificador (RUC/DNI), estilo "Crear rápido".
+            let consultBtn = idContainer?.querySelector('button[data-consult-button]');
+            if (!consultBtn && idContainer) {
+                consultBtn = document.createElement('button');
+                consultBtn.type = 'button';
+                consultBtn.setAttribute('data-consult-button', 'true');
+                consultBtn.id = 'consult-idcliente-button';
+                consultBtn.style.display = 'none';
+                consultBtn.setAttribute('style', 'background-color: #dc2626 !important; color: #fff !important; display: none;');
+                consultBtn.className = 'ml-1 inline-flex items-center gap-1 rounded border border-red-600 px-2 py-1 text-xs transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-opacity-50 disabled:cursor-not-allowed disabled:opacity-70';
+                consultBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35"/><circle cx="11" cy="11" r="6" /></svg><span class="ml-1">Consultar</span>';
+                // Insertar al nivel del label, conservando el asterisco y la estructura del label.
+                const labelContainer = idLabel?.querySelector(':scope > span') || idLabel;
+                if (idHelp) {
+                    idHelp.after(consultBtn); 
+                } else if (idLabel) {
+                    idLabel.after(consultBtn);
+                } else {
+                    idContainer.appendChild(consultBtn);
+                }
+                consultBtn.addEventListener('click', async () => {
+                    const tipo = tipoSelect.value === '1' ? 'ruc' : 'dni';
+                    const valor = idInput.value.trim();
+
+                    if (!valor) {
+                        alert('Por favor, ingresa un número de documento.');
+                        return;
+                    }
+
+                    consultBtn.disabled = true;
+                    const btnOriginalHtml = consultBtn.innerHTML;
+                    consultBtn.innerHTML = '<span class="ml-1">Consultando...</span>';
+
+                    try {
+                        const response = await fetch(`/api/consultar-documento?tipo=${tipo}&valor=${valor}`);
+                        const data = await response.json();
+
+                        if (data.status === 'success' && data.data) {
+                            const d = data.data;
+                            
+                            // 1 & 2. Razón Social y Nombre Comercial
+                            const nombre = d.razon_social || d.full_name || '';
+                            const inputRazonSocial = document.querySelector('input[name="razonSocial"]');
+                            const inputNombres = document.querySelector('#pn_nombres');
+                            const inputApellidos = document.querySelector('#pn_apellidos');
+
+                            if (inputRazonSocial) {
+                                const selectTipo = document.querySelector('select[name="tipoCliente"]');
+                                if (selectTipo && selectTipo.value === '0') {
+                                    if (inputNombres && d.first_name) {
+                                        inputNombres.value = d.first_name;
+                                    }
+                                    if (inputApellidos && (d.first_last_name || d.second_last_name)) {
+                                        inputApellidos.value = `${d.first_last_name || ''} ${d.second_last_name || ''}`.trim();
+                                    }
+                                    inputRazonSocial.value = `${inputNombres ? inputNombres.value : ''} ${inputApellidos ? inputApellidos.value : ''}`.trim();
+                                } else if (nombre) {
+                                    inputRazonSocial.value = nombre;
+                                }
+                            }
+
+                            const inputNombreComercial = document.querySelector('input[name="nombreComercial"]');
+                            if (inputNombreComercial) {
+                                if (d.full_name) {
+                                    inputNombreComercial.value = d.full_name;
+                                } else if (nombre) {
+                                    inputNombreComercial.value = nombre;
+                                }
+                            }
+
+                            // 3. Rubro
+                            const inputRubro = document.querySelector('input[name="rubro"]');
+                            if (inputRubro && d.actividad_economica) {
+                                inputRubro.value = d.actividad_economica;
+                            }
+
+                            // 4. Estado
+                            const selectEstado = document.querySelector('select[name="estadoCliente_idestadoCliente"]');
+                            if (selectEstado && d.estado) {
+                                const inst = selectEstado.tomselect || selectEstado.tomSelect || selectEstado._tomselect || null;
+                                if (inst && inst.options) {
+                                    const targetEstado = String(d.estado).trim().toUpperCase();
+                                    for (const key in inst.options) {
+                                        const optionText = String(inst.options[key].text || inst.options[key].label || '').trim().toUpperCase();
+                                        if (optionText === targetEstado) {
+                                            inst.setValue(key);
+                                            break;
+                                        }
+                                    }
+                                } else {
+                                    // Fallback to select without tomselect
+                                    Array.from(selectEstado.options).forEach(opt => {
+                                        if (opt.text.trim().toUpperCase() === String(d.estado).trim().toUpperCase()) {
+                                            selectEstado.value = opt.value;
+                                        }
+                                    });
+                                }
+                            }
+
+                            // 5. Retención (detraccion switch)
+                            const checkboxRetencion = document.querySelector('input[name="detraccion"], input[name="detraccion[]"]');
+                            if (checkboxRetencion && typeof d.es_agente_retencion !== 'undefined') {
+                                checkboxRetencion.checked = d.es_agente_retencion;
+                            }
+
+                            // Dirección Temporal
+                            const direccionesPayload = document.querySelector('input[name="direcciones_payload"]');
+                            const selectDireccion = document.querySelector('select[name="direccionCliente_iddireccionCliente"]');
+                            if (direccionesPayload && d.direccion) {
+                                const tempId = 'tmp-' + Date.now();
+                                const tempAddress = {
+                                    tempId: tempId,
+                                    tipo: 'Principal', 
+                                    direccion: d.direccion,
+                                    ubigeo_idubigeo: Number(d.ubigeo) || null,
+                                        ubigeo_text: (function(){
+                                            if (d.departamento || d.provincia || d.distrito) {
+                                                return [d.departamento, d.provincia, d.distrito].filter(Boolean).join(' / ').toUpperCase();
+                                            }
+                                            if (d.ubigeo_text || d.ubigeo_label) return d.ubigeo_text || d.ubigeo_label;
+                                            // intenta buscar texto de ubigeo en selects existentes (fallback)
+                                            try {
+                                                const id = String(d.ubigeo || '');
+                                                if (!id) return '';
+                                                const selects = Array.from(document.querySelectorAll('select'));
+                                                for (const s of selects) {
+                                                    const opt = s.querySelector('option[value="' + id + '"]');
+                                                    if (opt && opt.textContent && opt.textContent.trim() !== '') return opt.textContent.trim();
+                                                }
+                                            } catch (e) {}
+                                            return '';
+                                        })(),
+                                    linkUbicacion: ''
+                                };
+                                let currentPayload = [];
+                                try {
+                                    currentPayload = JSON.parse(direccionesPayload.value || '[]');
+                                } catch(e) {}
+                                currentPayload.push(tempAddress);
+                                direccionesPayload.value = JSON.stringify(currentPayload);
+                                
+                                // Actualizar el TomSelect visual de direcciones
+                                if (selectDireccion) {
+                                    let ubigeoDisplay = tempAddress.ubigeo_idubigeo ? String(tempAddress.ubigeo_idubigeo) : '';
+                                    if (tempAddress.ubigeo_text) {
+                                        ubigeoDisplay += ubigeoDisplay ? `-${tempAddress.ubigeo_text}` : tempAddress.ubigeo_text;
+                                    }
+                                    const label = tempAddress.direccion + (ubigeoDisplay ? ` (${ubigeoDisplay})` : '');
+                                    const inst = selectDireccion.tomselect || selectDireccion.tomSelect || selectDireccion._tomselect || null;
+                                    if (inst && typeof inst.addOption === 'function') {
+                                        inst.addOption({ value: tempId, text: label }, true);
+                                        inst.addItem(tempId);
+                                    } else {
+                                        let option = selectDireccion.querySelector(`option[value="${tempId}"]`);
+                                        if (!option) {
+                                            option = document.createElement('option');
+                                            option.value = tempId;
+                                            selectDireccion.appendChild(option);
+                                        }
+                                        option.textContent = label;
+                                        selectDireccion.value = tempId;
+                                    }
+                                    selectDireccion.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                            }
+
+                            alert('¡Datos encontrados y autocompletados exitosamente!');
+                        } else {
+                            alert(data.message || 'No se encontraron datos para este documento.');
+                        }
+                    } catch (error) {
+                        console.error("Error en la petición:", error);
+                        alert('Error de conexión al consultar el documento.');
+                    } finally {
+                        consultBtn.disabled = false;
+                        consultBtn.innerHTML = btnOriginalHtml;
+                    }
+                });
+            }
+
             if (String(idInput.value ?? '') !== initialIdValue) {
                 idInput.value = initialIdValue;
             }
@@ -6408,6 +6733,11 @@
                 idInput.required = hasSelection && canEditIdcliente && shouldStrictValidate;
                 idInput.dataset.validationMessage = validationMessage;
                 idInput.setCustomValidity('');
+
+                if (consultBtn) {
+                    // Mostrar el botón cuando haya un tipo seleccionado y el campo sea editable
+                    consultBtn.style.display = (hasSelection && canEditIdcliente) ? 'inline-flex' : 'none';
+                }
 
                 if (hasSelection) {
                     idInput.maxLength = fieldLength;
@@ -6710,6 +7040,101 @@
                 }
             });
         })(); 
+    </script>
+
+    <style>
+        /* Truncar texto largo en TomSelect (para campos como Dirección) */
+        .ts-control > .item, .ts-dropdown .option {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+    </style>
+
+    <script>
+        // Lógica de separación de Persona Natural (Nombres y Apellidos) vs Empresa (Razón Social)
+        document.addEventListener('DOMContentLoaded', function() {
+            const tipoClienteSelect = document.querySelector('select[name="tipoCliente"]');
+            const razonSocialInput = document.querySelector('input[name="razonSocial"]');
+            
+            if (tipoClienteSelect && razonSocialInput) {
+                const razonSocialWrapper = razonSocialInput.closest('.crud-field-wrapper');
+                if (!razonSocialWrapper) return;
+                
+                // Nombres + Apellidos wrapper (row, 2 columnas responsivas)
+                const nombresApellidosWrapper = document.createElement('div');
+                nombresApellidosWrapper.className = razonSocialWrapper.className + ' persona-natural-field hidden';
+                nombresApellidosWrapper.innerHTML = `
+                    <div class="grid grid-cols-12 gap-x-6">
+                        <div class="col-span-12 md:col-span-6">
+                            <label for="pn_nombres" class="text-sm font-medium text-slate-700 mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between block text-sm">
+                                <span>Nombres</span>
+                                <span class="text-xs text-slate-500 font-normal">Mínimo 2 caracteres.</span>
+                            </label>
+                            <input id="pn_nombres" name="pn_nombres" type="text" class="disabled:bg-slate-100 disabled:cursor-not-allowed dark:disabled:bg-darkmode-800/50 dark:disabled:border-transparent [&[readonly]]:bg-slate-100 [&[readonly]]:cursor-not-allowed [&[readonly]]:dark:bg-darkmode-800/50 [&[readonly]]:dark:border-transparent transition duration-200 ease-in-out w-full text-sm border-slate-200 shadow-sm rounded-md placeholder:text-slate-400/90 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 dark:placeholder:text-slate-500/80" placeholder="Ingrese nombres">
+                        </div>
+                        <div class="col-span-12 md:col-span-6">
+                            <label for="pn_apellidos" class="text-sm font-medium text-slate-700 mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between block text-sm">
+                                <span>Apellidos</span>
+                                <span class="text-xs text-slate-500 font-normal">Mínimo 2 caracteres.</span>
+                            </label>
+                            <input id="pn_apellidos" name="pn_apellidos" type="text" class="disabled:bg-slate-100 disabled:cursor-not-allowed dark:disabled:bg-darkmode-800/50 dark:disabled:border-transparent [&[readonly]]:bg-slate-100 [&[readonly]]:cursor-not-allowed [&[readonly]]:dark:bg-darkmode-800/50 [&[readonly]]:dark:border-transparent transition duration-200 ease-in-out w-full text-sm border-slate-200 shadow-sm rounded-md placeholder:text-slate-400/90 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 dark:placeholder:text-slate-500/80" placeholder="Ingrese apellidos">
+                        </div>
+                    </div>
+                `;
+
+                // Insert after Razón Social as single grouped row
+                razonSocialWrapper.parentNode.insertBefore(nombresApellidosWrapper, razonSocialWrapper.nextSibling);
+
+                const inputNombres = nombresApellidosWrapper.querySelector('#pn_nombres');
+                const inputApellidos = nombresApellidosWrapper.querySelector('#pn_apellidos');
+
+                // Split existing value
+                if (razonSocialInput.value && tipoClienteSelect.value === '0') {
+                    const parts = razonSocialInput.value.split(' ');
+                    if (parts.length > 2) {
+                        inputNombres.value = parts.slice(0, Math.ceil(parts.length/2)).join(' ');
+                        inputApellidos.value = parts.slice(Math.ceil(parts.length/2)).join(' ');
+                    } else {
+                        inputNombres.value = parts[0] || '';
+                        inputApellidos.value = parts[1] || '';
+                    }
+                }
+
+                const updateRazonSocial = () => {
+                    if (tipoClienteSelect.value === '0') {
+                        const fullName = (inputNombres.value.trim() + ' ' + inputApellidos.value.trim()).trim();
+                        razonSocialInput.value = fullName;
+                    }
+                };
+
+                const toggleFields = () => {
+                    const isPersonaNatural = (tipoClienteSelect.value === '0');
+                    if (isPersonaNatural) {
+                        razonSocialWrapper.style.display = 'none';
+                        nombresApellidosWrapper.classList.remove('hidden');
+                    } else {
+                        razonSocialWrapper.style.display = '';
+                        nombresApellidosWrapper.classList.add('hidden');
+                    }
+                };
+
+                inputNombres.addEventListener('input', updateRazonSocial);
+                inputApellidos.addEventListener('input', updateRazonSocial);
+                tipoClienteSelect.addEventListener('change', toggleFields);
+                
+                // Allow TomSelect to trigger changes if it is initialized
+                setTimeout(() => {
+                    const inst = tipoClienteSelect.tomselect || tipoClienteSelect.tomSelect || tipoClienteSelect._tomselect;
+                    if (inst) {
+                        inst.on('change', toggleFields);
+                    }
+                }, 500);
+
+                toggleFields();
+            }
+        });
     </script>
 
         <script>
@@ -7279,5 +7704,119 @@
                 });
             });
         </script>
+
+        <script>
+            // Rehidrata payloads temporales en los TomSelect del formulario principal
+            document.addEventListener('DOMContentLoaded', function () {
+                const mainForm = document.getElementById('main-crud-form');
+                if (!mainForm) return;
+
+                const parseJson = (value) => {
+                    try {
+                        const parsed = JSON.parse(String(value || '[]'));
+                        return Array.isArray(parsed) ? parsed : [];
+                    } catch {
+                        return [];
+                    }
+                };
+
+                const addOptionToSelect = (select, id, label) => {
+                    if (!select) return;
+                    const inst = select.tomselect || select.tomSelect || select._tomselect || null;
+                    try {
+                        if (inst && typeof inst.addOption === 'function') {
+                            inst.addOption({ value: String(id), text: String(label) }, true);
+                        } else {
+                            let opt = select.querySelector('option[value="' + id + '"]');
+                            if (!opt) {
+                                opt = document.createElement('option');
+                                opt.value = String(id);
+                                select.appendChild(opt);
+                            }
+                            opt.textContent = String(label);
+                        }
+                    } catch (e) {
+                        // noop
+                    }
+                };
+
+                const ensureSelected = (select, id) => {
+                    if (!select || !id) return;
+                    const inst = select.tomselect || select.tomSelect || select._tomselect || null;
+                    try {
+                        if (inst && typeof inst.setValue === 'function') {
+                            inst.setValue(String(id));
+                        } else if (inst && typeof inst.addItem === 'function') {
+                            inst.addItem(String(id));
+                        } else {
+                            select.value = String(id);
+                        }
+                        select.dispatchEvent(new Event('change', { bubbles: true }));
+                    } catch (e) {}
+                };
+
+                const rehydrate = (payloadName, selectName, labelBuilder) => {
+                    const payloadInput = mainForm.querySelector('input[name="' + payloadName + '"]');
+                    const select = document.querySelector('select[name="' + selectName + '"]');
+                    if (!payloadInput || !select) return;
+
+                    const items = parseJson(payloadInput.value);
+                    if (!items || items.length === 0) return;
+
+                    // Añade las opciones temporales desde el payload
+                    items.forEach(function (item, idx) {
+                        const id = String(item.tempId ?? item.id ?? ('tmp-' + idx));
+                        let label = '';
+                        try {
+                            label = labelBuilder(item) || item.label || item.text || id;
+                        } catch (e) {
+                            label = item.label || id;
+                        }
+                        addOptionToSelect(select, id, label);
+                    });
+
+                    // Si el select tiene un valor actual que coincide con un temp id, asegurarlo como seleccionado
+                    const currentVal = String(select.value || '');
+                    if (currentVal) {
+                        const found = items.find((it, ix) => String(it.tempId ?? it.id ?? ('tmp-' + ix)) === currentVal);
+                        if (found) {
+                            ensureSelected(select, currentVal);
+                        }
+                    }
+                };
+
+                // Builders para etiquetas (fallbacks simples)
+                const buildAddressLabel = (it) => {
+                    const direccion = String(it.direccion || it.label || 'Dirección temporal').trim();
+                    const ubigeo = String(it.ubigeo_text || '').trim();
+                    return ubigeo ? direccion + ' (' + ubigeo + ')' : direccion;
+                };
+
+                const buildContactLabel = (it) => {
+                    const nombre = String(it.nombreApellido || it.label || 'Contacto temporal').trim();
+                    const tipo = String(it.tipoContacto_label || it.tipo || '').trim();
+                    const numero = String(it.numero || '').trim();
+                    let lbl = nombre;
+                    if (tipo) lbl += ' (' + tipo + ')';
+                    if (numero) lbl += ' - ' + numero;
+                    return lbl;
+                };
+
+                const buildCredentialLabel = (it) => {
+                    const usuario = String(it.usuario || it.label || 'Credencial temporal').trim();
+                    const estado = String(it.estadoRecepcion || it.estado || '') === '1' ? 'Sí' : 'No';
+                    const fecha = String(it.fechaCreacion || '').trim();
+                    let lbl = usuario + ' - ' + estado;
+                    if (fecha) lbl += ' - ' + fecha;
+                    return lbl;
+                };
+
+                // Ejecutar rehidratación para direcciones, contactos y credenciales
+                rehydrate('direcciones_payload', 'direccionCliente_iddireccionCliente', buildAddressLabel);
+                rehydrate('contactos_payload', 'contactoSeleccionado', buildContactLabel);
+                rehydrate('credenciales_payload', 'credencialSeleccionada', buildCredentialLabel);
+            });
+        </script>
+        @includeIf('cliente.relation-panel-script')
 @endsection
 

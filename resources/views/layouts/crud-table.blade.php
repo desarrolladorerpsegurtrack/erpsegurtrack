@@ -139,6 +139,21 @@
                                 <button type="button" class="absolute top-0 right-0 mt-2 mr-2 text-lg font-bold text-gray-600 hover:text-gray-800" onclick="this.parentElement.style.display='none';">&times;</button>
                             </div>
                         @endif
+                        @if(session('download_pdf_url'))
+                            <script>
+                                document.addEventListener('DOMContentLoaded', function () {
+                                    var url = {!! json_encode(session('download_pdf_url')) !!};
+                                    if (!url) return;
+                                    var a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = '';
+                                    a.style.display = 'none';
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    document.body.removeChild(a);
+                                });
+                            </script>
+                        @endif
                         @if(session('error'))
                             <div class="mb-4 rounded-lg border px-4 py-3 text-lg font-semibold relative" style="border-color:#a31616;background-color:#fcdcdc;color:#531414;">
                                 ✕ {{ session('error') }}
@@ -296,14 +311,14 @@
                                             </td>
                                             @foreach($columns as $column)
                                                 @if(($column['key'] ?? '') === 'estado')
-                                                    <td data-tw-merge="" class="px-5 text-center align-middle border-b dark:border-darkmode-300 border-t border-slate-200/60 bg-slate-50 py-4 font-medium text-slate-500 @if(!empty($column['wrap'] ?? false)) w-[38%] @endif">
+                                                    <td data-tw-merge="" class="px-5 text-center align-middle border-b dark:border-darkmode-300 border-t border-slate-200/60 bg-slate-50 py-4 font-medium text-slate-500 @if(!empty($column['wrap'] ?? false)) min-w-[150px] @endif">
                                                         <div class="th-sort th-sort--center" role="button" tabindex="0" data-sort-index="{{ $loop->index + 1 }}" aria-label="Ordenar {{ $column['label'] }}">
                                                             <span class="th-sort__label">{{ $column['label'] }}</span>
                                                             <span class="th-sort__icon" aria-hidden="true"></span>
                                                         </div>
                                                     </td>
                                                 @else
-                                                    <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 border-t border-slate-200/60 bg-slate-50 py-4 font-medium text-slate-500 @if(!empty($column['wrap'] ?? false)) w-[38%] @endif">
+                                                    <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 border-t border-slate-200/60 bg-slate-50 py-4 font-medium text-slate-500 @if(!empty($column['wrap'] ?? false)) min-w-[150px] @endif">
                                                         <div class="th-sort" role="button" tabindex="0" data-sort-index="{{ $loop->index + 1 }}" aria-label="Ordenar {{ $column['label'] }}">
                                                             <span class="th-sort__label">{{ $column['label'] }}</span>
                                                             <span class="th-sort__icon" aria-hidden="true"></span>
@@ -352,7 +367,7 @@
                                                     </div>
                                                 </td>
                                                 @foreach($columns as $columnIndex => $column)
-                                                    <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 border-dashed py-4 dark:bg-darkmode-600 @if(($column['key'] ?? '') === 'estado') text-center align-middle @endif @if(!empty($column['wrap'] ?? false)) align-top w-[38%] @endif">
+                                                    <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 border-dashed py-4 dark:bg-darkmode-600 @if(($column['key'] ?? '') === 'estado') text-center align-middle @endif @if(!empty($column['wrap'] ?? false)) align-top min-w-[150px] @endif ">
                                                         @switch($column['type'] ?? 'text')
                                                             @case('text')
                                                                 @php
@@ -604,6 +619,18 @@
                                                                     @if($relationGroups->isNotEmpty())
                                                                         <div class="flex flex-col gap-4">
                                                                             @foreach($relationGroups as $relationGroup)
+                                                                                @php
+                                                                                    $groupMaxTs = null;
+                                                                                    $groupTimestamps = [];
+                                                                                    foreach ((array) ($relationGroup['records'] ?? []) as $rgRec) {
+                                                                                        $f = data_get($rgRec, 'fechaAsignacion') ?? data_get($rgRec, 'fecha_asignacion') ?? null;
+                                                                                        if (!empty($f)) {
+                                                                                            $t = @strtotime($f);
+                                                                                            if ($t !== false && $t !== null) $groupTimestamps[] = $t;
+                                                                                        }
+                                                                                    }
+                                                                                    if (!empty($groupTimestamps)) $groupMaxTs = max($groupTimestamps);
+                                                                                @endphp
                                                                                 <div class="overflow-hidden rounded-lg border border-slate-200 shadow-sm">
                                                                                     <div class="border-b px-4 py-3 text-sm font-semibold">
                                                                                         {{ $relationGroup['label'] ?? 'Relación' }}
@@ -619,7 +646,17 @@
                                                                                             </thead>
                                                                                             <tbody>
                                                                                                 @foreach(($relationGroup['records'] ?? []) as $relationRecord)
-                                                                                                    <tr>
+                                                                                                    @php
+                                                                                                        $relFecha = data_get($relationRecord, 'fechaAsignacion') ?? data_get($relationRecord, 'fecha_asignacion') ?? null;
+                                                                                                        $relStyle = '';
+                                                                                                        if (!empty($relFecha) && !empty($groupMaxTs)) {
+                                                                                                            $relTs = @strtotime($relFecha);
+                                                                                                            if ($relTs !== false && $relTs === $groupMaxTs) {
+                                                                                                                $relStyle = 'color: #dc2626 !important;';
+                                                                                                            }
+                                                                                                        }
+                                                                                                    @endphp
+                                                                                                    <tr style="{{ $relStyle }}">
                                                                                                         @foreach(($relationGroup['columns'] ?? []) as $relationColumn)
                                                                                                             @php
                                                                                                                 $relationValue = data_get($relationRecord, $relationColumn['key'] ?? '') ?? '-';
@@ -1064,7 +1101,7 @@
                                                 <tr>
                                                     <th class="px-3 py-2">Línea</th>
                                                     <th class="px-3 py-2">Número</th>
-                                                    <th class="px-3 py-2">SimCard</th>
+                                                    <th class="px-3 py-2">SimCard</th> 
                                                     <th class="px-3 py-2">Operador</th>
                                                     <th class="px-3 py-2">Estado</th>
                                                 </tr>
@@ -1200,7 +1237,24 @@
             border-left: 5px solid #fb7185 !important; 
             box-shadow: inset 0 0 0 1px rgba(251, 113, 133, 0.18) !important;
         }
+
+        #list-table-wrapper table th,
+        #list-table-wrapper table td {
+            font-size: 0.8125rem !important;
+            padding: 0.45rem 0.6rem !important;
+            vertical-align: middle !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+        }
+        /* límites por columna para mantener proporciones razonables */
+        #list-table-wrapper table td { max-width: 180px; }
+        #list-table-wrapper table td:first-child { max-width: 48px; }
+        #list-table-wrapper table td:last-child { max-width: 120px; }
+        /* evitar truncar botones/acciones si usan elementos interactivos */
+        #list-table-wrapper table td .btn, #list-table-wrapper table td .dropdown { white-space: normal !important; overflow: visible !important; }
     </style>
+
     <script>
         (function () {
             const listWrapperId = 'list-table-wrapper';
@@ -1398,6 +1452,82 @@
                     link.href = exportUrl.toString();
                 });
             };
+
+            const handleExportClick = (event) => {
+                const link = event.target.closest('[data-export-link]');
+                if (!link) {
+                    return;
+                }
+
+                event.preventDefault();
+
+                // Obtener IDs seleccionados
+                const selectedIds = rowCheckboxes
+                    .filter((checkbox) => checkbox.checked)
+                    .map((checkbox) => checkbox.value)
+                    .filter((value) => value !== '');
+
+                // Si hay selecciones, usar POST; si no, usar GET
+                if (selectedIds.length > 0) {
+                    const format = link.getAttribute('data-export-format') || 'pdf';
+                    const baseHref = link.getAttribute('data-export-base') || link.href;
+                    if (!baseHref) {
+                        return;
+                    }
+
+                    // Extraer la ruta base sin parámetros
+                    const url = new URL(baseHref, window.location.origin);
+                    const exportUrl = url.pathname.replace(/\?.*$/, '');
+
+                    // Crear formulario oculto para POST
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = exportUrl;
+                    form.style.display = 'none';
+
+                    // Agregar token CSRF
+                    const token = document.querySelector('meta[name="csrf-token"]')?.content;
+                    if (token) {
+                        const tokenInput = document.createElement('input');
+                        tokenInput.type = 'hidden';
+                        tokenInput.name = '_token';
+                        tokenInput.value = token;
+                        form.appendChild(tokenInput);
+                    }
+
+                    // Agregar IDs seleccionados
+                    selectedIds.forEach((id) => {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = 'selectedIds[]';
+                        input.value = id;
+                        form.appendChild(input);
+                    });
+
+                    // Agregar filtros también
+                    const params = getRequestParams();
+                    for (const [key, value] of params.entries()) {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = key;
+                        input.value = value;
+                        form.appendChild(input);
+                    }
+
+                    document.body.appendChild(form);
+                    form.submit();
+                    document.body.removeChild(form);
+                } else {
+                    // Si no hay selecciones, usar el href normal (GET)
+                    window.location.href = link.href;
+                }
+            };
+
+            // Agregar event listener para exportación
+            if (!window.hasExportListener) {
+                document.addEventListener('click', handleExportClick);
+                window.hasExportListener = true;
+            }
 
             const handlePageSizeChange = () => {
                 const url = buildUrl();
@@ -3279,4 +3409,5 @@
             init();
         })();
     </script>
+    @includeIf('cliente.relation-panel-script')
 @endsection

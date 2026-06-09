@@ -67,6 +67,7 @@ class AlmacenController extends Controller
                 ['key' => 'tecnologia_label', 'label' => 'Tecnología', 'type' => 'text', 'wrap' => true],
                 ['key' => 'unidad_medida_label', 'label' => 'Unidad medida', 'type' => 'text', 'wrap' => true],
                 ['key' => 'cantidad', 'label' => 'Cantidad', 'type' => 'text'],
+                ['key' => 'precio_label', 'label' => 'Precio', 'type' => 'text'],
             ],
             'stats' => [
                 ['label' => 'Total registros', 'value' => $stats['total']],
@@ -115,8 +116,60 @@ class AlmacenController extends Controller
                     'type' => 'text',
                     'placeholder' => 'Ej: 1, >3, <=10',
                 ],
+                [
+                    'name' => 'precio',
+                    'label' => 'Precio',
+                    'type' => 'text',
+                    'placeholder' => 'Ej: 100',
+                ],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.almacen.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.almacen.export', ['format' => 'xlsx']),
             ],
         ]);
+    }
+
+    public function export(Request $request, string $format)
+    {
+        $format = strtolower($format);
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            abort(404);
+        }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
+
+        $columns = [
+            ['key' => 'idalmacen', 'label' => 'ID'],
+            ['key' => 'empresa_label', 'label' => 'Empresa'],
+            ['key' => 'modelo_label', 'label' => 'Modelo'],
+            ['key' => 'marca_label', 'label' => 'Marca'],
+            ['key' => 'tipo_elemento_label', 'label' => 'Tipo elemento'],
+            ['key' => 'tecnologia_label', 'label' => 'Tecnología'],
+            ['key' => 'unidad_medida_label', 'label' => 'Unidad medida'],
+            ['key' => 'cantidad', 'label' => 'Cantidad'],
+            ['key' => 'precio', 'label' => 'Precio'],
+        ];
+
+        $filename = 'almacen_export_' . now()->format('Ymd_His') . '.' . $format;
+
+         if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $this->baseQuery($request)->whereIn('a.idalmacen', array_values($selectedIds))->orderBy('a.idalmacen')->get();
+
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Almacen', $filename);
+        }
+
+        $rows = $this->baseQuery($request)->orderByDesc('a.idalmacen')->get();
+
+        if ($format === 'xlsx') {
+            return $this->exportXlsxResponse($rows, $columns, $filename);
+        }
+
+        return $this->exportPdfResponse($rows, $columns, 'Listado de Almacén', $filename);
     }
 
     public function create(): View
@@ -124,7 +177,7 @@ class AlmacenController extends Controller
         $detailListaPrecioItems = collect();
 
         return view('almacen.almacen-form', [
-            'title' => 'Nuevo Almacén',
+            'title' => 'Nuevo Dispositivo',
             'moduleTitle' => 'Módulo Almacén',
             'mode' => 'create',
             'formAction' => route('modules.almacen.store'),
@@ -236,6 +289,7 @@ class AlmacenController extends Controller
             ->leftJoin('tipoelemento as te', 'a.tipoElemento_idtipoElemento', '=', 'te.idtipoElemento')
             ->leftJoin('tecnologia as tg', 'a.tecnologia_idtecnologia', '=', 'tg.idtecnologia')
             ->leftJoin('unidadmedida as um', 'a.unidadMedida_idunidadMedida', '=', 'um.idunidadMedida')
+            ->leftJoin('plataforma as p', 'te.plataforma_idplataforma', '=', 'p.idplataforma')
             ->whereRaw("LOWER(TRIM(COALESCE(te.nombre, ''))) NOT LIKE '%plan%'")
             ->whereRaw("LOWER(TRIM(COALESCE(te.nombre, ''))) NOT LIKE '%servicio%'")
             ->select(
@@ -253,7 +307,7 @@ class AlmacenController extends Controller
                 DB::raw("COALESCE(ep.razonSocial, 'Sin razón social') as empresa_label"),
                 DB::raw("COALESCE(m.nombreModelo, 'Sin modelo') as modelo_label"),
                 DB::raw("COALESCE(ma.nombreMarca, 'Sin marca') as marca_label"),
-                DB::raw("COALESCE(te.nombre, 'Sin tipo') as tipo_elemento_label"),
+                DB::raw("CONCAT(COALESCE(te.nombre, 'Sin tipo'), IF(COALESCE(te.detalle, '') != '', CONCAT(' - ', te.detalle), ''), IF(COALESCE(p.nombrePlataforma, '') != '', CONCAT(' - ', p.nombrePlataforma), '')) as tipo_elemento_label"),
                 DB::raw("COALESCE(tg.nombreTecnologia, 'Sin tecnología') as tecnologia_label"),
                 DB::raw("COALESCE(um.nomenclatura, 'Sin unidad') as unidad_medida_label"),
                 DB::raw('COALESCE(eac.cantidad, 0) as cantidad')
@@ -277,15 +331,19 @@ class AlmacenController extends Controller
             $query->where(function ($builder) use ($term) {
                 $builder
                     ->where('a.idalmacen', 'like', $term)
+                    ->orWhere('a.empresaPropietaria_RUC', 'like', $term)
                     ->orWhere('a.detalle', 'like', $term)
                     ->orWhere('ep.razonSocial', 'like', $term)
                     ->orWhere('m.nombreModelo', 'like', $term)
                     ->orWhere('ma.nombreMarca', 'like', $term)
                     ->orWhere('te.nombre', 'like', $term)
                     ->orWhere('te.detalle', 'like', $term)
+                    ->orWhere('p.nombrePlataforma', 'like', $term)
                     ->orWhere('tg.nombreTecnologia', 'like', $term)
                     ->orWhere('um.detalle', 'like', $term)
-                    ->orWhere('um.nomenclatura', 'like', $term);
+                    ->orWhere('um.nomenclatura', 'like', $term)
+                    ->orWhereRaw('CAST(a.cantidadDisponible AS CHAR) LIKE ?', [$term])
+                    ->orWhereRaw('CAST(a.precio AS CHAR) LIKE ?', [$term]);
             });
         }
 
@@ -324,6 +382,13 @@ class AlmacenController extends Controller
             $operator = $matches[1] !== '' ? $matches[1] : '=';
             $amount = (int) $matches[2];
             $query->whereRaw("COALESCE(eac.cantidad, 0) {$operator} ?", [$amount]);
+        }
+
+        $precio = trim((string) $request->input('precio', ''));
+        if ($precio !== '' && preg_match('/^(<=|>=|=|<|>)?\s*(\d+(?:\.\d+)?)$/', $precio, $matches)) {
+            $operator = $matches[1] !== '' ? $matches[1] : '=';
+            $amount = (float) $matches[2];
+            $query->whereRaw("COALESCE(a.precio, 0) {$operator} ?", [$amount]);
         }
 
         $usaRedMovil = trim((string) $request->input('usaRedMovil', ''));
@@ -524,17 +589,27 @@ class AlmacenController extends Controller
     private function tipoElementoOptions(): Collection
     {
         return DB::table('tipoelemento as te')
+            ->join('plataforma as p', 'te.plataforma_idplataforma', '=', 'p.idplataforma')
             ->whereRaw("LOWER(TRIM(COALESCE(te.nombre, ''))) NOT LIKE '%plan%'")
             ->whereRaw("LOWER(TRIM(COALESCE(te.nombre, ''))) NOT LIKE '%servicio%'")
+            ->select('te.idtipoElemento', 'te.nombre', 'te.detalle', 'p.nombrePlataforma')
             ->orderBy('te.nombre')
             ->orderBy('te.idtipoElemento')
             ->get()
             ->map(function ($row): array {
                 $nombre = trim((string) ($row->nombre ?? ''));
-                $label = trim((string) trim($nombre));
+                $detalle = trim((string) ($row->detalle ?? ''));
+                $plataforma = trim((string) ($row->nombrePlataforma ?? ''));
+
+                $labelBody = trim(
+                    $nombre . 
+                    ($detalle !== '' ? ' - ' . $detalle : '') . 
+                    ($plataforma !== '' ? ' - ' . $plataforma . '' : '')
+                );
+
                 return [
                     'value' => (string) $row->idtipoElemento,
-                    'label' => $label !== '' ? $label : (string) $row->idtipoElemento,
+                    'label' => trim((string) ($labelBody !== '' ? $labelBody : 'Sin detalle')),
                 ];
             });
     }

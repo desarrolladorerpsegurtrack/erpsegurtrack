@@ -8,9 +8,12 @@ class ErpPermission
     private const MODULE_CHILDREN = [
         'almacen' => [
             'almacen.almacen',
-            'almacen.planes_servicios',
+            'almacen.elemento_almacen',
             'almacen.nota_ingreso',
             'almacen.nota_salida',
+        ],
+        'ventas' => [
+            'ventas.planes_servicios',
         ],
         'clientes' => [
             'clientes.cliente',
@@ -47,8 +50,6 @@ class ErpPermission
             'configuracion.certificadosunat',
             'configuracion.vigencia_oferta',
             'configuracion.detalle_lista_precio',
-            'configuracion.elemento_almacen',
-            
         ],
         'sistema' => [
             'sistema.vista',
@@ -81,9 +82,12 @@ class ErpPermission
     ];
 
     private const ALMACEN_ROUTE_RULES = [
-        'planes-servicios' => 'almacen.planes_servicios',
-        'planes_servicios' => 'almacen.planes_servicios',
-        'planes servicios' => 'almacen.planes_servicios',
+        'planes-servicios' => 'ventas.planes_servicios',
+        'planes_servicios' => 'ventas.planes_servicios',
+        'planes servicios' => 'ventas.planes_servicios',
+        'elemento-almacen' => 'almacen.elemento_almacen',
+        'elemento_almacen' => 'almacen.elemento_almacen',
+        'elemento almacen' => 'almacen.elemento_almacen',
         'nota-ingreso' => 'almacen.nota_ingreso',
         'nota_ingreso' => 'almacen.nota_ingreso',
         'nota ingreso' => 'almacen.nota_ingreso',
@@ -92,6 +96,14 @@ class ErpPermission
         'nota salida' => 'almacen.nota_salida',
         '' => 'almacen.almacen',
         'index' => 'almacen.almacen',
+    ];
+
+    private const VENTAS_ROUTE_RULES = [
+        'planes-servicios' => 'ventas.planes_servicios',
+        'planes_servicios' => 'ventas.planes_servicios',
+        'planes servicios' => 'ventas.planes_servicios',
+        '' => 'ventas.planes_servicios',
+        'index' => 'ventas.planes_servicios',
     ];
 
     private const CLIENTES_ROUTE_RULES = [
@@ -194,9 +206,9 @@ class ErpPermission
         'detalle-lista-precio' => 'configuracion.detalle_lista_precio',
         'detalle_lista_precio' => 'configuracion.detalle_lista_precio',
         'detallelistaprecio' => 'configuracion.detalle_lista_precio',
-        'elemento-almacen' => 'configuracion.elemento_almacen',
-        'elemento_almacen' => 'configuracion.elemento_almacen',
-        'elementoalmacen' => 'configuracion.elemento_almacen',
+        'elemento-almacen' => 'almacen.elemento_almacen',
+        'elemento_almacen' => 'almacen.elemento_almacen',
+        'elementoalmacen' => 'almacen.elemento_almacen',
         'tipos-pedido' => 'configuracion.tipo_pedido',
         'tipos_pedido' => 'configuracion.tipo_pedido',
         'tipo-pedido' => 'configuracion.tipo_pedido',
@@ -272,7 +284,7 @@ class ErpPermission
         ['prefix' => 'configuracion.', 'containsAny' => ['numero_telefonico', 'numerotelefonico', 'telefono', 'telefonico'], 'permission' => 'lineas_chips.numero_telefonico'],
         ['prefix' => 'configuracion.', 'containsAny' => ['lista_precio', 'listaprecio'], 'permission' => 'configuracion.lista_precio'],
         ['prefix' => 'configuracion.', 'containsAny' => ['detalle_lista_precio', 'detallelistaprecio', 'detalle-lista-precio', 'detalle lista precio'], 'permission' => 'configuracion.detalle_lista_precio'],
-        ['prefix' => 'configuracion.', 'containsAny' => ['elemento_almacen', 'elementoalmacen', 'elemento-almacen', 'elemento almacen'], 'permission' => 'configuracion.elemento_almacen'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['elemento_almacen', 'elementoalmacen', 'elemento-almacen', 'elemento almacen'], 'permission' => 'almacen.elemento_almacen'],
         ['prefix' => 'configuracion.', 'containsAny' => ['proveedor'], 'permission' => 'configuracion.proveedor'],
         ['prefix' => 'configuracion.', 'containsAny' => ['certificado', 'sunat'], 'permission' => 'configuracion.certificadosunat'],
         ['prefix' => 'configuracion.', 'containsAny' => ['vigencia_oferta', 'vigenciaoferta', 'vigencia'], 'permission' => 'configuracion.vigencia_oferta'],
@@ -349,6 +361,10 @@ class ErpPermission
             return self::ALMACEN_ROUTE_RULES[$resource] ?? 'almacen.almacen';
         }
 
+        if ($module === 'ventas') {
+            return self::VENTAS_ROUTE_RULES[$resource] ?? 'ventas';
+        }
+
         if ($module === 'clientes') {
             return self::CLIENTES_ROUTE_RULES[$resource] ?? 'clientes.cliente';
         }
@@ -386,7 +402,9 @@ class ErpPermission
             'vehiculo', 'vehiculos' => 'vehiculos',
             'almacen' => 'almacen',
             'almacen.almacen' => 'almacen.almacen',
-            'almacen.planes_servicios', 'almacen.planes-servicios', 'almacen.planes servicios' => 'almacen.planes_servicios',
+            'ventas' => 'ventas',
+            'almacen.planes_servicios', 'almacen.planes-servicios', 'almacen.planes servicios' => 'ventas.planes_servicios',
+            'ventas.planes_servicios', 'ventas.planes-servicios', 'ventas.planes servicios' => 'ventas.planes_servicios',
             'almacen.nota_ingreso', 'almacen.nota-ingreso', 'almacen.nota ingreso' => 'almacen.nota_ingreso',
             'almacen.nota_salida', 'almacen.nota-salida', 'almacen.nota salida' => 'almacen.nota_salida',
             'servicio-cliente', 'servicio_cliente', 'serviciocliente' => 'servicio_cliente',
@@ -414,7 +432,8 @@ class ErpPermission
             'configuracion.tipo_vehiculo', 'configuracion.tipos_vehiculo', 'configuracion.tipo-vehiculo', 'configuracion.tipos-vehiculo' => 'configuracion.tipo_vehiculo',
             'configuracion.tipo_operacion', 'configuracion.tipos_operacion', 'configuracion.tipo-operacion', 'configuracion.tipos-operacion' => 'configuracion.tipo_operacion',
             'configuracion.detalle_lista_precio', 'configuracion.detallelistaprecio', 'configuracion.detalle-lista-precio', 'detalle_lista_precio', 'detallelistaprecio', 'detalle-lista-precio' => 'configuracion.detalle_lista_precio',
-            'configuracion.elemento_almacen', 'configuracion.elementoalmacen', 'configuracion.elemento-almacen', 'elemento_almacen', 'elementoalmacen', 'elemento-almacen' => 'configuracion.elemento_almacen',
+            'configuracion.elemento_almacen', 'configuracion.elementoalmacen', 'configuracion.elemento-almacen', 'elemento_almacen', 'elementoalmacen', 'elemento-almacen' => 'almacen.elemento_almacen',
+        'almacen.elemento_almacen', 'almacen.elementoalmacen', 'almacen.elemento-almacen' => 'almacen.elemento_almacen',
             'configuracion.vista', 'configuracion.vistas', 'vista', 'vistas' => 'configuracion.vista',
             'configuracion.flujo', 'configuracion.flujos', 'flujo', 'flujos' => 'configuracion.flujo',
             'configuracion.flujoregla', 'configuracion.flujoreglas', 'configuracion.flujo-regla', 'configuracion.flujo_regla', 'flujoregla', 'flujoreglas' => 'configuracion.flujoregla',

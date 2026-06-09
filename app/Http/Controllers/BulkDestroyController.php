@@ -223,11 +223,11 @@ class BulkDestroyController extends Controller
                 'redirectRoute' => 'modules.configuracion.detalle-lista-precio.index',
                 'label' => 'detalle de lista de precio',
             ],
-            'modules.configuracion.elemento-almacen.bulk-destroy' => [
+            'modules.almacen.elemento-almacen.bulk-destroy' => [
                 'table' => 'elementoalmacen',
                 'primaryKey' => 'imei',
-                'lockResource' => 'configuracion.elemento_almacen',
-                'redirectRoute' => 'modules.configuracion.elemento-almacen.index',
+                'lockResource' => 'almacen.elemento_almacen',
+                'redirectRoute' => 'modules.almacen.elemento-almacen.index',
                 'label' => 'elemento de almacén',
             ],
             'modules.configuracion.tipos-pedido.bulk-destroy' => [

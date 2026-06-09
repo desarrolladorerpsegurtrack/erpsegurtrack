@@ -25,10 +25,12 @@ class DispositivoClienteController extends Controller
     {
         $query = DB::table('dispositivocliente as d')
             ->leftJoin('vehiculo as v', 'v.placa', '=', 'd.vehiculo_placa')
+            ->leftJoin('cliente as c', 'c.idcliente', '=', 'v.cliente_idcliente')
             ->select([
                 'd.iddispositivoCliente',
                 'd.vehiculo_placa',
                 'v.cliente_idcliente',
+                DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as nombre_cliente'),
                 'd.marcaDispositivo',
                 'd.modeloDispositivo',
                 'd.fechaInstalacion',
@@ -47,6 +49,8 @@ class DispositivoClienteController extends Controller
                     ->orWhere('d.modeloDispositivo', 'like', $term);
             });
         }
+
+        
 
         if ($id = trim((string) $request->query('iddispositivoCliente', ''))) {
             $query->where('d.iddispositivoCliente', 'like', "%{$id}%");
@@ -72,6 +76,67 @@ class DispositivoClienteController extends Controller
             ->orderBy('d.iddispositivoCliente')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
+        // Añadir los grupos de relación (números de dispositivo) en cada fila para permitir
+        $items->setCollection(
+            $items->getCollection()->map(function ($row) {
+                $deviceId = data_get($row, 'iddispositivoCliente');
+                $relationGroups = [];
+
+                if (!empty($deviceId)) {
+                    $numbers = DB::table('detnumerosdispositivo as n')
+                        ->leftJoin('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'n.dispositivoCliente_iddispositivoCliente')
+                        ->leftJoin('vehiculo as v', 'v.placa', '=', 'dc.vehiculo_placa')
+                        ->leftJoin('cliente as c', 'c.idcliente', '=', 'v.cliente_idcliente')
+                        ->select([
+                            'n.iddetNumerosDispositivo',
+                            'n.dispositivoCliente_iddispositivoCliente',
+                            DB::raw('COALESCE(v.placa, dc.vehiculo_placa, "") as vehiculo_placa'),
+                            DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as nombre_cliente'),
+                            'n.numeroTelefonico_numeroTelefonico',
+                            'n.fechaAsignacion',
+                        ])
+                        ->where('n.dispositivoCliente_iddispositivoCliente', $deviceId)
+                        ->orderByDesc('n.fechaAsignacion')
+                        ->orderByDesc('n.iddetNumerosDispositivo')
+                        ->get();
+
+                    if ($numbers->isNotEmpty()) {
+                        $relationGroups[] = [
+                            'key' => 'detnumerosdispositivo',
+                            'label' => 'Números de dispositivo',
+                            'columns' => [
+                                ['key' => 'iddetNumerosDispositivo', 'label' => 'ID'],
+                                ['key' => 'dispositivoCliente_iddispositivoCliente', 'label' => 'ID Dispositivo'],
+                                ['key' => 'vehiculo_placa', 'label' => 'Vehículo'],
+                                ['key' => 'nombre_cliente', 'label' => 'Cliente'],
+                                ['key' => 'numeroTelefonico_numeroTelefonico', 'label' => 'Número'],
+                                ['key' => 'fechaAsignacion', 'label' => 'Fecha asignación'],
+                            ],
+                            'records' => $numbers->map(function ($r) {
+                                $row = (array) $r;
+                                $raw = $row['fechaAsignacion'] ?? null;
+                                $formatted = '-';
+                                if (!empty($raw) && $raw !== '0000-00-00 00:00:00') {
+                                    try {
+                                        $dt = Carbon::parse($raw);
+                                        $months = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.'];
+                                        $formatted = sprintf('%s %s %s', $dt->format('d'), $months[$dt->month - 1], $dt->format('Y'));  
+                                    } catch (\Throwable $e) {
+                                        $formatted = (string) $raw;
+                                    }
+                                }
+                                $row['fechaAsignacion'] = $formatted;
+                                return $row;
+                            })->all(),
+                        ];
+                    }
+                }
+
+                // Anexar relation_groups al row para que el layout lo consuma
+                $row->relation_groups = $relationGroups;
+                return $row;
+            })
+        );
 
         return view('dispositivocliente.dispositivo-cliente', [
             'title' => 'Módulo Dispositivo cliente',
@@ -85,6 +150,7 @@ class DispositivoClienteController extends Controller
             'columns' => [
                 ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo', 'type' => 'text'],
                 ['key' => 'vehiculo_placa', 'label' => 'Vehículo', 'type' => 'text'],
+                ['key' => 'nombre_cliente', 'label' => 'Cliente', 'type' => 'text'],
                 ['key' => 'marcaDispositivo', 'label' => 'Marca', 'type' => 'text'],
                 ['key' => 'modeloDispositivo', 'label' => 'Modelo', 'type' => 'text'],
                 ['key' => 'fechaInstalacion', 'label' => 'Fecha de instalación', 'type' => 'date'],
@@ -147,15 +213,22 @@ class DispositivoClienteController extends Controller
             abort(404);
         }
 
-        $rows = $this->getExportRows($request);
+        $selectedIds = (array) $request->input('selectedIds', []);
+
+        $rows = collect($this->getExportRows($request));
+
+        if (!empty($selectedIds)) {
+            $rows = $rows->whereIn('iddispositivoCliente', $selectedIds);
+        }
+
         $columns = $this->getExportColumns();
         $filename = 'dispositivo_cliente_export_' . now()->format('Ymd_His') . '.' . $format;
 
         if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
+            return $this->exportXlsxResponse($rows->all(), $columns, $filename);
         }
 
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Dispositivo cliente', $filename);
+        return $this->exportPdfResponse($rows->all(), $columns, 'Listado de Dispositivo cliente', $filename);
     }
 
     public function create(): View
@@ -260,6 +333,23 @@ class DispositivoClienteController extends Controller
             return redirect()->route('modules.dispositivo-cliente')->with('error', 'No se encontró el dispositivo solicitado.');
         }
 
+        $detnumerosdispositivo = DB::table('detnumerosdispositivo as n')
+            ->leftJoin('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'n.dispositivoCliente_iddispositivoCliente')
+            ->leftJoin('vehiculo as v', 'v.placa', '=', 'dc.vehiculo_placa')
+            ->leftJoin('cliente as c', 'c.idcliente', '=', 'v.cliente_idcliente')
+            ->where('n.dispositivoCliente_iddispositivoCliente', $id)
+            ->select([
+                'n.iddetNumerosDispositivo',
+                'n.dispositivoCliente_iddispositivoCliente',
+                DB::raw('COALESCE(v.placa, dc.vehiculo_placa, "") as vehiculo_placa'),
+                DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as nombre_cliente'),
+                'n.numeroTelefonico_numeroTelefonico',
+                'n.fechaAsignacion',
+            ])
+            ->orderByDesc('n.fechaAsignacion')
+            ->orderByDesc('n.iddetNumerosDispositivo')
+            ->get();
+
         return view('dispositivocliente.dispositivo-cliente-form', [
             'title' => 'Editar Dispositivo cliente',
             'moduleTitle' => 'Módulo Dispositivo cliente',
@@ -326,6 +416,8 @@ class DispositivoClienteController extends Controller
                     'placeholder' => 'Selecciona estado',
                 ],
             ],
+            'detnumerosdispositivo' => $detnumerosdispositivo,
+            
         ] + $this->prepareLockViewData(self::LOCK_RESOURCE, $record->iddispositivoCliente));
     }
 
@@ -459,7 +551,7 @@ class DispositivoClienteController extends Controller
                     'modeloDispositivo' => $item->modeloDispositivo,
                     'fechaInstalacion' => $item->fechaInstalacion,
                     'fechaBaja' => $item->fechaBaja,
-                    'estado' => $item->estado,
+                    'estado' => ((string) $item->estado === '1') ? 'Activo' : 'Inactivo',
                 ];
             })
             ->all();

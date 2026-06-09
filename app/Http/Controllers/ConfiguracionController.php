@@ -235,6 +235,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('estadocliente');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -249,16 +251,24 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idestadoCliente')
-            ->get();
-
         $columns = [
             ['key' => 'idestadoCliente', 'label' => 'ID'],
             ['key' => 'detalle', 'label' => 'Detalle'],
         ];
 
         $filename = 'estado_cliente_export_' . now()->format('Ymd_His') . '.' . $format;
+
+         if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idestadoCliente', array_values($selectedIds))->orderBy('idestadoCliente')->get();
+
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Estados de Cliente', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idestadoCliente')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -273,6 +283,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('tecnologia');
 
@@ -286,16 +298,24 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idtecnologia')
-            ->get();
-
         $columns = [
             ['key' => 'idtecnologia', 'label' => 'ID'],
             ['key' => 'nombreTecnologia', 'label' => 'Nombre'],
         ];
 
         $filename = 'tecnologia_export_' . now()->format('Ymd_His') . '.' . $format;
+
+         if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idtecnologia', array_values($selectedIds))->orderBy('idtecnologia')->get();
+
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Tecnologias', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idtecnologia')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -471,6 +491,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('tipogasto');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -485,16 +507,24 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idtipoGasto')
-            ->get();
-
         $columns = [
             ['key' => 'idtipoGasto', 'label' => 'ID'],
             ['key' => 'nombre', 'label' => 'Nombre'],
         ];
 
         $filename = 'tipo_gasto_export_' . now()->format('Ymd_His') . '.' . $format;
+
+         if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idtipoGasto', array_values($selectedIds))->orderBy('idtipoGasto')->get();
+
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Gasto', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idtipoGasto')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -671,6 +701,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('tipocontacto');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -685,16 +717,24 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idtipoContacto')
-            ->get();
-
         $columns = [
             ['key' => 'idtipoContacto', 'label' => 'ID'],
             ['key' => 'detalle', 'label' => 'Detalle'],
         ];
 
         $filename = 'tipo_contacto_export_' . now()->format('Ymd_His') . '.' . $format;
+
+         if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idtipoContacto', array_values($selectedIds))->orderBy('idtipoContacto')->get();
+
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Contacto', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idtipoContacto')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -912,6 +952,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('tipocobro');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -928,10 +970,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idtipoCobros')
-            ->get();
-
         $columns = [
             ['key' => 'idtipoCobros', 'label' => 'ID'],
             ['key' => 'nombre', 'label' => 'Nombre'],
@@ -940,6 +978,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'tipo_cobro_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idtipoCobros', array_values($selectedIds))->orderBy('idtipoCobros')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Cobro', $filename);
+        }    
+
+        $rows = $baseQuery->orderBy('idtipoCobros')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -1138,6 +1188,9 @@ class ConfiguracionController extends Controller
             abort(404);
         }
 
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
+
         $baseQuery = DB::table('unidadmedida');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
@@ -1152,9 +1205,7 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idunidadMedida')
-            ->get();
+        
 
         $columns = [
             ['key' => 'idunidadMedida', 'label' => 'ID'],
@@ -1163,6 +1214,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'unidad_medida_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idunidadMedida', array_values($selectedIds))->orderBy('idunidadMedida')->get();
+
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Unidades de Medida', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idunidadMedida')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -1360,6 +1423,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('moneda');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -1375,10 +1440,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idmoneda')
-            ->get();
-
         $columns = [
             ['key' => 'idmoneda', 'label' => 'ID'],
             ['key' => 'detalle', 'label' => 'Detalle'],
@@ -1386,6 +1447,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'moneda_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idmoneda', array_values($selectedIds))->orderBy('idmoneda')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Monedas', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idmoneda')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -1583,6 +1656,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('marca');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -1598,10 +1673,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idmarca')
-            ->get();
-
         $columns = [
             ['key' => 'idmarca', 'label' => 'ID'],
             ['key' => 'nombreMarca', 'label' => 'Nombre'],
@@ -1609,6 +1680,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'marca_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idmarca', array_values($selectedIds))->orderBy('idmarca')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Marcas', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idmarca')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -1752,6 +1835,7 @@ class ConfiguracionController extends Controller
             'ubigeo_idubigeo' => ['required', 'integer', 'exists:ubigeo,idubigeo'],
         ], [
             'RUC.integer' => 'El RUC debe ser un número entero.',
+            'rubro.max' => 'El rubro no debe tener más de 50 caracteres.',
         ]
         );
 
@@ -1861,6 +1945,8 @@ class ConfiguracionController extends Controller
             'rubro' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
             'direccionFiscal' => ['nullable', 'string', 'max:300', 'regex:' . self::SAFE_TEXT_REGEX],
             'ubigeo_idubigeo' => ['required', 'integer', 'exists:ubigeo,idubigeo'],
+        ], [
+            'rubro.max' => 'El rubro no debe tener más de 50 caracteres.',
         ]);
 
         $validated['RUC'] = (int) $validated['RUC'];
@@ -1902,6 +1988,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('empresapropietaria as ep')
             ->leftJoin('ubigeo as u', 'ep.ubigeo_idubigeo', '=', 'u.idubigeo')
@@ -1923,10 +2011,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('ep.razonSocial')
-            ->get();
-
         $columns = [
             ['key' => 'RUC', 'label' => 'RUC'],
             ['key' => 'razonSocial', 'label' => 'Razón social'],
@@ -1936,6 +2020,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'empresa_propietaria_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('ep.RUC', array_values($selectedIds))->orderBy('ep.razonSocial')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Empresas Propietarias', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('ep.razonSocial')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -2147,6 +2243,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('modelo as m')
             ->leftJoin('marca as ma', 'm.marca_idmarca', '=', 'ma.idmarca')
@@ -2164,10 +2262,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('m.idmodelo')
-            ->get();
-
         $columns = [
             ['key' => 'idmodelo', 'label' => 'ID'],
             ['key' => 'nombreModelo', 'label' => 'Nombre'],
@@ -2175,6 +2269,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'modelo_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('m.idmodelo', array_values($selectedIds))->orderBy('m.idmodelo')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Modelos', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('m.idmodelo')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -2392,6 +2498,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('tributo');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -2408,10 +2516,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idtributo')
-            ->get();
-
         $columns = [
             ['key' => 'idtributo', 'label' => 'ID'],
             ['key' => 'nombreTributo', 'label' => 'Nombre'],
@@ -2420,6 +2524,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'tributo_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idtributo', array_values($selectedIds))->orderBy('idtributo')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Tributos', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idtributo')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -2755,9 +2871,11 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('tipoplataforma');
-    $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -2769,16 +2887,24 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idtipoPlataforma')
-            ->get();
-
         $columns = [
             ['key' => 'idtipoPlataforma', 'label' => 'ID'],
             ['key' => 'descripcion', 'label' => 'Descripcion'],
         ];
 
         $filename = 'tipo_plataforma_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idtipoPlataforma', array_values($selectedIds))->orderBy('idtipoPlataforma')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Plataforma', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idtipoPlataforma')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -2986,6 +3112,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('plataforma')
             ->leftJoin('tipoplataforma', 'plataforma.tipoPlataforma_idtipoPlataforma', '=', 'tipoplataforma.idtipoPlataforma')
@@ -3003,10 +3131,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('plataforma.idplataforma')
-            ->get();
-
         $columns = [
             ['key' => 'idplataforma', 'label' => 'ID'],
             ['key' => 'nombrePlataforma', 'label' => 'Nombre'],
@@ -3014,6 +3138,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'plataforma_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('plataforma.idplataforma', array_values($selectedIds))->orderBy('plataforma.idplataforma')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Plataformas', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('plataforma.idplataforma')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -3245,6 +3381,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('tipoelemento')
             ->leftJoin('plataforma', 'tipoelemento.plataforma_idplataforma', '=', 'plataforma.idplataforma')
@@ -3263,10 +3401,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('tipoelemento.idtipoElemento')
-            ->get();
-
         $columns = [
             ['key' => 'idtipoElemento', 'label' => 'ID'],
             ['key' => 'nombre', 'label' => 'Nombre'],
@@ -3275,6 +3409,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'tipo_elemento_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('tipoelemento.idtipoElemento', array_values($selectedIds))->orderBy('tipoelemento.idtipoElemento')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Elemento', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('tipoelemento.idtipoElemento')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -3508,9 +3654,11 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('tipodocumento');
-    $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -3525,10 +3673,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idtipoDocumento')
-            ->get();
-
         $columns = [
             ['key' => 'idtipoDocumento', 'label' => 'ID'],
             ['key' => 'detalle', 'label' => 'Detalle'],
@@ -3538,6 +3682,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'tipo_documento_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idtipoDocumento', array_values($selectedIds))->orderBy('idtipoDocumento')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Documento', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idtipoDocumento')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -3733,9 +3889,11 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('formapago');
-    $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -3748,10 +3906,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idformaPago')
-            ->get();
-
         $columns = [
             ['key' => 'idformaPago', 'label' => 'ID'],
             ['key' => 'detalle', 'label' => 'Detalle'],
@@ -3759,6 +3913,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'forma_pago_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idformaPago', array_values($selectedIds))->orderBy('idformaPago')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Formas de Pago', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idformaPago')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -3978,6 +4144,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('entidadbancaria');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -3994,10 +4162,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('identidadBancaria')
-            ->get();
-
         $columns = [
             ['key' => 'identidadBancaria', 'label' => 'ID'],
             ['key' => 'razonSocial', 'label' => 'Razon social'],
@@ -4006,6 +4170,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'entidad_bancaria_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('identidadBancaria', array_values($selectedIds))->orderBy('identidadBancaria')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Entidades Bancarias', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('identidadBancaria')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -4181,6 +4357,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('operador');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -4195,16 +4373,24 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idoperador')
-            ->get();
-
         $columns = [
             ['key' => 'idoperador', 'label' => 'ID'],
             ['key' => 'nombre', 'label' => 'Nombre'],
         ];
 
         $filename = 'operador_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idoperador', array_values($selectedIds))->orderBy('idoperador')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Operadores', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idoperador')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -4380,6 +4566,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('tipovehiculo');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -4394,10 +4582,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idtipoVehiculo')
-            ->get();
-
         $columns = [
             ['key' => 'idtipoVehiculo', 'label' => 'ID'],
             ['key' => 'nombre', 'label' => 'Nombre'],
@@ -4405,6 +4589,17 @@ class ConfiguracionController extends Controller
 
         $filename = 'tipo_vehiculo_export_' . now()->format('Ymd_His') . '.' . $format;
 
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idtipoVehiculo', array_values($selectedIds))->orderBy('idtipoVehiculo')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Vehículo', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idtipoVehiculo')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -4602,6 +4797,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('tipooperacion');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -4617,10 +4814,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idtipoOperacion')
-            ->get();
-
         $columns = [
             ['key' => 'idtipoOperacion', 'label' => 'ID'],
             ['key' => 'nomenclatura', 'label' => 'Nomenclatura'],
@@ -4628,6 +4821,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'tipo_operacion_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idtipoOperacion', array_values($selectedIds))->orderBy('idtipoOperacion')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Operación', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idtipoOperacion')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -4803,6 +5008,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('listaprecio');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -4817,16 +5024,24 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idListaPrecio')
-            ->get();
-
         $columns = [
             ['key' => 'idListaPrecio', 'label' => 'ID'],
             ['key' => 'nombreLista', 'label' => 'Nombre lista'],
         ];
 
         $filename = 'listaprecio_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idListaPrecio', array_values($selectedIds))->orderBy('idListaPrecio')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Listas de Precio', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idListaPrecio')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -5070,6 +5285,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('detallelistaprecio as d')
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'd.almacen_idalmacen')
@@ -5101,10 +5318,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('d.iddetalleListaPrecio')
-            ->get();
-
         $columns = [
             ['key' => 'iddetalleListaPrecio', 'label' => 'ID'],
             ['key' => 'almacen_label', 'label' => 'Almacén'],
@@ -5114,331 +5327,23 @@ class ConfiguracionController extends Controller
 
         $filename = 'detalle_lista_precio_export_' . now()->format('Ymd_His') . '.' . $format;
 
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('d.iddetalleListaPrecio', array_values($selectedIds))->orderBy('d.iddetalleListaPrecio')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Detalles de Lista de Precio', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('d.iddetalleListaPrecio')->get();
+
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
         }
 
         return $this->exportPdfResponse($rows, $columns, 'Listado de Detalles de Lista de Precio', $filename);
-    }
-
-    public function elementoAlmacenIndex(Request $request): View
-    {
-        $baseQuery = DB::table('elementoalmacen as e')
-            ->leftJoin('almacen as a', 'a.idalmacen', '=', 'e.dispositivo_iddispositivo')
-            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
-            ->select([
-                'e.imei',
-                'e.dispositivo_iddispositivo',
-                'e.fechaIngreso',
-                'e.estado',
-                'e.idAuxiliar',
-                DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
-                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(ep.razonSocial), ""), "Sin empresa"), " - ", COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
-                DB::raw('CASE WHEN e.estado = 1 THEN "Activo" ELSE "Inactivo" END as estado_label'),
-            ]);
-            $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('e.imei', 'like', $term)
-                    ->orWhere('e.dispositivo_iddispositivo', 'like', $term)
-                    ->orWhere('a.detalle', 'like', $term)
-                    ->orWhere('ep.razonSocial', 'like', $term)
-                    ->orWhere('e.fechaIngreso', 'like', $term)
-                    ->orWhere('e.estado', 'like', $term)
-                    ->orWhere('e.idAuxiliar', 'like', $term);
-            });
-        }
-
-        $items = $baseQuery
-            ->orderBy('e.imei')
-            ->paginate($this->resolvePerPage($request))
-            ->withQueryString();
-
-        return view('configuracion.elementoalmacen.elementoalmacen', [
-            'title' => 'Configuracion: Elemento Almacén',
-            'singularTitle' => 'Elemento Almacén',
-            'items' => $items,
-            'columns' => [
-                ['key' => 'imei', 'label' => 'IMEI', 'type' => 'text'],
-                ['key' => 'almacen_label', 'label' => 'Dispositivo', 'type' => 'text', 'wrap' => true],
-                ['key' => 'fechaIngreso', 'label' => 'Fecha ingreso', 'type' => 'date'],
-                ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
-                ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar', 'type' => 'text'],
-            ],
-            'exportRoutes' => [
-                'pdf' => route('modules.configuracion.elemento-almacen.export', ['format' => 'pdf']),
-                'xlsx' => route('modules.configuracion.elemento-almacen.export', ['format' => 'xlsx']),
-            ],
-            'stats' => [
-                ['label' => 'Total de elementos de almacén', 'value' => (clone $baseQuery)->count()],
-            ],
-            'filters' => $this->configuracionListFilters(__FUNCTION__),
-            'createRoute' => route('modules.configuracion.elemento-almacen.create'),
-            'editRoute' => 'modules.configuracion.elemento-almacen.edit',
-            'showRoute' => 'modules.configuracion.elemento-almacen.edit',
-            'destroyRoute' => 'modules.configuracion.elemento-almacen.destroy',
-            'bulkDestroyRoute' => route('modules.configuracion.elemento-almacen.bulk-destroy'),
-            'identifierKey' => 'imei',
-            'lockResource' => 'configuracion.elemento_almacen',
-        ]);
-    }
-
-    public function elementoAlmacenCreate(): View
-    {
-        return view('configuracion.elementoalmacen.elementoalmacen-form', [
-            'title' => 'Nuevo Elemento Almacén',
-            'moduleTitle' => 'Configuracion: Elemento Almacén',
-            'mode' => 'create',
-            'formAction' => route('modules.configuracion.elemento-almacen.store'),
-            'backRoute' => route('modules.configuracion.elemento-almacen.index'),
-            'record' => null,
-            'fields' => [
-                [
-                    'name' => 'imei',
-                    'type' => 'text',
-                    'label' => 'IMEI',
-                    'required' => true,
-                    'maxlength' => 30,
-                    'minlength' => 1,
-                    'pattern' => '^[0-9]+$',
-                    'inputmode' => 'numeric',
-                    'helpText' => 'Solo números, hasta 30 caracteres.',
-                ],
-                [
-                    'name' => 'dispositivo_iddispositivo',
-                    'type' => 'select',
-                    'label' => 'Dispositivo (Almacén)',
-                    'required' => true,
-                    'tomSelect' => true,
-                    'placeholder' => 'Selecciona un dispositivo de Almacén',
-                    'optionsData' => $this->almacenOptions(),
-                    'optionKey' => 'idalmacen',
-                    'optionLabel' => 'label',
-                ],
-                [
-                    'name' => 'estado',
-                    'type' => 'select',
-                    'label' => 'Estado',
-                    'required' => true,
-                    'placeholder' => 'Selecciona un estado',
-                    'options' => [
-                        '1' => 'Activo',
-                        '0' => 'Inactivo',                  
-                    ],
-                ],
-                [
-                    'name' => 'idAuxiliar',
-                    'type' => 'text',
-                    'label' => 'ID Auxiliar',
-                    'required' => false,
-                    'maxlength' => 30,
-                    'helpText' => 'Identificador auxiliar opcional.',
-                ],
-            ],
-            'readOnly' => false,
-        ]);
-    }
-
-    public function elementoAlmacenStore(Request $request): RedirectResponse
-    {
-        $validated = $request->validate([
-            'imei' => ['required', 'string', 'max:30', 'regex:/^[0-9]+$/'],
-            'dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
-            'fechaIngreso' => ['nullable', 'date'],
-            'estado' => ['nullable', 'integer', 'in:0,1'],
-            'idAuxiliar' => ['nullable', 'string', 'max:30'],
-        ]);
-
-        $payload = $validated;
-        $payload['estado'] = (int) ($payload['estado'] ?? 0);
-        $payload['fechaIngreso'] = now()->format('Y-m-d H:i:s');
-
-        DB::table('elementoalmacen')->insert($payload);
-        $this->publishResourceEvent('configuracion.elemento_almacen', (string) $payload['imei'], 'created');
-
-        return redirect()
-            ->route('modules.configuracion.elemento-almacen.index')
-            ->with('success', 'Elemento de almacén creado correctamente.');
-    }
-
-    public function elementoAlmacenEdit(string $id): View|RedirectResponse
-    {
-        $record = DB::table('elementoalmacen')->where('imei', $id)->first();
-        if (!$record) {
-            return redirect()
-                ->route('modules.configuracion.elemento-almacen.index')
-                ->with('error', 'No se encontro el elemento de almacén solicitado.');
-        }
-
-        return view('configuracion.elementoalmacen.elementoalmacen-form', [
-            'title' => 'Editar Elemento Almacén',
-            'moduleTitle' => 'Configuracion: Elemento Almacén',
-            'mode' => 'edit',
-            'formAction' => route('modules.configuracion.elemento-almacen.update', $id),
-            'backRoute' => route('modules.configuracion.elemento-almacen.index'),
-            'record' => $record,
-            'fields' => [
-                [
-                    'name' => 'imei',
-                    'type' => 'text',
-                    'label' => 'IMEI',
-                    'required' => true,
-                    'maxlength' => 30,
-                    'minlength' => 1,
-                    'pattern' => '^[0-9]+$',
-                    'inputmode' => 'numeric',
-                    'helpText' => 'Solo números, hasta 30 caracteres.',
-                ],
-                [
-                    'name' => 'dispositivo_iddispositivo',
-                    'type' => 'select',
-                    'label' => 'Dispositivo (Almacén)',
-                    'required' => true,
-                    'tomSelect' => true,
-                    'placeholder' => 'Selecciona un dispositivo de almacén',
-                    'optionsData' => $this->almacenOptions(),
-                    'optionKey' => 'idalmacen',
-                    'optionLabel' => 'label',
-                ],
-                [
-                    'name' => 'estado',
-                    'type' => 'select',
-                    'label' => 'Estado',
-                    'required' => false,
-                    'placeholder' => 'Selecciona un estado',
-                    'options' => [
-                        '0' => 'Inactivo',
-                        '1' => 'Activo',
-                    ],
-                ],
-                [
-                    'name' => 'idAuxiliar',
-                    'type' => 'text',
-                    'label' => 'ID Auxiliar',
-                    'required' => false,
-                    'maxlength' => 30,
-                    'helpText' => 'Identificador auxiliar opcional.',
-                ],
-            ],
-            'readOnly' => true,
-        ] + $this->prepareLockViewData('configuracion.elemento_almacen', $id));
-    }
-
-    public function elementoAlmacenUpdate(Request $request, string $id): RedirectResponse
-    {
-        $exists = DB::table('elementoalmacen')->where('imei', $id)->exists();
-        if (!$exists) {
-            return redirect()
-                ->route('modules.configuracion.elemento-almacen.index')
-                ->with('error', 'No se encontro el elemento de almacén solicitado.');
-        }
-
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.elemento_almacen', $id, 'elemento de almacén', 'modules.configuracion.elemento-almacen.index')) {
-            return $redirect;
-        }
-
-        $validated = $request->validate([
-            'imei' => ['required', 'string', 'max:30', 'regex:/^[0-9]+$/'],
-            'dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
-            'fechaIngreso' => ['nullable', 'date'],
-            'estado' => ['nullable', 'integer', 'in:0,1'],
-            'idAuxiliar' => ['nullable', 'string', 'max:30'],
-        ]);
-
-        $payload = $validated;
-        $payload['estado'] = (int) ($payload['estado'] ?? 0);
-        unset($payload['fechaIngreso']);
-
-        DB::table('elementoalmacen')->where('imei', $id)->update($payload);
-        $this->publishResourceEvent('configuracion.elemento_almacen', $id, 'updated');
-
-        $this->releaseLockIfOwned($request, 'configuracion.elemento_almacen', $id);
-
-        return redirect()
-            ->route('modules.configuracion.elemento-almacen.index')
-            ->with('success', 'Elemento de almacén actualizado correctamente.');
-    }
-
-    public function elementoAlmacenDestroy(Request $request, string $id): RedirectResponse
-    {
-        if ($redirect = $this->assertLockAvailable($request, 'configuracion.elemento_almacen', $id, 'elemento de almacén', 'modules.configuracion.elemento-almacen.index')) {
-            return $redirect;
-        }
-
-        try {
-            DB::table('elementoalmacen')->where('imei', $id)->delete();
-            $this->publishResourceEvent('configuracion.elemento_almacen', $id, 'deleted');
-            $this->releaseLockIfOwned($request, 'configuracion.elemento_almacen', $id);
-            return redirect()
-                ->route('modules.configuracion.elemento-almacen.index')
-                ->with('success', 'Elemento de almacén eliminado correctamente.');
-        } catch (QueryException) {
-            return redirect()
-                ->route('modules.configuracion.elemento-almacen.index')
-                ->with('error', 'No se puede eliminar el elemento de almacén porque tiene registros relacionados.');
-        }
-    }
-
-    public function elementoAlmacenExport(Request $request, string $format)
-    {
-        $format = strtolower($format);
-        if (!in_array($format, ['pdf', 'xlsx'], true)) {
-            abort(404);
-        }
-
-        $baseQuery = DB::table('elementoalmacen as e')
-            ->leftJoin('almacen as a', 'a.idalmacen', '=', 'e.dispositivo_iddispositivo')
-            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
-            ->select([
-                'e.imei',
-                'e.dispositivo_iddispositivo',
-                'e.fechaIngreso',
-                'e.estado',
-                'e.idAuxiliar',
-                DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
-                DB::raw('CASE WHEN e.estado = 1 THEN "Activo" ELSE "Inactivo" END as estado_label'),
-                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(ep.razonSocial), ""), "Sin empresa"), " - ", COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
-            ]);
-            $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('e.imei', 'like', $term)
-                    ->orWhere('e.dispositivo_iddispositivo', 'like', $term)
-                    ->orWhere('a.detalle', 'like', $term)
-                    ->orWhere('e.fechaIngreso', 'like', $term)
-                    ->orWhere('ep.razonSocial', 'like', $term)
-                    ->orWhere('e.estado', 'like', $term)
-                    ->orWhere('e.idAuxiliar', 'like', $term);
-            });
-        }
-
-        $rows = $baseQuery
-            ->orderBy('e.imei')
-            ->get();
-
-        $columns = [
-            ['key' => 'imei', 'label' => 'IMEI'],
-            ['key' => 'almacen_label', 'label' => 'Almacén'],
-            ['key' => 'fechaIngreso', 'label' => 'Fecha ingreso'],
-            ['key' => 'estado_label', 'label' => 'Estado'],
-            ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar'],
-        ];
-
-        $filename = 'elemento_almacen_export_' . now()->format('Ymd_His') . '.' . $format;
-
-        if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
-        }
-
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Elementos de Almacén', $filename);
     }
 
     private function almacenOptions()
@@ -5678,6 +5583,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('tipopedido');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -5693,10 +5600,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idtipoPedido')
-            ->get();
-
         $columns = [
             ['key' => 'idtipoPedido', 'label' => 'ID'],
             ['key' => 'nomenclatura', 'label' => 'Nomenclatura'],
@@ -5704,6 +5607,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'tipo_pedido_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idtipoPedido', array_values($selectedIds))->orderBy('idtipoPedido')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Tipos de Pedido', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idtipoPedido')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -5955,6 +5870,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('proveedor');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -5970,10 +5887,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idproveedor')
-            ->get();
-
         $columns = [
             ['key' => 'idproveedor', 'label' => 'ID'],
             ['key' => 'razonSocial', 'label' => 'Razón social'],
@@ -5981,6 +5894,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'proveedor_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idproveedor', array_values($selectedIds))->orderBy('idproveedor')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Proveedores', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idproveedor')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -6176,6 +6101,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('vigenciaoferta');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -6191,10 +6118,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idvigenciaOferta')
-            ->get();
-
         $columns = [
             ['key' => 'idvigenciaOferta', 'label' => 'ID'],
             ['key' => 'detalle', 'label' => 'Detalle'],
@@ -6202,6 +6125,18 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'vigencia_oferta_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idvigenciaOferta', array_values($selectedIds))->orderBy('idvigenciaOferta')->get();
+    
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+    
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Vigencias de Oferta', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idvigenciaOferta')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -6580,6 +6515,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('certificadosunat');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -6597,16 +6534,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idcertificadoSUNAT')
-            ->get()
-            ->map(function ($row) {
-                $row->fechaEmision = $row->fechaEmision ? date('Y-m-d', strtotime($row->fechaEmision)) : null;
-                $row->fechaVencimiento = $row->fechaVencimiento ? date('Y-m-d', strtotime($row->fechaVencimiento)) : null;
-                $row->fechaCargaSistema = $row->fechaCargaSistema ? date('Y-m-d', strtotime($row->fechaCargaSistema)) : null;
-                return $row;
-            });
-
         $columns = [
             ['key' => 'idcertificadoSUNAT', 'label' => 'Certificado SUNAT'],
             ['key' => 'firmaDigital', 'label' => 'Firma digital'],
@@ -6619,6 +6546,26 @@ class ConfiguracionController extends Controller
         ];
 
         $filename = 'certificadosunat_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idcertificadoSUNAT', array_values($selectedIds))->orderBy('idcertificadoSUNAT')->get();
+        
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+        
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Certificados SUNAT', $filename);
+        }
+
+        $rows = $baseQuery
+            ->orderBy('idcertificadoSUNAT')
+            ->get()
+            ->map(function ($row) {
+                $row->fechaEmision = $row->fechaEmision ? date('Y-m-d', strtotime($row->fechaEmision)) : null;
+                $row->fechaVencimiento = $row->fechaVencimiento ? date('Y-m-d', strtotime($row->fechaVencimiento)) : null;
+                $row->fechaCargaSistema = $row->fechaCargaSistema ? date('Y-m-d', strtotime($row->fechaCargaSistema)) : null;
+                return $row;
+            });
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -6885,6 +6832,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('ubigeo');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -6902,10 +6851,6 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('idubigeo')
-            ->get();
-
         $columns = [
             ['key' => 'idubigeo', 'label' => 'ID'],
             ['key' => 'departamento', 'label' => 'Departamento'],
@@ -6916,6 +6861,17 @@ class ConfiguracionController extends Controller
 
         $filename = 'ubigeo_export_' . now()->format('Ymd_His') . '.' . $format;
 
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idubigeo', array_values($selectedIds))->orderBy('idubigeo')->get();
+        
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+        
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Ubigeos', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idubigeo')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -7113,6 +7069,8 @@ class ConfiguracionController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('cargopersonal');
         $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
@@ -7127,17 +7085,24 @@ class ConfiguracionController extends Controller
             });
         }
 
-        $rows = $baseQuery
-            ->orderBy('descripcion')
-            ->orderBy('idcargoPersonal')
-            ->get();
-
         $columns = [
             ['key' => 'idcargoPersonal', 'label' => 'ID'],
             ['key' => 'descripcion', 'label' => 'Descripcion'],
         ];
 
         $filename = 'cargo_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idcargoPersonal', array_values($selectedIds))->orderBy('descripcion')->orderBy('idcargoPersonal')->get();
+        
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+        
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Cargos', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('descripcion')->orderBy('idcargoPersonal')->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -7388,13 +7353,6 @@ class ConfiguracionController extends Controller
                 ['name' => 'almacen_detalle', 'label' => 'Almacén', 'type' => 'text'],
                 ['name' => 'listaprecio_nombre', 'label' => 'Lista de precio', 'type' => 'text'],
                 ['name' => 'precio', 'label' => 'Precio', 'type' => 'text'],
-            ],
-            'elementoAlmacenIndex', 'elementoAlmacenExport' => [
-                ['name' => 'imei', 'label' => 'IMEI', 'type' => 'text'],
-                ['name' => 'almacen_detalle', 'label' => 'Dispositivo', 'type' => 'text'],
-                ['name' => 'fechaIngreso', 'label' => 'Fecha ingreso', 'type' => 'date'],
-                ['name' => 'estado', 'label' => 'Estado', 'options' => [ ['value' => '1', 'label' => 'Activo'], ['value' => '0', 'label' => 'Inactivo'], ],],
-                ['name' => 'idAuxiliar', 'label' => 'ID Auxiliar', 'type' => 'text'],
             ],
             'tipopedidoIndex', 'tipopedidoExport' => [
                 ['name' => 'idtipoPedido', 'label' => 'ID', 'type' => 'text'],

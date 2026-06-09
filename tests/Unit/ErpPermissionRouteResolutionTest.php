@@ -30,6 +30,7 @@ class ErpPermissionRouteResolutionTest extends TestCase
             'modules.configuracion.cargos.index' => 'configuracion.cargo',
             'modules.configuracion.auditoria.index' => 'configuracion.auditoria',
             'modules.configuracion' => 'configuracion',
+            'modules.ventas' => 'ventas.planes_servicios',
         ];
 
         foreach ($cases as $routeName => $expectedPermissionKey) {

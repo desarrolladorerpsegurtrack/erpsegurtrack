@@ -9,18 +9,17 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
-class AlmacenPlanesServiciosController extends Controller
+class PlanesServiciosController extends Controller
 {
     use ExportableList;
     use HandlesResourceLock;
 
     protected const SAFE_TEXT_REGEX = '/^[^;<>`]+$/u';
 
-    private const LOCK_RESOURCE = 'almacen.planes_servicios';
+    private const LOCK_RESOURCE = 'ventas.planes_servicios';
 
     public function index(Request $request): View
     {
@@ -44,14 +43,15 @@ class AlmacenPlanesServiciosController extends Controller
             'empresaPropietaria_RUC' => (clone $statsQuery)->distinct('a.empresaPropietaria_RUC')->count('a.empresaPropietaria_RUC'),
         ];
 
-        return view('almacen.planes-servicios.index', [
+        return view('ventas.planes-servicios.index', [
             'title' => 'Planes y servicios',
             'singularTitle' => 'Plan o servicio',
             'items' => $items,
-            'createRoute' => route('modules.almacen.planes-servicios.create'),
-            'editRoute' => 'modules.almacen.planes-servicios.edit',
-            'destroyRoute' => 'modules.almacen.planes-servicios.destroy',
-            'bulkDestroyRoute' => route('modules.almacen.planes-servicios.bulk-destroy'),
+            'createRoute' => route('modules.ventas.planes-servicios.create'),
+            'editRoute' => 'modules.ventas.planes-servicios.edit',
+            'showRoute' => 'modules.ventas.planes-servicios.edit',
+            'destroyRoute' => 'modules.ventas.planes-servicios.destroy',
+            'bulkDestroyRoute' => route('modules.ventas.planes-servicios.bulk-destroy'),
             'identifierKey' => 'idalmacen',
             'lockResource' => self::LOCK_RESOURCE,
             'showActionsColumn' => true,
@@ -61,6 +61,7 @@ class AlmacenPlanesServiciosController extends Controller
                 ['key' => 'tipo_elemento_label', 'label' => 'Tipo elemento', 'type' => 'text', 'wrap' => true],
                 ['key' => 'precio_label', 'label' => 'Precio', 'type' => 'text'],
                 ['key' => 'renovacion_label', 'label' => 'Renovación', 'type' => 'text', 'wrap' => true],
+                ['key' => 'detalle', 'label' => 'Detalle', 'type' => 'text', 'wrap' => true],
             ],
             'stats' => [
                 ['label' => 'Total registros', 'value' => $stats['total']],
@@ -68,17 +69,37 @@ class AlmacenPlanesServiciosController extends Controller
             ],
             'filters' => [
                 [
-                    'name' => 'empresaPropietaria_RUC',
+                    'name' => 'empresa_search',
                     'label' => 'Empresa',
-                    'options' => $this->empresaOptions(),
-                    'placeholder' => 'Todas las empresas',
+                    'type' => 'text',
+                    'placeholder' => 'Buscar por RUC o Razón Social...',
                 ],
                 [
-                    'name' => 'tipoElemento_idtipoElemento',
+                    'name' => 'tipo_elemento_search',
                     'label' => 'Tipo elemento',
-                    'options' => $this->tipoElementoOptions(),
-                    'placeholder' => 'Todos los planes/servicios',
+                    'type' => 'text',
+                    'placeholder' => 'Buscar por tipo...',
                 ],
+                [
+                    'name' => 'precio_search',
+                    'label' => 'Precio',
+                    'type' => 'text',
+                    'placeholder' => 'Ej: 50.00',
+                ],
+                [
+                    'name' => 'renovacion',
+                    'label' => 'Renovación',
+                    'type' => 'select',
+                    'options' => [
+                        ['value' => '0', 'label' => 'No'],
+                        ['value' => '1', 'label' => 'Sí'],
+                    ],
+                    'placeholder' => 'Todos',
+                ],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.ventas.planes-servicios.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.ventas.planes-servicios.export', ['format' => 'xlsx']),
             ],
         ]);
     }
@@ -90,20 +111,36 @@ class AlmacenPlanesServiciosController extends Controller
             abort(404);
         }
 
-        $rows = $this->baseQuery($request)
-            ->orderByDesc('a.idalmacen')
-            ->get();
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
+        $selectedIds = $request->input('selectedIds', []);
+
+        $rows = $this->baseQuery($request)->orderByDesc('a.idalmacen')->get();
+
+        $rows->transform(function ($row) {
+            $row->renovacion = $this->formatYesNo($row->renovacion ?? null);
+            return $row;
+        });
 
         $columns = [
             ['key' => 'idalmacen', 'label' => 'ID'],
             ['key' => 'empresa_label', 'label' => 'Empresa'],
             ['key' => 'tipo_elemento_label', 'label' => 'Tipo elemento'],
-            ['key' => 'detalle', 'label' => 'Detalle'],
             ['key' => 'precio', 'label' => 'Precio'],
             ['key' => 'renovacion', 'label' => 'Renovación'],
+            ['key' => 'detalle', 'label' => 'Detalle'],
         ];
 
         $filename = 'planes_servicios_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $this->baseQuery($request)->whereIn('a.idalmacen', array_values($selectedIds))->orderBy('a.idalmacen')->get();
+
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Planes y Servicios', $filename);
+        }
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -114,12 +151,12 @@ class AlmacenPlanesServiciosController extends Controller
 
     public function create(): View
     {
-        return view('almacen.planes-servicios.form', [
+        return view('ventas.planes-servicios.form', [
             'title' => 'Nuevo plan o servicio',
             'moduleTitle' => 'Planes y servicios',
             'mode' => 'create',
-            'formAction' => route('modules.almacen.planes-servicios.store'),
-            'backRoute' => route('modules.almacen.planes-servicios.index'),
+            'formAction' => route('modules.ventas.planes-servicios.store'),
+            'backRoute' => route('modules.ventas.planes-servicios.index'),
             'record' => null,
             'fields' => $this->buildFields(null),
             'readOnly' => false,
@@ -138,7 +175,7 @@ class AlmacenPlanesServiciosController extends Controller
         });
 
         return redirect()
-            ->route('modules.almacen.planes-servicios.index')
+            ->route('modules.ventas.planes-servicios.index')
             ->with('success', 'Registro de plan o servicio creado correctamente.');
     }
 
@@ -148,16 +185,16 @@ class AlmacenPlanesServiciosController extends Controller
 
         if (!$record) {
             return redirect()
-                ->route('modules.almacen.planes-servicios.index')
+                ->route('modules.ventas.planes-servicios.index')
                 ->with('error', 'No se encontro el registro solicitado.');
         }
 
-        return view('almacen.planes-servicios.form', [
+        return view('ventas.planes-servicios.form', [
             'title' => 'Editar plan o servicio',
             'moduleTitle' => 'Planes y servicios',
             'mode' => 'edit',
-            'formAction' => route('modules.almacen.planes-servicios.update', $id),
-            'backRoute' => route('modules.almacen.planes-servicios.index'),
+            'formAction' => route('modules.ventas.planes-servicios.update', $id),
+            'backRoute' => route('modules.ventas.planes-servicios.index'),
             'record' => $record,
             'fields' => $this->buildFields($id),
             'readOnly' => true,
@@ -170,11 +207,11 @@ class AlmacenPlanesServiciosController extends Controller
 
         if (!$exists) {
             return redirect()
-                ->route('modules.almacen.planes-servicios.index')
+                ->route('modules.ventas.planes-servicios.index')
                 ->with('error', 'No se encontro el registro solicitado.');
         }
 
-        if ($redirect = $this->assertLockAvailable($request, self::LOCK_RESOURCE, (string) $id, 'registro de plan o servicio', 'modules.almacen.planes-servicios.index')) {
+        if ($redirect = $this->assertLockAvailable($request, self::LOCK_RESOURCE, (string) $id, 'registro de plan o servicio', 'modules.ventas.planes-servicios.index')) {
             return $redirect;
         }
 
@@ -188,13 +225,13 @@ class AlmacenPlanesServiciosController extends Controller
         });
 
         return redirect()
-            ->route('modules.almacen.planes-servicios.index')
+            ->route('modules.ventas.planes-servicios.index')
             ->with('success', 'Registro de plan o servicio actualizado correctamente.');
     }
 
     public function destroy(Request $request, int $id): RedirectResponse
     {
-        if ($redirect = $this->assertLockAvailable($request, self::LOCK_RESOURCE, (string) $id, 'registro de plan o servicio', 'modules.almacen.planes-servicios.index')) {
+        if ($redirect = $this->assertLockAvailable($request, self::LOCK_RESOURCE, (string) $id, 'registro de plan o servicio', 'modules.ventas.planes-servicios.index')) {
             return $redirect;
         }
 
@@ -204,11 +241,11 @@ class AlmacenPlanesServiciosController extends Controller
             $this->releaseLockIfOwned($request, self::LOCK_RESOURCE, (string) $id);
 
             return redirect()
-                ->route('modules.almacen.planes-servicios.index')
+                ->route('modules.ventas.planes-servicios.index')
                 ->with('success', 'Registro eliminado correctamente.');
         } catch (QueryException) {
             return redirect()
-                ->route('modules.almacen.planes-servicios.index')
+                ->route('modules.ventas.planes-servicios.index')
                 ->with('error', 'No se puede eliminar el registro porque tiene relaciones asociadas.');
         }
     }
@@ -220,6 +257,7 @@ class AlmacenPlanesServiciosController extends Controller
             ->leftJoin('modelo as m', 'a.modelo_idmodelo', '=', 'm.idmodelo')
             ->leftJoin('marca as ma', 'm.marca_idmarca', '=', 'ma.idmarca')
             ->leftJoin('tipoelemento as te', 'a.tipoElemento_idtipoElemento', '=', 'te.idtipoElemento')
+            ->leftJoin('plataforma as p', 'te.plataforma_idplataforma', '=', 'p.idplataforma')
             ->leftJoin('tecnologia as tg', 'a.tecnologia_idtecnologia', '=', 'tg.idtecnologia')
             ->leftJoin('unidadmedida as um', 'a.unidadMedida_idunidadMedida', '=', 'um.idunidadMedida')
             ->where(function ($builder) {
@@ -239,10 +277,10 @@ class AlmacenPlanesServiciosController extends Controller
                 'a.detalle',
                 'a.precio',
                 'a.renovacion',
-                DB::raw("COALESCE(ep.razonSocial, 'Sin razón social') as empresa_label"),
+                DB::raw("CONCAT(COALESCE(a.empresaPropietaria_RUC, ''), ' - ', COALESCE(ep.razonSocial, 'Sin razón social')) as empresa_label"),
                 DB::raw("COALESCE(m.nombreModelo, 'Sin modelo') as modelo_label"),
                 DB::raw("COALESCE(ma.nombreMarca, 'Sin marca') as marca_label"),
-                DB::raw("COALESCE(te.nombre, 'Sin tipo') as tipo_elemento_label"),
+                DB::raw("COALESCE(NULLIF(TRIM(CONCAT_WS('-', COALESCE(te.nombre, ''), NULLIF(TRIM(COALESCE(te.detalle, '')), ''), NULLIF(TRIM(COALESCE(p.nombrePlataforma, '')), ''))), ''), 'Sin tipo') as tipo_elemento_label"),
                 DB::raw("COALESCE(tg.nombreTecnologia, 'Sin tecnología') as tecnologia_label"),
                 DB::raw("COALESCE(um.nomenclatura, 'Sin unidad') as unidad_medida_label")
             );
@@ -259,17 +297,40 @@ class AlmacenPlanesServiciosController extends Controller
                     ->orWhere('ma.nombreMarca', 'like', $term)
                     ->orWhere('te.nombre', 'like', $term)
                     ->orWhere('te.detalle', 'like', $term)
+                    ->orWhere('p.nombrePlataforma', 'like', $term)
                     ->orWhere('tg.nombreTecnologia', 'like', $term)
                     ->orWhere('um.detalle', 'like', $term)
                     ->orWhere('um.nomenclatura', 'like', $term);
             });
         }
 
-        foreach (['empresaPropietaria_RUC' => 'a.empresaPropietaria_RUC', 'modelo_idmodelo' => 'a.modelo_idmodelo', 'marca_idmarca' => 'm.marca_idmarca', 'tecnologia_idtecnologia' => 'a.tecnologia_idtecnologia', 'unidadMedida_idunidadMedida' => 'a.unidadMedida_idunidadMedida'] as $input => $column) {
-            $value = trim((string) $request->input($input, ''));
-            if ($value !== '') {
-                $query->where($column, (int) $value);
-            }
+        $empresaSearch = trim((string) $request->input('empresa_search', ''));
+        if ($empresaSearch !== '') {
+            $term = '%' . $empresaSearch . '%';
+            $query->where(function ($builder) use ($term) {
+                $builder->where('a.empresaPropietaria_RUC', 'like', $term)
+                        ->orWhere('ep.razonSocial', 'like', $term);
+            });
+        }
+
+        $tipoSearch = trim((string) $request->input('tipo_elemento_search', ''));
+        if ($tipoSearch !== '') {
+            $term = '%' . $tipoSearch . '%';
+            $query->where(function ($builder) use ($term) {
+                $builder->where('te.nombre', 'like', $term)
+                        ->orWhere('te.detalle', 'like', $term)
+                        ->orWhere('p.nombrePlataforma', 'like', $term);
+            });
+        }
+
+        $precioSearch = trim((string) $request->input('precio_search', ''));
+        if ($precioSearch !== '') {
+            $query->where('a.precio', 'like', '%' . $precioSearch . '%');
+        }
+
+        $renovacion = $request->input('renovacion');
+        if ($renovacion !== null && $renovacion !== '') {
+            $query->where('a.renovacion', (int) $renovacion);
         }
 
         return $query;

@@ -48,6 +48,77 @@ class GrupoClienteController extends Controller
             ['key' => 'nombreGrupo', 'label' => 'Nombre', 'type' => 'text'],
         ];
         
+        // Adjuntar relation_groups para mostrar los clientes dentro de cada grupo
+        $ids = collect($grupos->items())->pluck('idgrupoCliente')->filter()->unique()->values()->all();
+        if (!empty($ids)) {
+            $clientesRows = DB::table('detallegrupocliente as dgc')
+                ->join('cliente as c', 'dgc.cliente_idcliente', '=', 'c.idcliente')
+                ->leftJoin('direccioncliente as dc', function ($join) {
+                    $join->on('c.idcliente', '=', 'dc.cliente_idcliente')
+                        ->where(function ($query) {
+                            $query->where('dc.default', 1)
+                                ->orWhere(function ($subQuery) {
+                                    $subQuery->whereNull('dc.default')
+                                        ->whereRaw('dc.iddireccionCliente = (select max(inner_dc.iddireccionCliente) from direccioncliente as inner_dc where inner_dc.cliente_idcliente = dc.cliente_idcliente)');
+                                });
+                        });
+                })
+                ->leftJoin('ubigeo as u', 'dc.ubigeo_idubigeo', '=', 'u.idubigeo')
+                ->whereIn('dgc.grupoCliente_idgrupoCliente', $ids)
+                ->select(
+                    'dgc.grupoCliente_idgrupoCliente',
+                    'c.idcliente',
+                    'c.nombreComercial',
+                    'c.razonSocial',
+                    'c.rubro',
+                    'dc.direccion',
+                    'u.departamento',
+                    'u.provincia',
+                    'u.distrito',
+                    'c.estadoCliente_idestadoCliente'
+                )
+                ->get()
+                ->map(function ($cliente) {
+                    $direccion = trim((string) ($cliente->direccion ?? ''));
+                    $ubigeoText = trim(("{$cliente->departamento} / {$cliente->provincia} / {$cliente->distrito}"), ' /');
+                    $cliente->direccion_completa = trim($direccion . ($direccion !== '' && $ubigeoText !== '' ? ' - ' . $ubigeoText : $ubigeoText));
+                    return $cliente;
+                });
+
+            $grouped = $clientesRows->groupBy('grupoCliente_idgrupoCliente')->map(function ($group) {
+                return $group->map(function ($c) {
+                    return (array) $c;
+                })->all();
+            })->all();
+
+            $newCollection = $grupos->getCollection()->map(function ($row) use ($grouped) {
+                $id = data_get($row, 'idgrupoCliente');
+                $clients = $grouped[$id] ?? [];
+
+                $relationGroups = [
+                    [
+                        'key' => 'detallegrupocliente',
+                        'label' => 'Clientes',
+                        'columns' => [
+                            ['key' => 'idcliente', 'label' => 'RUC/DNI', 'type' => 'text'],
+                            ['key' => 'nombreComercial', 'label' => 'Cliente', 'type' => 'text'],
+                            ['key' => 'razonSocial', 'label' => 'Razón Social', 'type' => 'text'],
+                            ['key' => 'rubro', 'label' => 'Rubro', 'type' => 'text'],
+                            ['key' => 'direccion_completa', 'label' => 'Dirección', 'type' => 'text'],
+                            ['key' => 'estadoCliente_idestadoCliente', 'label' => 'Estado', 'type' => 'status'],
+                        ],
+                        'records' => $clients,
+                    ],
+                ];
+
+                $rowArr = (array) $row;
+                $rowArr['relation_groups'] = $relationGroups;
+                return (object) $rowArr;
+            });
+
+            $grupos->setCollection($newCollection);
+        }
+
         return view('cliente.grupocliente', [
             'title' => 'Grupos de Cliente',
             'singularTitle' => 'Grupo',
@@ -68,6 +139,7 @@ class GrupoClienteController extends Controller
             'showRoute' => 'modules.clientes.grupos.edit',
             'destroyRoute' => 'modules.clientes.grupos.destroy',
             'lockResource' => 'clientes.grupos',
+            'relationPanelView' => 'cliente.relation-grupo',
             'exportRoutes' => [
                 'pdf' => route('modules.clientes.grupos.export', ['format' => 'pdf']),
                 'xlsx' => route('modules.clientes.grupos.export', ['format' => 'xlsx']),
@@ -82,6 +154,8 @@ class GrupoClienteController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
+
+        $selectedIds = $request->input('selectedIds', []);
 
         $baseQuery = DB::table('grupocliente');
 
@@ -102,22 +176,56 @@ class GrupoClienteController extends Controller
             }
         }
 
-        $rows = $baseQuery
-            ->orderBy('idgrupoCliente')
-            ->get();
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $baseQuery->whereIn('idgrupoCliente', array_values($selectedIds));
+        }
+
+        $rows = $baseQuery->orderBy('idgrupoCliente')->get();
+
+        $ids = $rows->pluck('idgrupoCliente')->filter()->unique()->map(function($id) {
+            return (int) $id;
+        })->values()->all();
+
+        $clientesAgrupados = [];
+
+        if (!empty($ids)) {
+            $clientesRows = DB::table('detallegrupocliente as dgc')
+                ->join('cliente as c', 'dgc.cliente_idcliente', '=', 'c.idcliente')
+                ->whereIn('dgc.grupoCliente_idgrupoCliente', $ids)
+                ->select('dgc.grupoCliente_idgrupoCliente', 'c.idcliente', 'c.nombreComercial', 'c.razonSocial')
+                ->get();
+
+            $clientesAgrupados = $clientesRows->groupBy('grupoCliente_idgrupoCliente')->map(function ($group) {
+                return $group->map(function ($c) {
+                    $nombre = trim((string) ($c->nombreComercial ?: $c->razonSocial));
+                    return $nombre !== '' ? $nombre : 'Cliente ID: ' . $c->idcliente;
+                })->filter()->implode(', ');
+            })->all();
+        }
+
+        $exportRows = $rows->map(function ($row) use ($clientesAgrupados) {
+            $id = $row->idgrupoCliente;
+            $rowArr = (array) $row;
+            $rowArr['clientes_texto'] = isset($clientesAgrupados[$id]) && $clientesAgrupados[$id] !== '' 
+                ? $clientesAgrupados[$id] 
+                : 'Sin clientes asignados';
+                
+            return (object) $rowArr;
+        });
 
         $columns = [
             ['key' => 'idgrupoCliente', 'label' => 'ID'],
             ['key' => 'nombreGrupo', 'label' => 'Nombre'],
+            ['key' => 'clientes_texto', 'label' => 'Clientes en este grupo'],
         ];
 
         $filename = 'grupos_cliente_export_' . now()->format('Ymd_His') . '.' . $format;
 
         if ($format === 'xlsx') {
-            return $this->exportXlsxResponse($rows, $columns, $filename);
+            return $this->exportXlsxResponse($exportRows, $columns, $filename);
         }
 
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Grupos de Cliente', $filename);
+        return $this->exportPdfResponse($exportRows, $columns, 'Listado de Grupos de Cliente', $filename);
     }
 
     public function create(): View
@@ -197,7 +305,8 @@ class GrupoClienteController extends Controller
                 'dc.direccion',
                 'u.departamento',
                 'u.provincia',
-                'u.distrito'
+                'u.distrito',
+                'c.estadoCliente_idestadoCliente'
             )
             ->get()
             ->map(function ($cliente) {

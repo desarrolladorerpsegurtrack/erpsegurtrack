@@ -9,6 +9,7 @@ Route::middleware('erp.module:lineas_chips')->group(function () {
 
     Route::get('/modulos/lineas-chips/numeros-telefonico', [LineasChipsController::class, 'numerosTelefonicoIndex'])->name('modules.lineas-chips.numeros-telefonico.index');
     Route::get('/modulos/lineas-chips/numeros-telefonico/export/{format}', [LineasChipsController::class, 'numerosTelefonicoExport'])->name('modules.lineas-chips.numeros-telefonico.export')->where('format', 'pdf|xlsx');
+    Route::post('/modulos/lineas-chips/numeros-telefonico/export/{format}', [LineasChipsController::class, 'numerosTelefonicoExport'])->name('modules.lineas-chips.numeros-telefonico.export.post')->where('format', 'pdf|xlsx');
     Route::get('/modulos/lineas-chips/numeros-telefonico/crear', [LineasChipsController::class, 'numerosTelefonicoCreate'])->name('modules.lineas-chips.numeros-telefonico.create');
     Route::post('/modulos/lineas-chips/numeros-telefonico', [LineasChipsController::class, 'numerosTelefonicoStore'])->name('modules.lineas-chips.numeros-telefonico.store');
     Route::delete('/modulos/lineas-chips/numeros-telefonico/bulk-destroy', [LineasChipsController::class, 'numerosTelefonicoBulkDestroy'])->name('modules.lineas-chips.numeros-telefonico.bulk-destroy');
@@ -18,6 +19,7 @@ Route::middleware('erp.module:lineas_chips')->group(function () {
 
     Route::get('/modulos/lineas-chips/numeros-dispositivo', [LineasChipsController::class, 'numerosDispositivoIndex'])->name('modules.lineas-chips.numeros-dispositivo.index');
     Route::get('/modulos/lineas-chips/numeros-dispositivo/export/{format}', [LineasChipsController::class, 'numerosDispositivoExport'])->name('modules.lineas-chips.numeros-dispositivo.export')->where('format', 'pdf|xlsx');
+    Route::post('/modulos/lineas-chips/numeros-dispositivo/export/{format}', [LineasChipsController::class, 'numerosDispositivoExport'])->name('modules.lineas-chips.numeros-dispositivo.export.post')->where('format', 'pdf|xlsx');
     Route::get('/modulos/lineas-chips/numeros-dispositivo/crear', [LineasChipsController::class, 'numerosDispositivoCreate'])->name('modules.lineas-chips.numeros-dispositivo.create');
     Route::post('/modulos/lineas-chips/numeros-dispositivo', [LineasChipsController::class, 'numerosDispositivoStore'])->name('modules.lineas-chips.numeros-dispositivo.store');
     Route::delete('/modulos/lineas-chips/numeros-dispositivo/bulk-destroy', [LineasChipsController::class, 'numerosDispositivoBulkDestroy'])->name('modules.lineas-chips.numeros-dispositivo.bulk-destroy');
@@ -25,6 +27,7 @@ Route::middleware('erp.module:lineas_chips')->group(function () {
 
     Route::get('/modulos/lineas-chips/simcard', [LineasChipsController::class, 'simcardIndex'])->name('modules.lineas-chips.simcard.index');
     Route::get('/modulos/lineas-chips/simcard/export/{format}', [LineasChipsController::class, 'simcardExport'])->name('modules.lineas-chips.simcard.export')->where('format', 'pdf|xlsx');
+    Route::post('/modulos/lineas-chips/simcard/export/{format}', [LineasChipsController::class, 'simcardExport'])->name('modules.lineas-chips.simcard.export.post')->where('format', 'pdf|xlsx');
     Route::get('/modulos/lineas-chips/simcard/crear', [LineasChipsController::class, 'simcardCreate'])->name('modules.lineas-chips.simcard.create');
     Route::post('/modulos/lineas-chips/simcard', [LineasChipsController::class, 'simcardStore'])->name('modules.lineas-chips.simcard.store');
     Route::get('/modulos/lineas-chips/simcard/{id}/editar', [LineasChipsController::class, 'simcardEdit'])->name('modules.lineas-chips.simcard.edit');
@@ -34,6 +37,7 @@ Route::middleware('erp.module:lineas_chips')->group(function () {
 
     Route::get('/modulos/lineas-chips/detallesimcard', [LineasChipsController::class, 'detallesimcardIndex'])->name('modules.lineas-chips.detallesimcard.index');
     Route::get('/modulos/lineas-chips/detallesimcard/export/{format}', [LineasChipsController::class, 'detallesimcardExport'])->name('modules.lineas-chips.detallesimcard.export')->where('format', 'pdf|xlsx');
+    Route::post('/modulos/lineas-chips/detallesimcard/export/{format}', [LineasChipsController::class, 'detallesimcardExport'])->name('modules.lineas-chips.detallesimcard.export.post')->where('format', 'pdf|xlsx');
     Route::get('/modulos/lineas-chips/detallesimcard/crear', [LineasChipsController::class, 'detallesimcardCreate'])->name('modules.lineas-chips.detallesimcard.create');
     Route::post('/modulos/lineas-chips/detallesimcard', [LineasChipsController::class, 'detallesimcardStore'])->name('modules.lineas-chips.detallesimcard.store');
     Route::post('/modulos/lineas-chips/detallesimcard/bulk-deactivate', [LineasChipsController::class, 'detallesimcardBulkDeactivate'])->name('modules.lineas-chips.detallesimcard.bulk-deactivate');

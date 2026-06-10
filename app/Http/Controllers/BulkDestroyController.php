@@ -349,6 +349,71 @@ class BulkDestroyController extends Controller
         }
 
         try {
+            // Caso especial: notas de ingreso / salida — los selectedIds son `idcompras`.
+            if ($routeName === 'modules.almacen.nota-ingreso.bulk-destroy' || $routeName === 'modules.almacen.nota-salida.bulk-destroy') {
+                $allImeis = DB::table('detallemovalmacen')->whereIn('compras_idcompras', $selectedIds)->pluck('elementoAlmacen_imei')->values();
+
+                if ($allImeis->isEmpty()) {
+                    DB::transaction(function () use ($selectedIds, $request) {
+                        DB::table('detallemovalmacen')->whereIn('compras_idcompras', $selectedIds)->delete();
+                        DB::table('compras')->whereIn('idcompras', $selectedIds)->delete();
+
+                        foreach ($selectedIds as $id) {
+                            $this->publishResourceEvent('almacen.nota_ingreso', (string) $id, 'deleted');
+                            $this->releaseLockIfOwned($request, 'almacen.nota_ingreso', (string) $id);
+                        }
+                    });
+
+                    $count = count($selectedIds);
+                    $successMessage = $count === 1
+                        ? '1 fila exitosamente eliminada'
+                        : "{$count} filas exitosamente eliminadas";
+                    return redirect()->route($resource['redirectRoute'])->with('success', $successMessage);
+                }
+
+                $imeisByDevice = DB::table('elementoalmacen')->whereIn('imei', $allImeis)->select('imei', 'dispositivo_iddispositivo')->get()->groupBy('dispositivo_iddispositivo');
+
+                DB::transaction(function () use ($allImeis, $imeisByDevice, $selectedIds, $request) {
+                    // Comprobar stock por dispositivo sumando todas las filas a eliminar
+                    foreach ($imeisByDevice as $deviceId => $rowsToRemove) {
+                        $countToRemove = count($rowsToRemove);
+
+                        $existing = DB::table('elementoalmacen')
+                            ->where('dispositivo_iddispositivo', $deviceId)
+                            ->where('estado', 1)
+                            ->select('imei')
+                            ->lockForUpdate()
+                            ->get();
+
+                        $currentStock = $existing->count();
+
+                        if (($currentStock - $countToRemove) < 0) {
+                            throw new \RuntimeException('stock_insuficiente');
+                        }
+                    }
+
+                    // Eliminar detalles y marcar elementos como inactivos
+                    DB::table('detallemovalmacen')->whereIn('compras_idcompras', $selectedIds)->delete();
+                    DB::table('elementoalmacen')->whereIn('imei', $allImeis->all())->update([
+                        'estado' => 0,
+                        'fechaIngreso' => now(),
+                    ]);
+                    DB::table('compras')->whereIn('idcompras', $selectedIds)->delete();
+
+                    foreach ($selectedIds as $id) {
+                        $this->publishResourceEvent('almacen.nota_ingreso', (string) $id, 'deleted');
+                        $this->releaseLockIfOwned($request, 'almacen.nota_ingreso', (string) $id);
+                    }
+                });
+
+                $count = count($selectedIds);
+                $successMessage = $count === 1
+                    ? '1 fila exitosamente eliminada'
+                    : "{$count} filas exitosamente eliminadas";
+                return redirect()->route($resource['redirectRoute'])->with('success', $successMessage);
+            }
+
+            // Caso genérico
             DB::transaction(function () use ($resource, $selectedIds, $request) {
                 DB::table($resource['table'])->whereIn($resource['primaryKey'], $selectedIds)->delete();
 
@@ -367,6 +432,11 @@ class BulkDestroyController extends Controller
             return redirect()->route($resource['redirectRoute'])->with('success', $successMessage);
         } catch (QueryException $exception) {
             return redirect()->route($resource['redirectRoute'])->with('error', 'No se puede eliminar los registros seleccionados porque tienen relaciones asociadas.');
+        } catch (\RuntimeException $e) {
+            if ($e->getMessage() === 'stock_insuficiente') {
+                return redirect()->route($resource['redirectRoute'])->with('error', 'No se puede eliminar la(s) nota(s) porque la operación dejaría stock negativo para uno o más dispositivos.');
+            }
+            throw $e;
         }
     }
 }

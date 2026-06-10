@@ -245,7 +245,7 @@ class AlmacenNotaSalidaController extends Controller
             'record' => null,
             'fields' => $this->buildFields(),
             'readOnly' => false,
-            'tipoDocumentoOptions' => $this->tipoDocumentoOptions(),
+            'tipoDocumentoOptions' => $this->tipoDocumentoOptions('nota de ingreso'),
             'almacenOptions' => $this->almacenOptions(),
         ]);
     }
@@ -358,11 +358,19 @@ class AlmacenNotaSalidaController extends Controller
             }
 
             // Crear compra y marcar IMEIs como salida (estado = 0) dentro de transacción
-            $newId = 'NS' . time();
+            $newId = null;
             $currentUser = session('erp_auth.usuario') ?? (auth()->check() ? (string) (auth()->user()->usuario ?? auth()->user()->name ?? 'system') : 'system');
 
             try {
-                DB::transaction(function () use ($validated, $imeisPerDevice, $newId, $currentUser, $totalCount): void {
+                DB::transaction(function () use ($validated, $imeisPerDevice, &$newId, $currentUser, $totalCount): void {
+                    $tipoId = (int) ($validated['tipoDocumento_idtipoDocumento'] ?? 0);
+                    $td = DB::table('tipodocumento')->where('idtipoDocumento', $tipoId)->lockForUpdate()->first();
+                    $next = ((int) ($td->correlativo ?? 0)) + 1;
+                    $serie = trim((string) ($td->serie ?? 'NS'));
+                    $newId = $serie . sprintf('%05d', $next);
+                    if ($td) {
+                        DB::table('tipodocumento')->where('idtipoDocumento', $tipoId)->update(['correlativo' => $next]);
+                    }
                     DB::table('compras')->insert([
                         'idcompras' => $newId,
                         'usuario_usuario' => $currentUser,
@@ -464,11 +472,19 @@ class AlmacenNotaSalidaController extends Controller
             return redirect()->back()->withInput()->with('error', 'Algunos IMEIs solicitados no están disponibles o son inválidos.');
         }
 
-        $newId = 'NS' . time();
+        $newId = null;
         $currentUser = session('erp_auth.usuario') ?? (auth()->check() ? (string) (auth()->user()->usuario ?? auth()->user()->name ?? 'system') : 'system');
 
         try {
-            DB::transaction(function () use ($validated, $selectedImeis, $newId, $currentUser): void {
+            DB::transaction(function () use ($validated, $selectedImeis, &$newId, $currentUser): void {
+                $tipoId = (int) ($validated['tipoDocumento_idtipoDocumento'] ?? 0);
+                $td = DB::table('tipodocumento')->where('idtipoDocumento', $tipoId)->lockForUpdate()->first();
+                $next = ((int) ($td->correlativo ?? 0)) + 1;
+                $serie = trim((string) ($td->serie ?? 'NS'));
+                $newId = $serie . sprintf('%05d', $next);
+                if ($td) {
+                    DB::table('tipodocumento')->where('idtipoDocumento', $tipoId)->update(['correlativo' => $next]);
+                }
                 DB::table('compras')->insert([
                     'idcompras' => $newId,
                     'usuario_usuario' => $currentUser,
@@ -689,7 +705,7 @@ class AlmacenNotaSalidaController extends Controller
         }
 
         // Mostrar únicamente notas de salida: filtrar por detalle en tipodocumento que empiece por 'NS'
-        $query->whereRaw("LOWER(TRIM(COALESCE(td.detalle, ''))) LIKE 'ns%'");
+            $query->whereRaw("LOWER(TRIM(COALESCE(td.detalle, ''))) LIKE 'nota de salida%'");
 
         return $query;
     }
@@ -727,7 +743,7 @@ class AlmacenNotaSalidaController extends Controller
                 'label' => 'Tipo documento',
                 'required' => true,
                 'tomSelect' => true,
-                'optionsData' => $this->tipoDocumentoOptions(),
+                'optionsData' => $this->tipoDocumentoOptions('nota de ingreso'),
                 'optionKey' => 'value',
                 'optionLabel' => 'label',
                 'placeholder' => 'Selecciona tipo de documento',
@@ -818,19 +834,25 @@ class AlmacenNotaSalidaController extends Controller
             ]);
     }
 
-    private function tipoDocumentoOptions(): Collection
+    private function tipoDocumentoOptions(?string $excludeStartsWith = null): Collection
     {
-        return DB::table('tipodocumento as td')
+        $rows = DB::table('tipodocumento as td')
             ->orderBy('td.detalle')
             ->orderBy('td.idtipoDocumento')
-            ->get()
-            ->map(function ($row): array {
-                $detalle = trim((string) ($row->detalle ?? ''));
-                return [
-                    'value' => (int) $row->idtipoDocumento,
-                    'label' => trim((string) ($detalle !== '' ? $detalle : 'Sin detalle')),
-                ];
-            });
+            ->get();
+
+        if ($excludeStartsWith !== null) {
+            $exclude = strtolower(trim($excludeStartsWith));
+            $rows = $rows->filter(fn($r) => strpos(strtolower(trim((string) ($r->detalle ?? ''))), $exclude) !== 0);
+        }
+
+        return $rows->map(function ($row): array {
+            $detalle = trim((string) ($row->detalle ?? ''));
+            return [
+                'value' => (int) $row->idtipoDocumento,
+                'label' => trim((string) ($detalle !== '' ? $detalle : 'Sin detalle')),
+            ];
+        });
     }
 
     private function normalizeDateTimeInput(?string $value): ?string

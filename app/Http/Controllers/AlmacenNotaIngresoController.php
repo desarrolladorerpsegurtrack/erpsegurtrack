@@ -49,13 +49,19 @@ class AlmacenNotaIngresoController extends Controller
 
                 if ($deviceRows->isNotEmpty()) {
                     $grouped = $deviceRows->groupBy('idalmacen')->map(function ($group, $idalmacen) {
-                        $first = $group->first();
+                        $first = $group->first();  
                         $imeis = $group->pluck('imei')->all();
+                        $maxPreview = 3;
+                        $imeisArray = $imeis;
+                        $imeisDisplay = count($imeisArray) > $maxPreview
+                            ? implode(', ', array_slice($imeisArray, 0, $maxPreview)) . '…'
+                            : implode(', ', $imeisArray);
                         return [
                             'idalmacen' => $idalmacen,
                             'dispositivo' => $first->dispositivo,
-                            'cantidad' => count($imeis),
-                            'imeis' => implode(', ', $imeis),
+                            'cantidad' => count($imeisArray),
+                            'imeis' => $imeisDisplay,
+                            'imeis_full' => $imeisArray,
                         ];
                     })->values()->all();
 
@@ -204,7 +210,7 @@ class AlmacenNotaIngresoController extends Controller
             'record' => null,
             'fields' => $this->buildFields(),
             'readOnly' => false,
-            'tipoDocumentoOptions' => $this->tipoDocumentoOptions(),
+            'tipoDocumentoOptions' => $this->tipoDocumentoOptions('nota de salida'),
             'almacenOptions' => $this->almacenOptions(),
         ]);
     }
@@ -272,7 +278,7 @@ class AlmacenNotaIngresoController extends Controller
                     // generar IMEIs aleatorios únicos contra BD
                     $generated = collect();
                     while ($generated->count() < $cantidad) {
-                        $candidate = (string) random_int(100000000000000, 999999999999999);
+                        $candidate = (string) random_int(1000000000, 9999999999);
                         // verificar colisión en BD y en esta colección
                         $exists = DB::table('elementoalmacen')->where('imei', $candidate)->exists();
                         if (!$exists && !$generated->contains($candidate)) {
@@ -291,9 +297,17 @@ class AlmacenNotaIngresoController extends Controller
             }
 
             // Crear compra e insertar elementos
-            $newId = 'NI' . time();
+            $newId = null;
             $currentUser = session('erp_auth.usuario') ?? (auth()->check() ? (string) (auth()->user()->usuario ?? auth()->user()->name ?? 'system') : 'system');
-            DB::transaction(function () use ($validated, $imeisPerDevice, $newId, $currentUser): void {
+            DB::transaction(function () use ($validated, $imeisPerDevice, &$newId, $currentUser): void {
+                $tipoId = (int) ($validated['tipoDocumento_idtipoDocumento'] ?? 0);
+                $td = DB::table('tipodocumento')->where('idtipoDocumento', $tipoId)->lockForUpdate()->first();
+                $next = ((int) ($td->correlativo ?? 0)) + 1;
+                $serie = trim((string) ($td->serie ?? 'NI'));
+                $newId = $serie . sprintf('%05d', $next);
+                if ($td) {
+                    DB::table('tipodocumento')->where('idtipoDocumento', $tipoId)->update(['correlativo' => $next]);
+                }
                 DB::table('compras')->insert([
                     'idcompras' => $newId,
                     'usuario_usuario' => $currentUser,
@@ -353,10 +367,18 @@ class AlmacenNotaIngresoController extends Controller
             return redirect()->back()->withInput()->with('error', 'Debes indicar al menos un IMEI válido.');
         }
 
-        $newId = 'NI' . time();
+        $newId = null;
         $currentUser = session('erp_auth.usuario') ?? (auth()->check() ? (string) (auth()->user()->usuario ?? auth()->user()->name ?? 'system') : 'system');
 
-        DB::transaction(function () use ($validated, $selectedImeis, $newId, $currentUser): void {
+        DB::transaction(function () use ($validated, $selectedImeis, &$newId, $currentUser): void {
+            $tipoId = (int) ($validated['tipoDocumento_idtipoDocumento'] ?? 0);
+            $td = DB::table('tipodocumento')->where('idtipoDocumento', $tipoId)->lockForUpdate()->first();
+            $next = ((int) ($td->correlativo ?? 0)) + 1;
+            $serie = trim((string) ($td->serie ?? 'NI'));
+            $newId = $serie . sprintf('%05d', $next);
+            if ($td) {
+                DB::table('tipodocumento')->where('idtipoDocumento', $tipoId)->update(['correlativo' => $next]);
+            }
             DB::table('compras')->insert([
                 'idcompras' => $newId,
                 'usuario_usuario' => $currentUser,
@@ -616,8 +638,8 @@ class AlmacenNotaIngresoController extends Controller
             }
         }
 
-        // Mostrar únicamente notas de ingreso: filtrar por detalle en tipodocumento que empiece por 'NI'
-        $query->whereRaw("LOWER(TRIM(COALESCE(td.detalle, ''))) LIKE 'ni%'");
+        // Mostrar únicamente notas de ingreso: filtrar por el texto de detalle exacto 'Nota de ingreso' (case-insensitive, admite sufijos)
+        $query->whereRaw("LOWER(TRIM(COALESCE(td.detalle, ''))) LIKE 'nota de ingreso%'");
 
         return $query;
     }
@@ -655,7 +677,7 @@ class AlmacenNotaIngresoController extends Controller
                 'label' => 'Tipo documento',
                 'required' => true,
                 'tomSelect' => true,
-                'optionsData' => $this->tipoDocumentoOptions(),
+                'optionsData' => $this->tipoDocumentoOptions('nota de salida'),
                 'optionKey' => 'value',
                 'optionLabel' => 'label',
                 'placeholder' => 'Selecciona tipo de documento',
@@ -735,19 +757,25 @@ class AlmacenNotaIngresoController extends Controller
             ]);
     }
 
-    private function tipoDocumentoOptions(): Collection
+    private function tipoDocumentoOptions(?string $excludeStartsWith = null): Collection
     {
-        return DB::table('tipodocumento as td')
+        $rows = DB::table('tipodocumento as td')
             ->orderBy('td.detalle')
             ->orderBy('td.idtipoDocumento')
-            ->get()
-            ->map(function ($row): array {
-                $detalle = trim((string) ($row->detalle ?? ''));
-                return [
-                    'value' => (int) $row->idtipoDocumento,
-                    'label' => trim((string) ($detalle !== '' ? $detalle : 'Sin detalle')),
-                ];
-            });
+            ->get();
+
+        if ($excludeStartsWith !== null) {
+            $exclude = strtolower(trim($excludeStartsWith));
+            $rows = $rows->filter(fn($r) => strpos(strtolower(trim((string) ($r->detalle ?? ''))), $exclude) !== 0);
+        }
+
+        return $rows->map(function ($row): array {
+            $detalle = trim((string) ($row->detalle ?? ''));
+            return [
+                'value' => (int) $row->idtipoDocumento,
+                'label' => trim((string) ($detalle !== '' ? $detalle : 'Sin detalle')),
+            ];
+        });
     }
 
     private function normalizeDateTimeInput(?string $value): ?string

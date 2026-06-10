@@ -61,10 +61,22 @@ class ClientesController extends Controller
             ],
             'filters' => [
                 [
+                    'name' => 'idcliente',
+                    'label' => 'RUC/DNI',
+                    'type' => 'text',
+                    'placeholder' => 'Filtrar por RUC o DNI',
+                ],
+                [
                     'name' => 'nombre',
-                    'label' => 'Nombre',
+                    'label' => 'Nombre Comercial',
                     'type' => 'text',
                     'placeholder' => 'Nombre comercial o razón social',
+                ],
+                [
+                    'name' => 'grupo',
+                    'label' => 'Grupo',
+                    'type' => 'text',
+                    'placeholder' => 'Filtrar por grupo',
                 ],
                 [
                     'name' => 'rubro',
@@ -81,12 +93,7 @@ class ClientesController extends Controller
                     ])->all(),
                     'placeholder' => 'Todos los estados',
                 ],
-                [
-                    'name' => 'grupo',
-                    'label' => 'Grupo',
-                    'type' => 'text',
-                    'placeholder' => 'Filtrar por grupo',
-                ],
+                
             ],
             'createRoute' => route('modules.clientes.create'),
             'editRoute' => 'modules.clientes.edit',

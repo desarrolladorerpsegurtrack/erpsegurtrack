@@ -49,15 +49,16 @@
                     <th>Fecha</th>
                     <td>{{ $note->fechaRealizacion ? Carbon::parse($note->fechaRealizacion)->format('d/m/Y H:i') : '-' }}</td>
                 </tr>
-                <tr>
+                <tr> 
+                    <th>Usuario</th>
+                    <td>{{ $note->usuario_usuario ?? '-' }}</td>
                     <th>Tipo documento</th>
                     <td>{{ $note->tipoDocumento_nombre ?? '-' }}</td>
-                    <th>Documento referencia</th>
-                    <td>{{ $note->docReferencia ?? '-' }}</td>
+                   
                 </tr>
                 <tr>
-                    <th>Usuario</th>
-                    <td colspan="3">{{ $note->usuario_usuario ?? '-' }}</td>
+                    <th>Documento referencia</th>
+                    <td colspan="3">{{ $note->docReferencia ?? '-' }}</td>
                 </tr>
                 <tr>
                     <th>Motivo</th>

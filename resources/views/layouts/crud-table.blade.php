@@ -361,7 +361,7 @@
                                                 $hasExpandableRelations = $historyItems->isNotEmpty() || $relationGroups->isNotEmpty();
                                             @endphp
                                             <tr data-tw-merge="" class="[&_td]:last:border-b-0">
-                                                <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 border-dashed py-4 dark:bg-darkmode-600">
+                                                <td data-tw-merge="" class="px-6 border-b dark:border-darkmode-300 border-dashed py-8 dark:bg-darkmode-600">
                                                     <div class="flex items-center gap-2">
                                                         <input data-tw-merge="" type="checkbox" class="list-row-checkbox transition-all duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&[type='radio']]:checked:bg-primary [&[type='radio']]:checked:border-primary [&[type='radio']]:checked:border-opacity-10 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:not(:checked)]:dark:bg-darkmode-800/50 [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed [&:disabled:checked]:dark:bg-darkmode-800/50" value="{{ data_get($row, $identifierKey) }}">
                                                     </div>
@@ -414,7 +414,7 @@
                                                             @case('truncated_modal')
                                                                 @php
                                                                     $value = data_get($row, $column['key']) ?? '-';
-                                                                    $maxLength = $column['maxLength'] ?? 40;
+                                                                    $maxLength = $column['maxLength'] ?? 23;
                                                                     $isLong = mb_strlen((string) $value) > $maxLength;
                                                                     $summary = $isLong ? mb_substr((string) $value, 0, $maxLength) . '...' : (string) $value;
                                                                 @endphp
@@ -1240,19 +1240,29 @@
 
         #list-table-wrapper table th,
         #list-table-wrapper table td {
-            font-size: 0.8125rem !important;
-            padding: 0.45rem 0.6rem !important;
+            font-size: 0.85rem !important;
+            padding: 0.88rem 0.5rem !important;
             vertical-align: middle !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
             white-space: nowrap !important;
         }
         /* límites por columna para mantener proporciones razonables */
-        #list-table-wrapper table td { max-width: 180px; }
-        #list-table-wrapper table td:first-child { max-width: 48px; }
-        #list-table-wrapper table td:last-child { max-width: 120px; }
+        #list-table-wrapper table td { 
+            max-width: 155px; 
+        }
+        #list-table-wrapper table td:first-child { 
+            max-width: 48px; 
+        }
+        #list-table-wrapper table td:last-child { 
+            max-width: 120px; 
+        }
         /* evitar truncar botones/acciones si usan elementos interactivos */
-        #list-table-wrapper table td .btn, #list-table-wrapper table td .dropdown { white-space: normal !important; overflow: visible !important; }
+        #list-table-wrapper table td .btn, 
+        #list-table-wrapper table td .dropdown { 
+            white-space: normal !important; overflow: visible !important; 
+        }
+
     </style>
 
     <script>

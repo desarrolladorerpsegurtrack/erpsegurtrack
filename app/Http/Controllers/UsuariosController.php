@@ -57,6 +57,12 @@ class UsuariosController extends Controller
                     'placeholder' => 'Filtrar por usuario o nombre',
                 ],
                 [
+                    'name' => 'dni',
+                    'label' => 'DNI',
+                    'type' => 'text',
+                    'placeholder' => 'Filtrar por DNI',
+                ],
+                [
                     'name' => 'estado',
                     'label' => 'Estado',
                     'options' => [

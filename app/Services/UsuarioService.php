@@ -463,6 +463,10 @@ class UsuarioService
             });
         }
 
+        if ($filters['dni'] !== '') {
+            $query->where('u.personal_dniPersonal', 'like', '%' . $filters['dni'] . '%');
+        }
+
         return $query;
     }
 
@@ -473,6 +477,7 @@ class UsuarioService
             'estado' => trim((string) $request->input('estado', '')),
             'rol' => trim((string) $request->input('rol', '')),
             'nombre' => trim((string) $request->input('nombre', '')),
+            'dni' => trim((string) $request->input('dni', '')),
         ];
     }
 

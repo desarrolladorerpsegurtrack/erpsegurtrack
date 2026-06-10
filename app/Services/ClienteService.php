@@ -112,6 +112,10 @@ class ClienteService
                     ->orWhere('dc.direccion', 'like', $term);
             });
         }
+        
+        if ($filters['idcliente'] !== '') {
+            $query->where('c.idcliente', 'like', '%' . $filters['idcliente'] . '%');
+        }
 
         if ($filters['estado'] !== '') {
             $query->where('c.estadoCliente_idestadoCliente', $filters['estado']);
@@ -140,6 +144,7 @@ class ClienteService
     {
         return [
             'search' => trim((string) $request->input('q', '')),
+            'idcliente' => trim((string) $request->input('idcliente', '')),
             'estado' => trim((string) $request->input('estado', '')),
             'nombre' => trim((string) $request->input('nombre', '')),
             'rubro' => trim((string) $request->input('rubro', '')),

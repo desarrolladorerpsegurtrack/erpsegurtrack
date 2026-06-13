@@ -261,9 +261,9 @@ class PersonalController extends Controller
                     'label' => 'Apellidos',
                     'required' => false,
                     'maxlength' => 50,
-                    'minlength' => 5,
-                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}',
-                    'helpText' => 'Solo letras. Mínimo 5 caracteres.',
+                    'minlength' => 2,
+                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}',
+                    'helpText' => 'Solo letras. Mínimo 2 caracteres.',
                 ],
                 [
                     'name' => 'nombre',
@@ -271,9 +271,9 @@ class PersonalController extends Controller
                     'label' => 'Nombres',
                     'required' => false,
                     'maxlength' => 50,
-                    'minlength' => 5,
-                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}',
-                    'helpText' => 'Solo letras. Mínimo 5 caracteres.',
+                    'minlength' => 2,
+                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}',
+                    'helpText' => 'Solo letras. Mínimo 2 caracteres.',
                 ],
                 [
                     'name' => 'correo',
@@ -313,8 +313,8 @@ class PersonalController extends Controller
     {
         $validated = $request->validate([
             'dniPersonal' => ['required', 'digits:8', 'unique:personal,dniPersonal'],
-            'apellido' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}$/u', 'unique:personal,apellido'],
-            'nombre' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}$/u', 'unique:personal,nombre'],
+            'apellido' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}$/u', 'unique:personal,apellido'],
+            'nombre' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}$/u', 'unique:personal,nombre'],
             'cargoPersonal_idcargoPersonal' => ['required', 'integer', 'exists:cargopersonal,idcargoPersonal'],
             'foto' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
             'firma' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
@@ -325,6 +325,8 @@ class PersonalController extends Controller
             'dniPersonal.digits' => 'El DNI debe tener exactamente 8 dígitos.',
             'nombre.unique' => 'El nombre ya está registrado en personal.',
             'apellido.unique' => 'El apellido ya está registrado en personal.',
+            'foto' => 'La foto no debe ser mayor a 2MB.',
+            'firma' => 'La firma no debe ser mayor a 2MB.',
         ]);
 
         // Manejo de archivos: foto y firma
@@ -401,9 +403,9 @@ class PersonalController extends Controller
                     'label' => 'Apellidos',
                     'required' => false,
                     'maxlength' => 50,
-                    'minlength' => 5,
-                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}',
-                    'helpText' => 'Solo letras. Mínimo 5 caracteres.',
+                    'minlength' => 2,
+                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}',
+                    'helpText' => 'Solo letras. Mínimo 2 caracteres.',
                 ],
                 [
                     'name' => 'nombre',
@@ -411,9 +413,9 @@ class PersonalController extends Controller
                     'label' => 'Nombres',
                     'required' => false,
                     'maxlength' => 50,
-                    'minlength' => 5,
-                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}',
-                    'helpText' => 'Solo letras. Mínimo 5 caracteres.',
+                    'minlength' => 2,
+                    'pattern' => '[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}',
+                    'helpText' => 'Solo letras. Mínimo 2 caracteres.',
                 ],
                 [
                     'name' => 'correo',
@@ -477,6 +479,8 @@ class PersonalController extends Controller
             'dniPersonal.digits' => 'El DNI debe tener exactamente 8 dígitos.',
             'nombre.unique' => 'El nombre ya está registrado en personal.',
             'apellido.unique' => 'El apellido ya está registrado en personal.',
+            'foto' => 'La foto no debe ser mayor a 2MB.',
+            'firma' => 'La firma no debe ser mayor a 2MB.',
         ]);
 
         // Obtener paths anteriores para borrado si se reemplazan

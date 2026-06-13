@@ -232,6 +232,8 @@ class ClienteService
                 'v.modelo',
                 'v.tracto',
                 DB::raw('COALESCE(tv.nombre, "") as tipo_vehiculo'),
+                // número activo más reciente para el vehículo (si existe)
+                DB::raw('(select n.numeroTelefonico_numeroTelefonico from detnumerosdispositivo n join dispositivocliente dc on dc.iddispositivoCliente = n.dispositivoCliente_iddispositivoCliente where dc.vehiculo_placa = v.placa order by n.fechaAsignacion desc, n.iddetNumerosDispositivo desc limit 1) as numero'),
             ])
             ->where('v.cliente_idcliente', $clienteId)
             ->orderBy('v.placa')
@@ -243,6 +245,7 @@ class ClienteService
                 'label' => 'Vehículos',
                 'columns' => [
                     ['key' => 'placa', 'label' => 'Placa'],
+                    ['key' => 'numero', 'label' => 'Número'],
                     ['key' => 'tipo_vehiculo', 'label' => 'Tipo'],
                     ['key' => 'anio', 'label' => 'Año'],
                     ['key' => 'marca', 'label' => 'Marca'],
@@ -263,6 +266,7 @@ class ClienteService
                 'd.fechaInstalacion',
                 'd.fechaBaja',
                 'd.estado',
+                DB::raw('(select n.numeroTelefonico_numeroTelefonico from detnumerosdispositivo n where n.dispositivoCliente_iddispositivoCliente = d.iddispositivoCliente order by n.fechaAsignacion desc, n.iddetNumerosDispositivo desc limit 1) as numero'),
             ])
             ->whereIn('d.vehiculo_placa', DB::table('vehiculo')->where('cliente_idcliente', $clienteId)->select('placa'))
             ->orderBy('d.iddispositivoCliente')
@@ -274,6 +278,7 @@ class ClienteService
                 'label' => 'Dispositivo cliente',
                 'columns' => [
                     ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo'],
+                    ['key' => 'numero', 'label' => 'Número'],
                     ['key' => 'vehiculo_placa', 'label' => 'Vehículo'],
                     ['key' => 'marcaDispositivo', 'label' => 'Marca'],
                     ['key' => 'modeloDispositivo', 'label' => 'Modelo'],
@@ -320,11 +325,64 @@ class ClienteService
         });
     }
 
-    public function getTiposContacto(): Collection
+    public function getAllowedContactTypes(?string $username): array
     {
-        return DB::table('tipocontacto')
-            ->orderBy('detalle')
+        if (empty($username)) {
+            return [];
+        }
+
+        $roleRows = DB::table('detallerol as ur')
+            ->join('rol as r', 'ur.rol_idrol', '=', 'r.idrol')
+            ->select('r.idrol', 'r.nombre')
+            ->where('ur.usuario_usuario', $username)
             ->get();
+
+        $adminRoles = ['admin'];
+        foreach ($roleRows as $row) {
+            if (in_array(mb_strtolower(trim((string)$row->nombre)), $adminRoles, true)) {
+                return ['*'];
+            }
+        }
+
+        $roleIds = $roleRows->pluck('idrol')->all();
+
+        if (empty($roleIds)) {
+            return [];
+        }
+
+        $modulos = DB::table('inforol')
+            ->whereIn('rol_idrol', $roleIds)
+            ->where('accion', 'ver')
+            ->where('modulo', 'like', 'cliente.tipo_contacto.%')
+            ->pluck('modulo');
+
+        if ($modulos->contains('cliente.tipo_contacto.*')) {
+            return ['*'];
+        }
+
+        return $modulos
+            ->map(function ($module) {
+                $module = (string) $module;
+                return (int) str_replace('cliente.tipo_contacto.', '', $module);
+            })
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    public function getTiposContacto(?array $allowedIds = null): Collection
+    {
+        $query = DB::table('tipocontacto')->orderBy('detalle');
+
+        if ($allowedIds !== null && !in_array('*', $allowedIds, true)) {
+            if (empty($allowedIds)) {
+                return collect();
+            }
+            $query->whereIn('idtipoContacto', $allowedIds);
+        }
+
+        return $query->get();
     }
 
     public function getDirecciones(?string $cliente = null): Collection
@@ -356,9 +414,9 @@ class ClienteService
         });
     }
 
-    public function getContactosByCliente(string $cliente): Collection
+    public function getContactosByCliente(string $cliente, ?array $allowedIds = null): Collection
     {
-        $contactos = DB::table('contacto as c')
+        $query = DB::table('contacto as c')
             ->leftJoin('tipocontacto as tc', 'c.tipoContacto_idtipoContacto', '=', 'tc.idtipoContacto')
             ->select(
                 'c.idcontacto',
@@ -371,7 +429,16 @@ class ClienteService
                 'c.numero2',
                 'tc.detalle as tipoDetalle'
             )
-            ->where('c.cliente_idcliente', $cliente)
+            ->where('c.cliente_idcliente', $cliente);
+
+        if ($allowedIds !== null && !in_array('*', $allowedIds, true)) {
+            if (empty($allowedIds)) {
+                return collect();
+            }
+            $query->whereIn('c.tipoContacto_idtipoContacto', $allowedIds);
+        }
+
+        $contactos = $query
             ->orderByDesc('c.default')
             ->orderByDesc('c.idcontacto')
             ->get();

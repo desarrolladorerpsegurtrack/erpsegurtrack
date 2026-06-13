@@ -27,6 +27,7 @@ class RolesController extends Controller
 
     protected const SAFE_TEXT_REGEX = '/^[^;<>`]+$/u';
     private const PERMISSION_MODULES = [
+        'inicio' => 'Inicio',
         'personal' => 'Personal',
         'roles' => 'Roles',
         'usuarios' => 'Usuarios',
@@ -157,6 +158,9 @@ class RolesController extends Controller
         $vistas = $this->rolesService->getVistasCatalog();
         $selectedVistaIds = $this->rolesService->extractSelectedVistaIds((array) old('vista_permissions', []));
 
+        $tiposContacto = $this->rolesService->getTiposContactoCatalog();
+        $selectedTipoContactoIds = $this->rolesService->extractSelectedTipoContactoIds((array) old('contacto_tipos_permissions', []));
+
         return view('role.roles-form', [
             'title' => 'Nuevo Rol',
             'moduleTitle' => 'Módulo Roles',
@@ -164,7 +168,7 @@ class RolesController extends Controller
             'formAction' => route('modules.roles.store'),
             'backRoute' => route('modules.roles'),
             'record' => null,
-            'fields' => $this->buildRoleFields($this->defaultPermissionMatrix(), $vistas, $selectedVistaIds),
+            'fields' => $this->buildRoleFields($this->defaultPermissionMatrix(), $vistas, $selectedVistaIds, $tiposContacto, $selectedTipoContactoIds),
             'readOnly' => false,
         ]);
     }
@@ -177,6 +181,8 @@ class RolesController extends Controller
             'permissions' => ['nullable', 'array'],
             'vista_permissions' => ['nullable', 'array'],
             'vista_permissions.*' => ['integer', Rule::exists('vista', 'idvista')],
+            'contacto_tipos_permissions' => ['nullable', 'array'],
+            'contacto_tipos_permissions.*' => ['string'],
         ], [
             'nombre.unique' => 'Ya existe un rol con ese nombre.',
             'estado.required' => 'El estado es requerido.',
@@ -185,6 +191,7 @@ class RolesController extends Controller
 
         $permissionPairs = $this->rolesService->extractSelectedPermissions((array) ($request->input('permissions') ?? []));
         $vistaIds = $this->rolesService->extractSelectedVistaIds((array) ($request->input('vista_permissions') ?? []));
+        $tipoContactoIds = $this->rolesService->extractSelectedTipoContactoIds((array) ($request->input('contacto_tipos_permissions') ?? []));
 
         if ($permissionPairs === [] && $vistaIds === []) {
             return back()
@@ -199,7 +206,7 @@ class RolesController extends Controller
                 ->withInput();
         }
 
-        $roleId = $this->rolesService->createRole($validated, $permissionPairs, $vistaIds);
+        $roleId = $this->rolesService->createRole($validated, $permissionPairs, $vistaIds, $tipoContactoIds);
 
         $this->publishResourceEvent('roles', (string) $roleId, 'created');
 
@@ -222,6 +229,10 @@ class RolesController extends Controller
         $storedVistaIds = $this->rolesService->getStoredVistaIdsByRoleId($id);
         $selectedVistaIds = $this->rolesService->extractSelectedVistaIds((array) old('vista_permissions', $storedVistaIds));
 
+        $storedTipoContactoIds = $this->rolesService->getStoredTipoContactoIdsByRoleId($id);
+        $selectedTipoContactoIds = $this->rolesService->extractSelectedTipoContactoIds((array) old('contacto_tipos_permissions', $storedTipoContactoIds));
+        $tiposContacto = $this->rolesService->getTiposContactoCatalog();
+
         return view('role.roles-form', [
             'title' => 'Editar Rol',
             'moduleTitle' => 'Módulo Roles',
@@ -232,7 +243,9 @@ class RolesController extends Controller
             'fields' => $this->rolesService->buildRoleFields(
                 $this->rolesService->matrixFromStoredPermissions($storedPermissions),
                 $this->rolesService->getVistasCatalog(),
-                $selectedVistaIds
+                $selectedVistaIds,
+                $tiposContacto,
+                $selectedTipoContactoIds
             ),
             'readOnly' => true,
         ] + $this->prepareLockViewData('roles', (string) $id));
@@ -258,6 +271,8 @@ class RolesController extends Controller
             'permissions' => ['nullable', 'array'],
             'vista_permissions' => ['nullable', 'array'],
             'vista_permissions.*' => ['integer', Rule::exists('vista', 'idvista')],
+            'contacto_tipos_permissions' => ['nullable', 'array'],
+            'contacto_tipos_permissions.*' => ['string'],
         ], [
             'nombre.unique' => 'Ya existe un rol con ese nombre.',
             'estado.required' => 'El estado es requerido.',
@@ -266,6 +281,7 @@ class RolesController extends Controller
 
         $permissionPairs = $this->rolesService->extractSelectedPermissions((array) ($request->input('permissions') ?? []));
         $vistaIds = $this->rolesService->extractSelectedVistaIds((array) ($request->input('vista_permissions') ?? []));
+        $tipoContactoIds = $this->rolesService->extractSelectedTipoContactoIds((array) ($request->input('contacto_tipos_permissions') ?? []));
 
         if ($permissionPairs === [] && $vistaIds === []) {
             return back()
@@ -280,7 +296,7 @@ class RolesController extends Controller
                 ->withInput();
         }
 
-        $this->rolesService->updateRole($id, $validated, $permissionPairs, $vistaIds);
+        $this->rolesService->updateRole($id, $validated, $permissionPairs, $vistaIds, $tipoContactoIds);
 
         $this->publishResourceEvent('roles', (string) $id, 'updated');
         $this->publishUsersAffectedByRole($id, ['source' => 'role.update']);
@@ -343,9 +359,9 @@ class RolesController extends Controller
 
 
     private function buildRoleFields(array $permissionsMatrix, 
-        Collection $vistasCatalog, array $selectedVistaIds): array
+        Collection $vistasCatalog, array $selectedVistaIds, ?Collection $tiposContactoCatalog = null, array $selectedTipoContactoIds = []): array
     {
-        return $this->rolesService->buildRoleFields($permissionsMatrix, $vistasCatalog, $selectedVistaIds);
+        return $this->rolesService->buildRoleFields($permissionsMatrix, $vistasCatalog, $selectedVistaIds, $tiposContactoCatalog, $selectedTipoContactoIds);
     }
 
     private function defaultPermissionMatrix(): array

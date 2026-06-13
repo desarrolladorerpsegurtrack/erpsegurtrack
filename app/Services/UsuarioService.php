@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Support\RolePermissionMatrix;
+use App\Services\RolesService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
@@ -12,6 +13,12 @@ use Illuminate\Support\Facades\Hash;
 
 class UsuarioService
 {
+    private RolesService $rolesService;
+
+    public function __construct(RolesService $rolesService)
+    {
+        $this->rolesService = $rolesService;
+    }
     public function getVistasCatalog(): Collection
     {
         return DB::table('vista')
@@ -153,9 +160,9 @@ class UsuarioService
             ->get();
     }
 
-    public function createUser(array $validated, ?int $selectedRoleId, array $permissionPairs, array $vistaIds): void
+    public function createUser(array $validated, ?int $selectedRoleId, array $permissionPairs, array $vistaIds, array $tipoContactoIds = []): void
     {
-        DB::transaction(function () use ($validated, $selectedRoleId, $permissionPairs, $vistaIds) {
+        DB::transaction(function () use ($validated, $selectedRoleId, $permissionPairs, $vistaIds, $tipoContactoIds) {
             DB::table('usuario')->insert([
                 'usuario' => $validated['usuario'],
                 'personal_dniPersonal' => $validated['personal_dniPersonal'],
@@ -177,7 +184,8 @@ class UsuarioService
                 $validated['usuario'],
                 (string) ($validated['estado'] ?? '1'),
                 $permissionPairs,
-                $vistaIds
+                $vistaIds,
+                $tipoContactoIds
             );
 
             if ($selectedRoleId !== null) {
@@ -299,11 +307,11 @@ class UsuarioService
         return $selected !== null ? (int) $selected : null;
     }
 
-    public function updateUser(string $usuario, array $validated, ?int $selectedRoleId, array $permissionPairs, array $vistaIds): array
+    public function updateUser(string $usuario, array $validated, ?int $selectedRoleId, array $permissionPairs, array $vistaIds, array $tipoContactoIds = []): array
     {
         $result = ['newUsuario' => $usuario, 'oldInternalRoleId' => null];
 
-        DB::transaction(function () use ($usuario, $validated, $selectedRoleId, $permissionPairs, $vistaIds, &$result) {
+        DB::transaction(function () use ($usuario, $validated, $selectedRoleId, $permissionPairs, $vistaIds, $tipoContactoIds, &$result) {
             $assignedRoles = $this->getAssignedRoles($usuario);
             $result['oldInternalRoleId'] = $assignedRoles
                 ->first(fn ($role) => (int) ($role->tipo ?? 1) === 0)?->idrol;
@@ -356,7 +364,8 @@ class UsuarioService
                 DB::table('inforol')->where('rol_idrol', (int) $result['oldInternalRoleId'])->delete();
                 $permissionRows = RolePermissionMatrix::buildInforolRows((int) $result['oldInternalRoleId'], $permissionPairs);
                 $vistaRows = $this->buildVistaInforolRows((int) $result['oldInternalRoleId'], $vistaIds);
-                $rows = array_merge($permissionRows, $vistaRows);
+                $tipoRows = $this->rolesService->buildTipoContactoInforolRows((int) $result['oldInternalRoleId'], $tipoContactoIds);
+                $rows = array_merge($permissionRows, $vistaRows, $tipoRows);
                 if ($rows !== []) {
                     DB::table('inforol')->insert($rows);
                 }
@@ -372,7 +381,8 @@ class UsuarioService
                 $newUsuario,
                 (string) ($validated['estado'] ?? '1'),
                 $permissionPairs,
-                $vistaIds
+                $vistaIds,
+                $tipoContactoIds
             );
 
             DB::table('detallerol')->insert([
@@ -542,7 +552,7 @@ class UsuarioService
             ->groupBy('usuario_usuario');
     }
 
-    private function createInternalRoleWithPermissions(string $usuario, string $estado, array $permissionPairs, array $vistaIds): int
+    private function createInternalRoleWithPermissions(string $usuario, string $estado, array $permissionPairs, array $vistaIds, array $tipoContactoIds = []): int
     {
         $roleId = DB::table('rol')->insertGetId([
             'nombre' => $this->internalRoleNameForUser($usuario),
@@ -554,8 +564,10 @@ class UsuarioService
         $permissionRows = RolePermissionMatrix::buildInforolRows($roleId, $permissionPairs);
         $vistaRows = $this->buildVistaInforolRows($roleId, $vistaIds);
 
-        if ($permissionRows !== [] || $vistaRows !== []) {
-            DB::table('inforol')->insert(array_merge($permissionRows, $vistaRows));
+        $tipoRows = $this->rolesService->buildTipoContactoInforolRows($roleId, $tipoContactoIds);
+
+        if ($permissionRows !== [] || $vistaRows !== [] || $tipoRows !== []) {
+            DB::table('inforol')->insert(array_merge($permissionRows, $vistaRows, $tipoRows));
         }
 
         return (int) $roleId;

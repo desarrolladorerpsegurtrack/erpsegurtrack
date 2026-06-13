@@ -7,6 +7,7 @@ use Illuminate\Support\Collection;
 class RolePermissionMatrix
 {
     private const PERMISSION_MODULES = [
+        'inicio' => 'Inicio',
         'tickets' => 'Gestiones',
         'personal' => 'Personal',
         'roles' => 'Roles',
@@ -111,6 +112,7 @@ class RolePermissionMatrix
         'crear' => 'Crear',
         'editar' => 'Editar',
         'eliminar' => 'Eliminar',
+        'exportar' => 'Exportar',
     ];
 
     private const MODULES_WITHOUT_EDIT = [
@@ -123,6 +125,7 @@ class RolePermissionMatrix
     ];
 
     private const MODULES_VER_ONLY = [
+        'inicio',
         'lineas_chips.cargar_numeros',
         'lineas_chips.bajar_numeros',
         'configuracion.auditoria',
@@ -163,7 +166,7 @@ class RolePermissionMatrix
 
         foreach (array_keys($leafModules) as $moduleKey) {
             foreach (array_keys(self::PERMISSION_ACTIONS) as $actionKey) {
-                if (in_array($moduleKey, self::MODULES_VER_ONLY, true) && $actionKey !== 'ver') {
+                if (in_array($moduleKey, self::MODULES_VER_ONLY, true) && !in_array($actionKey, ['ver', 'exportar'], true)) {
                     continue;
                 }
 
@@ -198,7 +201,7 @@ class RolePermissionMatrix
                 continue;
             }
 
-            if (in_array($module, self::MODULES_VER_ONLY, true) && $action !== 'ver') {
+            if (in_array($module, self::MODULES_VER_ONLY, true) && !in_array($action, ['ver', 'exportar'], true)) {
                 continue;
             }
 
@@ -239,7 +242,7 @@ class RolePermissionMatrix
             }
 
             foreach (array_keys(self::PERMISSION_ACTIONS) as $actionKey) {
-                if (in_array($moduleKey, self::MODULES_VER_ONLY, true) && $actionKey !== 'ver') {
+                if (in_array($moduleKey, self::MODULES_VER_ONLY, true) && !in_array($actionKey, ['ver', 'exportar'], true)) {
                     continue;
                 }
 

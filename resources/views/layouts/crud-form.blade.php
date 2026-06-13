@@ -68,7 +68,7 @@
         .custom-checkbox-wrapper {
             position: relative;
             display: inline-flex;
-            align-items: center;
+            align-items: flex-start;
             gap: 0.625rem;
             padding: 0.50rem 0.9rem;
             border: 1px solid #cbd5e1;
@@ -76,7 +76,7 @@
             background-color: #ffffff;
             cursor: pointer;
             transition: background-color 0.2s ease, border-color 0.2s ease;
-            white-space: nowrap;
+            white-space: normal;
             box-sizing: border-box;
             width: auto;
         }
@@ -156,10 +156,19 @@
         }
         .role-cards-grid {
             display: grid;
-            grid-template-columns: repeat(7, max-content);
+            grid-template-columns: repeat(5, 1fr); 
             gap: 0.45rem;
-            justify-items: start;
+            justify-items: stretch; 
+            align-items: start;
+        }
+
+        .role-cards-grid .checkbox-object-item {
+            white-space: normal; 
+            overflow: visible;
+            display: flex;
             align-items: center;
+            padding: 0.5rem;
+            justify-content: flex-start;
         }
         @media (max-width: 1024px) {
             .role-cards-grid {
@@ -467,6 +476,13 @@
             box-sizing: border-box;
             position: relative;
             transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .custom-checkbox-wrapper .text-sm {
+            display: block;
+            white-space: normal !important;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            max-width: calc(100% - 2.2rem);
         }
         .custom-checkbox-box::after {
             content: '';
@@ -1235,6 +1251,37 @@
         .credential-row-disabled input {
             cursor: not-allowed;
         }
+        /* Ajustes responsivos globales para modales quick-* */
+        /* Hace que el modal sea desplazable en dispositivos pequeños y limite su ancho */
+        /* Ocultar solo cuando el modal tenga la clase 'hidden' para respetar utilidades Tailwind como .flex */
+        [id$="-modal"].hidden {
+            display: none;
+        }
+        [id$="-modal"].flex,
+        [id$="-modal"].block,
+        [id$="-modal"]:not(.hidden) {
+            display: flex;
+            align-items: flex-start;
+            padding: 1rem;
+            overflow-y: auto;
+        }
+        [id$="-modal"] > div {
+            max-width: 980px;
+            width: 100%;
+            margin: 1rem auto;
+            max-height: calc(100vh - 2.5rem);
+            overflow: auto;
+            border-radius: 12px;
+        }
+        @media (min-width: 768px) {
+            [id$="-modal"] {
+                align-items: center;
+                padding: 1.5rem;
+            }
+            [id$="-modal"] > div {
+                width: calc(100% - 4rem);
+            }
+        }
     </style>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
@@ -1466,6 +1513,55 @@
 
             var form = document.getElementById('main-crud-form');
             if (form) {
+                var updateContactoTiposVisibility = function (activeModuleKey) {
+                    try {
+                        var active = activeModuleKey || (document.querySelector('[data-permission-tab].is-active') || document.querySelector('[data-permission-panel].is-active'))?.dataset?.permissionTab || null;
+
+                        document.querySelectorAll('fieldset[data-visible-on-module]').forEach(function (fs) {
+                            var target = String(fs.dataset.visibleOnModule || '').trim();
+                            var shouldShow = false;
+
+                            if (!target) {
+                                fs.classList.add('hidden');
+                                return;
+                            }
+
+                            if (active !== target) {
+                                // not the active module
+                                shouldShow = false;
+                            } else {
+                                // If module is 'clientes' we require ver + (crear|editar)
+                                if (target === 'clientes') {
+                                    var permissionFieldset = document.querySelector('fieldset[data-permissions-fieldset]');
+                                    if (permissionFieldset) {
+                                        var clienteVer = permissionFieldset.querySelector('input[name="permissions[clientes.cliente][ver]"]');
+                                        var clienteCrear = permissionFieldset.querySelector('input[name="permissions[clientes.cliente][crear]"]');
+                                        var clienteEditar = permissionFieldset.querySelector('input[name="permissions[clientes.cliente][editar]"]');
+                                        var hasVer = clienteVer && clienteVer.checked;
+                                        var hasCrear = clienteCrear && clienteCrear.checked;
+                                        var hasEditar = clienteEditar && clienteEditar.checked;
+                                        shouldShow = !!(hasVer && (hasCrear || hasEditar));
+                                    }
+                                } else if (target === 'tickets' || target === 'gestiones') {
+                                    // For tickets (Gestiones), require the tickets 'ver' checkbox
+                                    var permissionFieldset = document.querySelector('fieldset[data-permissions-fieldset]');
+                                    if (permissionFieldset) {
+                                        var ticketsVer = permissionFieldset.querySelector('input[name="permissions[tickets][ver]"]');
+                                        shouldShow = !!(ticketsVer && ticketsVer.checked);
+                                    }
+                                } else {
+                                    // default: show when module active
+                                    shouldShow = true;
+                                }
+                            }
+
+                            fs.classList.toggle('hidden', !shouldShow);
+                        });
+                    } catch (e) {
+                        // fail silently
+                    }
+                };
+
                 var initializePermissionTabs = function () {
                     document.querySelectorAll('fieldset[data-permissions-fieldset]').forEach(function (fieldset) {
                         var tabs = Array.from(fieldset.querySelectorAll('[data-permission-tab]'));
@@ -1485,6 +1581,7 @@
                             panels.forEach(function (panel) {
                                 panel.classList.toggle('is-active', panel.dataset.permissionPanel === moduleKey);
                             });
+                            try { updateContactoTiposVisibility(moduleKey); } catch (e) { }
                         };
 
                         tabs.forEach(function (tab) {
@@ -1767,13 +1864,19 @@
                     'input[name="permissions[vehiculos][ver]"], input[name="permissions[vehiculos][crear]"], input[name="permissions[vehiculos][editar]"],' +
                     'input[name="permissions[lineas_chips.detallesimcard][ver]"]'
                 ).forEach(function (input) {
-                    input.addEventListener('change', updateCredentialRows);
+                    input.addEventListener('change', function (ev) {
+                        try { updateCredentialRows.call(this, ev); } catch (e) { }
+                        try { updateContactoTiposVisibility(); } catch (e) { }
+                    });
                 });
 
                 var ticketsVerInput = form.querySelector('input[name="permissions[tickets][ver]"]');
                 if (ticketsVerInput) {
-                    ticketsVerInput.addEventListener('change', updateVistaSelectorVisibility);
-                    ticketsVerInput.addEventListener('change', syncTicketsViewModeExclusive);
+                    ticketsVerInput.addEventListener('change', function (ev) {
+                        try { updateVistaSelectorVisibility(); } catch (e) { }
+                        try { syncTicketsViewModeExclusive(); } catch (e) { }
+                        try { updateContactoTiposVisibility(); } catch (e) { }
+                    });
                 }
 
                 var ticketsVerFlujoInput = form.querySelector('input[name="permissions[tickets][ver_flujo]"]');
@@ -1788,6 +1891,8 @@
                 initializePermissionAccordions();
                 initializeConfiguracionGroupAccordions();
                 initializePermissionTabs();
+                // Ajustar visibilidad inicial de contacto-tipos tras inicializar pestañas
+                try { updateContactoTiposVisibility(); } catch (e) { }
                 initializeRolePermissionSync();
                 syncModuleToggleStates();
                 updatePermissionCardExpansion();
@@ -2411,7 +2516,7 @@
                                                     ->filter(fn ($vista) => in_array((string) data_get($vista, $field['optionKey'] ?? 'idvista'), $selectedVistaIds, true))
                                                     ->values();
                                             @endphp
-                                            <fieldset class="md:col-span-2 rounded-3xl border border-slate-200 p-4 hidden {{ $hasError ? 'permissions-field-error' : '' }}" data-vista-selector-fieldset>
+                                            <fieldset class="md:col-span-2 rounded-3xl border border-slate-200 p-4 hidden {{ $hasError ? 'permissions-field-error' : '' }}" data-vista-selector-fieldset data-visible-on-module="tickets">
                                                 <legend class="mb-2 block text-sm font-medium text-slate-700">
                                                     {{ $field['label'] }}
                                                     @if(($field['required'] ?? false))
@@ -2721,11 +2826,11 @@
                                                                                                 <tr data-submodule="{{ $subKey }}" data-parent-module="configuracion" class="{{ $isCredentialRow ? 'credential-permission-row' : '' }} {{ $credentialDisabled ? 'credential-row-disabled' : '' }}">
                                                                                                     <td>{{ $configDisplayLabel }}</td>
                                                                                                     @foreach($tablePermissionActions as $actionKey => $actionLabel)
-                                                                                                        @php
-                                                                                                            $isChecked = !empty($permissionValue[$subKey][$actionKey]);
-                                                                                                            $isHiddenAction = $isAuditoriaRow && $actionKey !== 'ver';
-                                                                                                        @endphp
-                                                                                                        @if($isHiddenAction)
+                                                                                                @php
+                                                                                                    $isChecked = !empty($permissionValue[$subKey][$actionKey]);
+                                                                                                    $isHiddenAction = ($isAuditoriaRow && !in_array($actionKey, ['ver', 'exportar'], true)) || ($isCredentialRow && $actionKey === 'exportar');
+                                                                                                @endphp
+                                                                                                @if($isHiddenAction)
                                                                                                             <td class="permissions-action-cell"></td>
                                                                                                         @else
                                                                                                         <td class="permissions-action-cell">
@@ -2797,14 +2902,14 @@
                                                                                         <tr data-submodule="{{ $subKey }}" data-parent-module="{{ $moduleEntry['moduleKey'] }}" data-dependency="{{ $isLineasChildRow ? 'lineas_chips.detallesimcard' : '' }}" class="{{ $isConditionalRow ? 'credential-permission-row' : '' }} {{ $isLineasChildRow ? 'dependent-permission-row' : '' }} {{ $rowDisabled ? 'credential-row-disabled' : '' }}">
                                                                                             <td>{{ $subLabel }}</td>
                                                                                             @foreach($tablePermissionActions as $actionKey => $actionLabel)
-                                                                                                @php
-                                                                                                    $isEditForbidden = in_array($subKey, ['lineas_chips.detallesimcard', 'lineas_chips.numero_dispositivo'], true) && $actionKey === 'editar';
-                                                                                                    $isDeleteForbidden = $isTicketsRow && in_array($actionKey, ['editar', 'eliminar'], true);
-                                                                                                    $isVerOnlyRow = in_array($subKey, ['lineas_chips.cargar_numeros', 'lineas_chips.bajar_numeros'], true);
-                                                                                                    $isHistorialFlujoHidden = $isHistorialFlujoRow && $actionKey !== 'ver';
-                                                                                                    $isActionHidden = $isVerOnlyRow && $actionKey !== 'ver';
-                                                                                                    $isChecked = !empty($permissionValue[$subKey][$actionKey]);
-                                                                                                @endphp
+                                                                                        @php
+                                                                                            $isEditForbidden = in_array($subKey, ['lineas_chips.detallesimcard', 'lineas_chips.numero_dispositivo'], true) && $actionKey === 'editar';
+                                                                                            $isDeleteForbidden = $isTicketsRow && in_array($actionKey, ['editar', 'eliminar'], true);
+                                                                                            $isVerOnlyRow = in_array($subKey, ['lineas_chips.cargar_numeros', 'lineas_chips.bajar_numeros'], true);
+                                                                                            $isHistorialFlujoHidden = $isHistorialFlujoRow && !in_array($actionKey, ['ver', 'exportar'], true);
+                                                                                            $isActionHidden = ($isVerOnlyRow && !in_array($actionKey, ['ver', 'exportar'], true)) || ($isCredentialRow && $actionKey === 'exportar');
+                                                                                            $isChecked = !empty($permissionValue[$subKey][$actionKey]);
+                                                                                        @endphp
                                                                                                 @if($isEditForbidden || $isDeleteForbidden || $isActionHidden || $isHistorialFlujoHidden)
                                                                                                     <td class="permissions-action-cell"></td>
                                                                                                 @else
@@ -2899,7 +3004,7 @@
                                                                 </div>
                                                             @endif
                                                             <div>
-                                                                <label class="inline-flex items-center gap-2 cursor-pointer rounded-lg border border-slate-300 px-3 py-2 text-sm transition duration-200 ease-in-out hover:border-slate-400 hover:bg-slate-50">
+                                                                <label class="inline-flex items-center gap-2 rounded-md border-dashed border-2 p-3 text-slate-600 cursor-pointer file-upload-placeholder" style="border-color: #a7b2c2;">
                                                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M16 8l-4-4m0 0L8 8m4-4v12"/></svg>
                                                                     <span class="text-sm text-slate-700 font-medium">Cambiar {{ strtolower($field['label']) }}</span>
                                                                     <input type="file" name="{{ $field['name'] }}" accept="{{ $acceptTypes }}" data-file-kind="{{ $fileKind }}" data-file-label="{{ strtolower($field['label']) }}" class="hidden file-upload-input" onchange="showFileSelectionMessage(this)" {{ ($readOnly ?? false) ? 'disabled' : '' }}>
@@ -2907,7 +3012,7 @@
                                                             </div>
                                                         </div>
                                                     @else
-                                                        <label class="flex items-center gap-3 rounded-lg border-dashed border-2 p-3 text-slate-600 border-slate-200 cursor-pointer file-upload-placeholder" data-file-upload-placeholder>
+                                                        <label class="flex items-center gap-3 rounded-md border-dashed border-2 p-3 text-slate-600 cursor-pointer file-upload-placeholder" style="border-color: #a7b2c2;" data-file-upload-placeholder>
                                                             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4 4 4M17 8v8a4 4 0 01-4 4H7"/></svg>
                                                             <span class="text-sm file-upload-label">Seleccionar {{ strtolower($field['label']) }}</span>
                                                             <input type="file" name="{{ $field['name'] }}" accept="{{ $acceptTypes }}" data-file-kind="{{ $fileKind }}" data-file-label="{{ strtolower($field['label']) }}" class="hidden file-upload-input" onchange="showFileSelectionMessage(this)" {{ ($readOnly ?? false) ? 'disabled' : '' }}>
@@ -2946,6 +3051,69 @@
                                                     {{ $field['value'] ?? '' }}
                                                 </div>
                                             </div>
+                                        @break
+
+                                        @case('contacto-tipos-permissions')
+                                            @php
+                                                $tipoOptions = $field['optionsData'] ?? collect();
+                                                $selectedTipoIds = is_array($fieldValue) ? array_map('strval', $fieldValue) : [];
+                                                $isAllSelected = in_array('*', $selectedTipoIds, true) || empty($selectedTipoIds);
+                                            @endphp
+                                            <fieldset class="md:col-span-2 mt-4 rounded-3xl border border-slate-200 p-4 bg-white" data-contacto-tipos-fieldset data-visible-on-module="clientes">
+                                                <legend class="mb-3 block text-sm font-semi text-slate-700">
+                                                    {{ $field['label'] }}
+                                                    @if(($field['required'] ?? false))
+                                                        <span class="text-red-500">*</span>
+                                                    @endif
+                                                </legend>
+                                                
+                                                <div class="mb-4">
+                                                    <div class="flex items-center gap-4 mb-3">
+                                                        <label class="inline-flex items-center gap-2 cursor-pointer">
+                                                            <input type="radio" name="contacto_tipos_modo" value="all" class="form-radio text-primary focus:ring-primary h-4 w-4" {{ $isAllSelected ? 'checked' : '' }} onchange="toggleContactoTipos(this)">
+                                                            <span class="text-sm font-medium text-slate-700">Permitir todos los tipos</span>
+                                                        </label>
+                                                        <label class="inline-flex items-center gap-2 cursor-pointer">
+                                                            <input type="radio" name="contacto_tipos_modo" value="specific" class="form-radio text-primary focus:ring-primary h-4 w-4" {{ !$isAllSelected ? 'checked' : '' }} onchange="toggleContactoTipos(this)">
+                                                            <span class="text-sm font-medium text-slate-700">Seleccionar tipos específicos</span>
+                                                        </label>
+                                                    </div>
+                                                </div>
+
+                                                <div class="contacto-tipos-list {{ $isAllSelected ? 'opacity-50 pointer-events-none' : '' }} grid grid-cols-1 sm:grid-cols-4 md:grid-cols-4 gap-3">
+                                                    <input type="hidden" name="contacto_tipos_permissions[]" value="*" class="contacto-tipos-all-input" {{ !$isAllSelected ? 'disabled' : '' }}>
+                                                    @foreach($tipoOptions as $tipo)
+                                                        @php
+                                                            $tipoId = data_get($tipo, $field['optionKey']);
+                                                            $tipoName = data_get($tipo, $field['optionLabel']);
+                                                            $isSelected = in_array((string)$tipoId, $selectedTipoIds, true);
+                                                        @endphp
+                                                        <label class="inline-flex items-center gap-2 p-2 rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer transition-colors bg-white">
+                                                            <input type="checkbox" name="contacto_tipos_permissions[]" value="{{ $tipoId }}" class="form-checkbox text-primary rounded focus:ring-primary h-4 w-4 contacto-tipo-checkbox" {{ $isSelected && !$isAllSelected ? 'checked' : '' }} {{ $isAllSelected ? 'disabled' : '' }}>
+                                                            <span class="text-sm text-slate-700 font-medium">{{ $tipoName }}</span>
+                                                        </label>
+                                                    @endforeach
+                                                </div>
+                                            </fieldset>
+                                            
+                                            <script>
+                                                function toggleContactoTipos(radio) {
+                                                    const fieldset = radio.closest('fieldset');
+                                                    const list = fieldset.querySelector('.contacto-tipos-list');
+                                                    const checkboxes = list.querySelectorAll('.contacto-tipo-checkbox');
+                                                    const allInput = list.querySelector('.contacto-tipos-all-input');
+                                                    
+                                                    if (radio.value === 'all') {
+                                                        list.classList.add('opacity-50', 'pointer-events-none');
+                                                        allInput.disabled = false;
+                                                        checkboxes.forEach(cb => cb.disabled = true);
+                                                    } else {
+                                                        list.classList.remove('opacity-50', 'pointer-events-none');
+                                                        allInput.disabled = true;
+                                                        checkboxes.forEach(cb => cb.disabled = false);
+                                                    }
+                                                }
+                                            </script>
                                         @break
 
                                         @endswitch
@@ -7819,4 +7987,20 @@
         </script>
         @includeIf('cliente.relation-panel-script')
 @endsection
+
+@push('styles')
+    <style>
+        /* Permitir que los labels largos en formularios se quiebren y no desborden */
+        /* Selectores específicos para no romper otras partes del layout */
+        label.block > .flex > span:first-child {
+            display: inline-block;
+            white-space: normal !important;
+            overflow-wrap: anywhere !important;
+            word-break: break-word !important;
+            max-width: 100%;
+        }
+        /* Si hay un control al lado (radio/checkbox), permitir que la línea se divida correctamente */
+        label.block > .flex { align-items: flex-start; }
+    </style>
+@endpush
 

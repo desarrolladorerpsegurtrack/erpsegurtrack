@@ -61,6 +61,7 @@
                             $canCreate = $isAdmin || $currentPermissions->contains('crear');
                             $canEdit = $isAdmin || $currentPermissions->contains('editar');
                             $canDelete = $isAdmin || $currentPermissions->contains('eliminar');
+                            $canExport = $isAdmin || $currentPermissions->contains('exportar');
                             $canBulkDeactivate = $isAdmin || collect($authData['permissions']['lineas_chips.bajar_numeros'] ?? [])
                                 ->map(fn ($value) => App\Support\ErpPermission::normalizeAction((string) $value))
                                 ->filter()
@@ -171,12 +172,18 @@
                         @endif
                         <!-- ESTADÍSTICAS -->
                         @if($stats)
-                            <div class="box box--stacked flex flex-col p-5">
+                           <div class="box box--stacked flex flex-col p-5">
                                 <div class="grid grid-cols-4 gap-5">
-                                    @foreach($stats as $stat)
+                                    @foreach($stats as $key => $stat)
+                                        @php
+                                            $label = is_array($stat) && array_key_exists('label', $stat) ? $stat['label'] : (is_string($key) ? $key : '');
+                                            $value = is_array($stat) && array_key_exists('value', $stat) ? $stat['value'] : $stat;
+                                        @endphp
                                         <div class="box col-span-4 rounded-[0.6rem] border border-dashed border-slate-300/80 bg-white p-5 shadow-sm md:col-span-2 xl:col-span-1">
-                                            <div class="text-base text-slate-500">{{ $stat['label'] }}</div>
-                                            <div class="mt-1.5 text-2xl font-medium">{{ $stat['value'] }}</div>
+                                            @if($label !== '')
+                                                <div class="text-base text-slate-500">{{ $label }}</div>
+                                            @endif
+                                            <div class="mt-1.5 text-2xl font-medium">{{ $value }}</div>
                                         </div>
                                     @endforeach
                                 </div>
@@ -208,7 +215,7 @@
                                     </div>
                                     @php $exportMode = $exportMode ?? 'dropdown'; @endphp
                                     <div class="flex flex-col gap-x-3 gap-y-2 sm:ml-auto sm:flex-row">
-                                        @if(!empty($exportRoutes))
+                                        @if(!empty($exportRoutes) && $canExport)
                                             @if($exportMode === 'buttons')
                                                 <a href="{{ $exportRoutes['xlsx'] ?? '#' }}" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 [&:hover:not(:disabled)]:dark:bg-darkmode-100/10 w-full sm:w-auto">
                                                     <i data-tw-merge="" data-lucide="file-bar-chart" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
@@ -613,9 +620,9 @@
                                                                 'historyTitle' => $historyTitle,
                                                             ])
                                                         @else
-                                                            <div class="overflow-hidden rounded-lg border border-slate-200 shadow-sm" style="background-color: #ffffff; ">
-                                                                <div class="border-b px-4 py-3 text-sm font-semibold" >{{ $historyTitle }}</div>
-                                                                <div class="overflow-x-auto px-4 py-3" >
+                                                            <div class="overflow-hidden rounded-lg border border-black shadow-sm" style="background-color: #ffffff; ">
+                                                                <div class="border-b border-black bg-slate-200 text-slate-800 px-4 py-3 text-sm font-semibold" >{{ $historyTitle }}</div>
+                                                                <div class="overflow-x-auto" >
                                                                     @if($relationGroups->isNotEmpty())
                                                                         <div class="flex flex-col gap-4">
                                                                             @foreach($relationGroups as $relationGroup)
@@ -631,16 +638,16 @@
                                                                                     }
                                                                                     if (!empty($groupTimestamps)) $groupMaxTs = max($groupTimestamps);
                                                                                 @endphp
-                                                                                <div class="overflow-hidden rounded-lg border border-slate-200 shadow-sm">
-                                                                                    <div class="border-b px-4 py-3 text-sm font-semibold">
+                                                                                <div class="overflow-hidden rounded-lg border border-black shadow-sm">
+                                                                                    <div class="border-b border-black bg-slate-200 text-slate-800 px-4 py-3 text-sm font-semibold">
                                                                                         {{ $relationGroup['label'] ?? 'Relación' }}
                                                                                     </div>
-                                                                                    <div class="overflow-x-auto px-4 py-3">
-                                                                                        <table class="w-full text-left text-sm">
-                                                                                            <thead>
+                                                                                    <div class="overflow-x-auto ">
+                                                                                        <table class="w-full text-left text-sm border-collapse border border-black">
+                                                                                            <thead class="bg-slate-300 text-slate-800">
                                                                                                 <tr>
                                                                                                     @foreach(($relationGroup['columns'] ?? []) as $relationColumn)
-                                                                                                        <th class="px-3 py-2 whitespace-nowrap">{{ $relationColumn['label'] ?? '' }}</th>
+                                                                                                        <th class="px-3 py-2 whitespace-nowrap border-b border-black">{{ $relationColumn['label'] ?? '' }}</th>
                                                                                                     @endforeach
                                                                                                 </tr>
                                                                                             </thead>
@@ -656,7 +663,7 @@
                                                                                                             }
                                                                                                         }
                                                                                                     @endphp
-                                                                                                    <tr style="{{ $relStyle }}">
+                                                                                                    <tr style="{{ $relStyle }}" class="bg-slate-100">
                                                                                                         @foreach(($relationGroup['columns'] ?? []) as $relationColumn)
                                                                                                             @php
                                                                                                                 $relationValue = data_get($relationRecord, $relationColumn['key'] ?? '') ?? '-';
@@ -675,7 +682,7 @@
                                                                                                                         $isActive = stripos($label, 'activo') !== false && stripos($label, 'inactivo') === false;
                                                                                                                     }
                                                                                                                 @endphp
-                                                                                                                <td class="px-3 py-2">
+                                                                                                                <td class="px-3 py-2 border-b border-black">
                                                                                                                     <div class="flex items-center">
                                                                                                                         <i data-lucide="database" class="h-3.5 w-3.5 stroke-[1.7] {{ $isActive ? 'text-danger' : 'text-slate-400' }}"></i>
                                                                                                                         <span class="ml-1.5 whitespace-nowrap font-medium {{ $isActive ? 'text-danger' : 'text-slate-500' }}">{{ $label }}</span>
@@ -700,9 +707,9 @@
                                                                                                                         }
                                                                                                                     }
                                                                                                                 @endphp
-                                                                                                                <td class="px-3 py-2 whitespace-nowrap">{{ $formattedRelationDate }}</td>
+                                                                                                                <td class="px-3 py-2 whitespace-nowrap border-b border-black">{{ $formattedRelationDate }}</td>
                                                                                                             @else
-                                                                                                                <td class="px-3 py-2 whitespace-nowrap">{{ $relationValue }}</td>
+                                                                                                                <td class="px-3 py-2 whitespace-nowrap border-b border-black">{{ $relationValue }}</td>
                                                                                                             @endif
                                                                                                         @endforeach
                                                                                                     </tr>
@@ -714,17 +721,17 @@
                                                                             @endforeach
                                                                         </div>
                                                                     @else
-                                                                        <table class="w-full text-left text-sm">
-                                                                            <thead>
+                                                                        <table class="w-full text-left text-sm border-collapse border border-black">
+                                                                            <thead class="bg-slate-300 text-slate-800">
                                                                                 <tr>
                                                                                     @foreach($historyColumns as $historyColumn)
-                                                                                        <th class="px-3 py-2 whitespace-nowrap">{{ $historyColumn['label'] ?? '' }}</th>
+                                                                                        <th class="px-3 py-2 whitespace-nowrap border-b border-black">{{ $historyColumn['label'] ?? '' }}</th>
                                                                                     @endforeach
                                                                                 </tr>
                                                                             </thead>
                                                                             <tbody>
                                                                                 @foreach($historyItems as $history)
-                                                                                    <tr>
+                                                                                    <tr class="bg-slate-100">
                                                                                         @foreach($historyColumns as $historyColumn)
                                                                                             @php
                                                                                                 $historyValue = data_get($history, $historyColumn['key'] ?? '') ?? '-';
@@ -743,7 +750,7 @@
                                                                                                         $isActive = stripos($label, 'activo') !== false && stripos($label, 'inactivo') === false;
                                                                                                     }
                                                                                                 @endphp
-                                                                                                <td class="px-3 py-2">
+                                                                                                <td class="px-3 py-2 border-b border-black">
                                                                                                     <div class="flex items-center">
                                                                                                         <i data-lucide="database" class="h-3.5 w-3.5 stroke-[1.7] {{ $isActive ? 'text-danger' : 'text-slate-400' }}"></i>
                                                                                                         <span class="ml-1.5 whitespace-nowrap font-medium {{ $isActive ? 'text-danger' : 'text-slate-500' }}">
@@ -752,7 +759,7 @@
                                                                                                     </div>
                                                                                                 </td>
                                                                                             @else
-                                                                                                <td class="px-3 py-2 whitespace-nowrap">{{ $historyValue }}</td>
+                                                                                                <td class="px-3 py-2 whitespace-nowrap border-b border-black">{{ $historyValue }}</td>
                                                                                             @endif
                                                                                         @endforeach
                                                                                     </tr>
@@ -822,8 +829,8 @@
                         </div>
                         <h2 id="delete-confirmation-title" style="font-size:22px;font-weight:600;margin:0;color:#111827;">¿Estás seguro?</h2>
                         <p id="delete-confirmation-message" style="margin-top:12px;color:#6b7280;font-size:14px;line-height:1.6;">Esta acción eliminará el registro y no se podrá deshacer.</p>
-                        <div id="delete-confirmation-details" class="mt-5 hidden rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900"></div>
-                        <div id="delete-confirmation-relations" class="mt-5 hidden rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" style="background-color: #ffe7e7;"></div>
+                        <div id="delete-confirmation-details" class="mt-5 hidden rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900" style="white-space: normal; overflow-wrap: anywhere; word-break: break-word; box-sizing: border-box;"></div>
+                        <div id="delete-confirmation-relations" class="mt-5 hidden rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" style="background-color: #ffe7e7; white-space: normal; overflow-wrap: anywhere; word-break: break-word; box-sizing: border-box;"></div>
                         <div id="delete-confirmation-hint" class="mt-3 hidden text-sm text-slate-600"></div>
                         <div style="margin-top:26px;display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;align-items:center;">
                             <div id="delete-confirmation-actions" class="hidden flex flex-wrap gap-3 mr-auto"></div>

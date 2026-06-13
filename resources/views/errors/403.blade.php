@@ -11,7 +11,7 @@
             </p>
             <button type="button"
                 style="background:red;color:#fff;padding:12px 24px;border-radius:9px;;display:inline-flex"
-                onclick="location.href='{{ url()->previous() ?: url('/') }}'">
+                onclick="location.href='{{ route('home') }}'">
                 Volver
             </button>
         </div>

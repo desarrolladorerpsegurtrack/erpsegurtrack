@@ -297,7 +297,7 @@ class ErpPermission
 
     public static function allPermissionKeys(): array
     {
-        $permissionKeys = ['personal', 'roles', 'usuarios', 'vehiculos', 'almacen', 'dispositivo_cliente', 'servicio_cliente', 'tickets'];
+        $permissionKeys = ['inicio', 'personal', 'roles', 'usuarios', 'vehiculos', 'almacen', 'dispositivo_cliente', 'servicio_cliente', 'tickets'];
 
         foreach (self::MODULE_CHILDREN as $children) {
             $permissionKeys = array_merge($permissionKeys, $children);
@@ -396,6 +396,7 @@ class ErpPermission
         }
 
         return match ($normalized) {
+            'inicio' => 'inicio',
             'personal' => 'personal',
             'rol', 'roles' => 'roles',
             'usuario', 'usuarios' => 'usuarios',
@@ -528,6 +529,7 @@ class ErpPermission
             'crear', 'create', 'store', 'new' => 'crear',
             'editar', 'edit', 'update', 'actualizar' => 'editar',
             'eliminar', 'delete', 'destroy', 'remove' => 'eliminar',
+            'exportar', 'export', 'download', 'descargar', 'xlsx', 'pdf' => 'exportar',
             default => null,
         };
     }

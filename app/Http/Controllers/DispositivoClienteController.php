@@ -132,7 +132,19 @@ class DispositivoClienteController extends Controller
                     }
                 }
 
-                // Anexar relation_groups al row para que el layout lo consuma
+                // Determinar número activo (el más reciente) y anexar relation_groups al row para que el layout lo consuma
+                $activeNumber = '-';
+                if (!empty($relationGroups)) {
+                    $firstGroup = $relationGroups[0];
+                    if (!empty($firstGroup['records']) && is_array($firstGroup['records'])) {
+                        $firstRecord = $firstGroup['records'][0] ?? null;
+                        if (!empty($firstRecord) && !empty($firstRecord['numeroTelefonico_numeroTelefonico'])) {
+                            $activeNumber = $firstRecord['numeroTelefonico_numeroTelefonico'];
+                        }
+                    }
+                }
+
+                $row->numero = $activeNumber;
                 $row->relation_groups = $relationGroups;
                 return $row;
             })
@@ -150,6 +162,7 @@ class DispositivoClienteController extends Controller
             'columns' => [
                 ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo', 'type' => 'text'],
                 ['key' => 'vehiculo_placa', 'label' => 'Vehículo', 'type' => 'text'],
+                ['key' => 'numero', 'label' => 'Número', 'type' => 'text'],
                 ['key' => 'nombre_cliente', 'label' => 'Cliente', 'type' => 'text'],
                 ['key' => 'marcaDispositivo', 'label' => 'Marca', 'type' => 'text'],
                 ['key' => 'modeloDispositivo', 'label' => 'Modelo', 'type' => 'text'],
@@ -202,6 +215,7 @@ class DispositivoClienteController extends Controller
                 'pdf' => route('modules.dispositivo-cliente.export', ['format' => 'pdf']),
                 'xlsx' => route('modules.dispositivo-cliente.export', ['format' => 'xlsx']),
             ],
+            'relationPanelView' => 'cliente.relation-panel',
             'identifierKey' => 'iddispositivoCliente',
         ]);
     }
@@ -535,6 +549,8 @@ class DispositivoClienteController extends Controller
             ->select([
                 'd.iddispositivoCliente',
                 'd.vehiculo_placa',
+                // Obtener número activo (última asignación) mediante subconsulta
+                DB::raw('(select n.numeroTelefonico_numeroTelefonico from detnumerosdispositivo n where n.dispositivoCliente_iddispositivoCliente = d.iddispositivoCliente order by n.fechaAsignacion desc, n.iddetNumerosDispositivo desc limit 1) as numero'),
                 'd.marcaDispositivo',
                 'd.modeloDispositivo',
                 'd.fechaInstalacion',
@@ -547,6 +563,7 @@ class DispositivoClienteController extends Controller
                 return [
                     'iddispositivoCliente' => $item->iddispositivoCliente,
                     'vehiculo_placa' => $item->vehiculo_placa,
+                    'numero' => $item->numero ?? '-',
                     'marcaDispositivo' => $item->marcaDispositivo,
                     'modeloDispositivo' => $item->modeloDispositivo,
                     'fechaInstalacion' => $item->fechaInstalacion,
@@ -562,6 +579,7 @@ class DispositivoClienteController extends Controller
         return [
             ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo'],
             ['key' => 'vehiculo_placa', 'label' => 'Vehículo'],
+            ['key' => 'numero', 'label' => 'Número'],
             ['key' => 'marcaDispositivo', 'label' => 'Marca'],
             ['key' => 'modeloDispositivo', 'label' => 'Modelo'],
             ['key' => 'fechaInstalacion', 'label' => 'Fecha instalación'],

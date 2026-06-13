@@ -856,7 +856,80 @@
 
         }
 
-    </style>
+        /* Responsive fixes para barra de filtros en 'Gestiones' */
+        @media (max-width: 768px) {
+            .ticket-filters-bar {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0.75rem;
+                padding-left: 0.5rem;
+                padding-right: 0.5rem;
+            }
+
+            .ticket-filters-track {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.6rem;
+                justify-content: flex-start;
+                padding-bottom: 0;
+            }
+
+            .ticket-filter-item,
+            .ticket-filter-item--wide,
+            .ticket-filter-item--tom {
+                flex: 1 1 100%;
+                min-width: 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+
+            #list-filter-form .tom-select.ts-wrapper,
+            #list-filter-form .tom-select,
+            .ticket-filter-item--tom .tom-select.ts-wrapper,
+            .ticket-filter-item--tom .tom-select {
+                width: 100% !important;
+                min-width: 0 !important;
+                max-width: 100% !important;
+                box-sizing: border-box !important;
+            }
+
+            .ticket-filters-actions {
+                width: 100%;
+                display: flex;
+                gap: 0.5rem;
+                justify-content: flex-start;
+                margin-top: 0.5rem;
+                flex-wrap: wrap;
+            }
+
+            .ticket-filters-actions > * {
+                flex: 0 0 auto;
+            }
+        }
+
+        /* Muy pequeño: botones apilados y controles full-width */
+        @media (max-width: 420px) {
+            .ticket-filters-track {
+                gap: 0.5rem;
+            }
+
+            .ticket-filter-item,
+            .ticket-filter-item--wide,
+            .ticket-filter-item--tom {
+                flex: 1 1 100%;
+            }
+
+            .ticket-filters-actions {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+
+            .ticket-filters-actions > * {
+                width: 100%;
+            }
+        }
+
+        </style>
     <script>
         (function () {
             const listWrapperId = 'list-table-wrapper';

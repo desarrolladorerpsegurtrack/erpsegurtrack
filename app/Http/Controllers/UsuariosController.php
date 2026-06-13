@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Export\ExportableList;
 use App\Services\UsuarioService;
+use App\Services\RolesService;
 use App\Support\RolePermissionMatrix;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\RedirectResponse;
@@ -17,10 +18,12 @@ class UsuariosController extends Controller
     use ExportableList;
 
     private UsuarioService $usuarioService;
+    private RolesService $rolesService;
 
-    public function __construct(UsuarioService $usuarioService)
+    public function __construct(UsuarioService $usuarioService, RolesService $rolesService)
     {
         $this->usuarioService = $usuarioService;
+        $this->rolesService = $rolesService;
     }
 
     public function index(Request $request): View
@@ -111,6 +114,9 @@ class UsuariosController extends Controller
         // Excluir personales que ya estén asignados a un usuario
         $personales = $this->usuarioService->getPersonalesForCreate();
         $vistasCatalog = $this->usuarioService->getVistasCatalog();
+
+        $tiposContacto = $this->rolesService->getTiposContactoCatalog();
+        $selectedTipoContactoIds = $this->rolesService->extractSelectedTipoContactoIds((array) old('contacto_tipos_permissions', []));
 
         $roles = $this->usuarioService->getRolesCatalog()->map(function ($rol) {
             $rol->nombre = $rol->label;
@@ -223,6 +229,17 @@ class UsuariosController extends Controller
                     'value' => $selectedVistaIds,
                     'colSpan' => 2,
                 ],
+                [
+                    'name' => 'contacto_tipos_permissions',
+                    'type' => 'contacto-tipos-permissions',
+                    'label' => 'Tipos de Contacto del Cliente permitidos',
+                    'required' => false,
+                    'optionsData' => $tiposContacto,
+                    'optionKey' => 'idtipoContacto',
+                    'optionLabel' => 'detalle',
+                    'value' => $selectedTipoContactoIds,
+                    'colSpan' => 2,
+                ],
             ],
             'readOnly' => false,
         ]);
@@ -246,6 +263,8 @@ class UsuariosController extends Controller
             'role_ids.*' => ['integer', Rule::exists('rol', 'idrol')->where(fn ($query) => $query->where('tipo', 1))],
             'permissions' => ['nullable', 'array'],
             'vista_permissions' => ['nullable', 'array'],
+            'contacto_tipos_permissions' => ['nullable', 'array'],
+            'contacto_tipos_permissions.*' => ['string'],
             'vista_permissions.*' => ['integer', Rule::exists('vista', 'idvista')],
         ], [
             'usuario.unique' => 'El nombre de usuario ya está en uso.',
@@ -257,6 +276,7 @@ class UsuariosController extends Controller
         $selectedRoleId = $this->resolveSelectedRoleId($validated['role_ids'] ?? []);
         $permissionPairs = RolePermissionMatrix::extractSelectedPermissions((array) ($request->input('permissions') ?? []));
         $vistaIds = $this->usuarioService->extractSelectedVistaIds((array) ($request->input('vista_permissions') ?? []));
+        $tipoContactoIds = $this->rolesService->extractSelectedTipoContactoIds((array) ($request->input('contacto_tipos_permissions') ?? []));
 
         if ($selectedRoleId !== null && $this->usuarioService->requestDefaultsMatchRole($selectedRoleId, $permissionPairs, $vistaIds)) {
             $permissionPairs = [];
@@ -278,7 +298,7 @@ class UsuariosController extends Controller
             }
         }
 
-        $this->usuarioService->createUser($validated, $selectedRoleId, $permissionPairs, $vistaIds);
+        $this->usuarioService->createUser($validated, $selectedRoleId, $permissionPairs, $vistaIds, $tipoContactoIds);
 
         $this->publishResourceEvent('usuarios', $validated['usuario'], 'created');
         $this->publishUserPermissionsChanged($validated['usuario'], ['source' => 'user.create']);
@@ -325,6 +345,10 @@ class UsuariosController extends Controller
             ? $this->usuarioService->getStoredVistaIdsForRoleIds($assignedRoleIds)
             : [];
 
+        $storedTipoContactoIds = $assignedInternalRoleId !== null
+            ? $this->rolesService->getStoredTipoContactoIdsByRoleId((int) $assignedInternalRoleId)
+            : [];
+
         $defaultManualMatrix = $assignedInternalRoleId !== null
             ? RolePermissionMatrix::matrixFromStoredPermissions($storedPermissionsByRole->get((int) $assignedInternalRoleId, collect()))
             : RolePermissionMatrix::defaultMatrix();
@@ -332,6 +356,8 @@ class UsuariosController extends Controller
         $selectedRoleId = $this->usuarioService->resolveSelectedRoleId(old('role_ids', $assignedPublicRoleId !== null ? [$assignedPublicRoleId] : []));
         $oldVistaPermissions = old('vista_permissions', null);
         $selectedVistaIds = $this->usuarioService->extractSelectedVistaIds((array) ($oldVistaPermissions !== null ? $oldVistaPermissions : $storedVistaIds));
+        $selectedTipoContactoIds = $this->rolesService->extractSelectedTipoContactoIds((array) old('contacto_tipos_permissions', $storedTipoContactoIds));
+        $tiposContacto = $this->rolesService->getTiposContactoCatalog();
         if ($oldVistaPermissions !== null) {
             $selectedRoleId = null;
         }
@@ -432,6 +458,17 @@ class UsuariosController extends Controller
                     'value' => $selectedVistaIds,
                     'colSpan' => 2,
                 ],
+                [
+                    'name' => 'contacto_tipos_permissions',
+                    'type' => 'contacto-tipos-permissions',
+                    'label' => 'Tipos de Contacto del Cliente permitidos',
+                    'required' => false,
+                    'optionsData' => $tiposContacto,
+                    'optionKey' => 'idtipoContacto',
+                    'optionLabel' => 'detalle',
+                    'value' => $selectedTipoContactoIds,
+                    'colSpan' => 2,
+                ],
             ],
             'readOnly' => true,
         ] + $this->prepareLockViewData('usuarios', $usuario));
@@ -469,6 +506,8 @@ class UsuariosController extends Controller
             'role_ids.*' => ['integer', Rule::exists('rol', 'idrol')->where(fn ($query) => $query->where('tipo', 1))],
             'permissions' => ['nullable', 'array'],
             'vista_permissions' => ['nullable', 'array'],
+            'contacto_tipos_permissions' => ['nullable', 'array'],
+            'contacto_tipos_permissions.*' => ['string'],
             'vista_permissions.*' => ['integer', Rule::exists('vista', 'idvista')],
         ], [
             'usuario.unique' => 'El nombre de usuario ya está en uso.',
@@ -480,6 +519,7 @@ class UsuariosController extends Controller
         $selectedRoleId = $this->resolveSelectedRoleId($validated['role_ids'] ?? []);
         $permissionPairs = RolePermissionMatrix::extractSelectedPermissions((array) ($request->input('permissions') ?? []));
         $vistaIds = $this->usuarioService->extractSelectedVistaIds((array) ($request->input('vista_permissions') ?? []));
+        $tipoContactoIds = $this->rolesService->extractSelectedTipoContactoIds((array) ($request->input('contacto_tipos_permissions') ?? []));
 
         if ($selectedRoleId !== null && $this->usuarioService->requestDefaultsMatchRole($selectedRoleId, $permissionPairs, $vistaIds)) {
             $permissionPairs = [];
@@ -501,7 +541,7 @@ class UsuariosController extends Controller
             }
         }
 
-        $result = $this->usuarioService->updateUser($usuario, $validated, $selectedRoleId, $permissionPairs, $vistaIds);
+        $result = $this->usuarioService->updateUser($usuario, $validated, $selectedRoleId, $permissionPairs, $vistaIds, $tipoContactoIds);
 
         if ($selectedRoleId !== null && $result['oldInternalRoleId'] !== null) {
             $this->usuarioService->cleanupInternalRoleIfOrphan((int) $result['oldInternalRoleId']);

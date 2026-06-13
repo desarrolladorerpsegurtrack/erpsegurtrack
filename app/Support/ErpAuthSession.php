@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\DB;
 class ErpAuthSession
 {
     private const DEFAULT_MODULES = ['personal', 'roles', 'usuarios', 'clientes', 'configuracion'];
-    private const DEFAULT_ACTIONS = ['ver', 'crear', 'editar', 'eliminar'];
+    private const DEFAULT_ACTIONS = ['ver', 'crear', 'editar', 'eliminar', 'exportar'];
 
     public static function calculateAuthForUser(string $usuario): ?array
     {

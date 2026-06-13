@@ -10,8 +10,21 @@ Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
 Route::post('/login', [AuthController::class, 'login'])->name('login.attempt');
 
 Route::middleware(['erp.auth', 'audit.log', 'erp.action'])->group(function () {
-    Route::get('/', function () {
-        return view('home');
+    Route::get('/', function (\Illuminate\Http\Request $request) {
+        $authData = $request->session()->get('erp_auth', []);
+        $permissions = collect($authData['permissions'] ?? []);
+        $roles = collect($authData['roles'] ?? [])->map(fn ($role) => mb_strtolower(trim((string) $role)))->filter();
+
+        if ($roles->contains('admin') || collect($permissions->get('inicio', []))->contains('ver')) {
+            return view('home');
+        }
+
+        $routeName = \App\Support\ErpPermission::getDefaultRedirectRoute($authData);
+        if ($routeName !== 'home') {
+            return redirect()->route($routeName);
+        }
+
+        abort(403, 'No tienes acceso a ningún módulo.');
     })->name('home');
 
     require __DIR__.'/locks.php';

@@ -23,6 +23,14 @@ class RolesService
             });
     }
 
+    public function getTiposContactoCatalog(): Collection
+    {
+        return DB::table('tipocontacto')
+            ->select('idtipoContacto', 'detalle')
+            ->orderBy('detalle')
+            ->get();
+    }
+
     public function getRoleList(Request $request, int $perPage): LengthAwarePaginator
     {
         $query = $this->applyFilters($this->buildBaseQuery(), $this->extractFilters($request));
@@ -64,7 +72,7 @@ class RolesService
         ];
     }
 
-    public function buildRoleFields(array $permissionsMatrix, Collection $vistasCatalog, array $selectedVistaIds = []): array
+    public function buildRoleFields(array $permissionsMatrix, Collection $vistasCatalog, array $selectedVistaIds = [], ?Collection $tiposContactoCatalog = null, array $selectedTipoContactoIds = []): array
     {
         return [
             [
@@ -101,6 +109,17 @@ class RolesService
                 'optionKey' => 'idvista',
                 'optionLabel' => 'nombre',
                 'value' => $selectedVistaIds,
+                'colSpan' => 2,
+            ],
+            [
+                'name' => 'contacto_tipos_permissions',
+                'type' => 'contacto-tipos-permissions',
+                'label' => 'Tipos de Contacto del Cliente permitidos',
+                'required' => false,
+                'optionsData' => $tiposContactoCatalog ?? collect(),
+                'optionKey' => 'idtipoContacto',
+                'optionLabel' => 'detalle',
+                'value' => $selectedTipoContactoIds,
                 'colSpan' => 2,
             ],
         ];
@@ -143,9 +162,46 @@ class RolesService
             ->all();
     }
 
+    public function getStoredTipoContactoIdsByRoleId(int $roleId): array
+    {
+        $modulos = DB::table('inforol')
+            ->where('rol_idrol', $roleId)
+            ->where('accion', 'ver')
+            ->where('modulo', 'like', 'cliente.tipo_contacto.%')
+            ->pluck('modulo');
+
+        if ($modulos->contains('cliente.tipo_contacto.*')) {
+            return ['*'];
+        }
+
+        return $modulos
+            ->map(function ($module) {
+                $module = (string) $module;
+                return (int) str_replace('cliente.tipo_contacto.', '', $module);
+            })
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
     public function extractSelectedVistaIds(array $vistaInput): array
     {
         return collect($vistaInput)
+            ->map(fn ($id) => is_numeric($id) ? (int) $id : null)
+            ->filter(fn ($id) => $id !== null && $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    public function extractSelectedTipoContactoIds(array $tipoInput): array
+    {
+        if (in_array('*', $tipoInput, true)) {
+            return ['*'];
+        }
+
+        return collect($tipoInput)
             ->map(fn ($id) => is_numeric($id) ? (int) $id : null)
             ->filter(fn ($id) => $id !== null && $id > 0)
             ->unique()
@@ -182,6 +238,46 @@ class RolesService
         return $rows;
     }
 
+    public function buildTipoContactoInforolRows(int $roleId, array $tipoIds): array
+    {
+        if ($tipoIds === []) {
+            return [];
+        }
+
+        $rows = [];
+
+        if (in_array('*', $tipoIds, true)) {
+            $rows[] = [
+                'rol_idrol' => $roleId,
+                'modulo' => 'cliente.tipo_contacto.*',
+                'accion' => 'ver',
+                'nombre' => 'Ver todos los tipos de contacto',
+            ];
+            return $rows;
+        }
+
+        $tiposById = $this->getTiposContactoCatalog()->keyBy(fn ($tipo) => (int) $tipo->idtipoContacto);
+
+        foreach ($tipoIds as $tipoId) {
+            $tipoId = (int) $tipoId;
+            if ($tipoId <= 0) {
+                continue;
+            }
+
+            $tipo = $tiposById->get($tipoId);
+            $tipoName = $tipo !== null ? (string) $tipo->detalle : 'Tipo Contacto ' . $tipoId;
+
+            $rows[] = [
+                'rol_idrol' => $roleId,
+                'modulo' => 'cliente.tipo_contacto.' . $tipoId,
+                'accion' => 'ver',
+                'nombre' => 'Ver contactos tipo ' . $tipoName,
+            ];
+        }
+
+        return $rows;
+    }
+
     public function validateRolePermissionDependencies(array $permissionPairs): ?string
     {
         return RolePermissionMatrix::validateDependencies($permissionPairs);
@@ -197,9 +293,9 @@ class RolesService
         return DB::table('inforol')->where('rol_idrol', $id)->select('modulo', 'accion')->get();
     }
 
-    public function createRole(array $validated, array $permissionPairs, array $vistaIds): int
+    public function createRole(array $validated, array $permissionPairs, array $vistaIds, array $tipoContactoIds = []): int
     {
-        return DB::transaction(function () use ($validated, $permissionPairs, $vistaIds) {
+        return DB::transaction(function () use ($validated, $permissionPairs, $vistaIds, $tipoContactoIds) {
             $roleId = DB::table('rol')->insertGetId([
                 'nombre' => $validated['nombre'],
                 'estado' => $validated['estado'] ?? null,
@@ -209,18 +305,19 @@ class RolesService
 
             $permissionRows = $this->buildInforolRows($roleId, $permissionPairs);
             $vistaRows = $this->buildVistaInforolRows($roleId, $vistaIds);
+            $tipoContactoRows = $this->buildTipoContactoInforolRows($roleId, $tipoContactoIds);
 
-            if ($permissionRows !== [] || $vistaRows !== []) {
-                DB::table('inforol')->insert(array_merge($permissionRows, $vistaRows));
+            if ($permissionRows !== [] || $vistaRows !== [] || $tipoContactoRows !== []) {
+                DB::table('inforol')->insert(array_merge($permissionRows, $vistaRows, $tipoContactoRows));
             }
 
             return $roleId;
         });
     }
 
-    public function updateRole(int $id, array $validated, array $permissionPairs, array $vistaIds): void
+    public function updateRole(int $id, array $validated, array $permissionPairs, array $vistaIds, array $tipoContactoIds = []): void
     {
-        DB::transaction(function () use ($id, $validated, $permissionPairs, $vistaIds) {
+        DB::transaction(function () use ($id, $validated, $permissionPairs, $vistaIds, $tipoContactoIds) {
             DB::table('rol')->where('idrol', $id)->update([
                 'nombre' => $validated['nombre'],
                 'estado' => $validated['estado'] ?? null,
@@ -230,9 +327,10 @@ class RolesService
 
             $permissionRows = $this->buildInforolRows($id, $permissionPairs);
             $vistaRows = $this->buildVistaInforolRows($id, $vistaIds);
+            $tipoContactoRows = $this->buildTipoContactoInforolRows($id, $tipoContactoIds);
 
-            if ($permissionRows !== [] || $vistaRows !== []) {
-                DB::table('inforol')->insert(array_merge($permissionRows, $vistaRows));
+            if ($permissionRows !== [] || $vistaRows !== [] || $tipoContactoRows !== []) {
+                DB::table('inforol')->insert(array_merge($permissionRows, $vistaRows, $tipoContactoRows));
             }
         });
     }

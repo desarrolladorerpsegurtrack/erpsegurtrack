@@ -86,7 +86,30 @@ class VehiculosController extends Controller
                 ->select('iddispositivoCliente', 'marcaDispositivo', 'modeloDispositivo', 'fechaInstalacion', 'fechaBaja', 'estado', 'vehiculo_placa')
                 ->get();
 
-            $grouped = $dispositivosRows->groupBy('vehiculo_placa')->map(function ($group) {
+            // Obtener números activos (última asignación) para los dispositivos encontrados
+            $deviceIds = $dispositivosRows->pluck('iddispositivoCliente')->filter()->unique()->values()->all();
+            $numbersMap = [];
+            if (!empty($deviceIds)) {
+                $numbers = DB::table('detnumerosdispositivo as n')
+                    ->whereIn('n.dispositivoCliente_iddispositivoCliente', $deviceIds)
+                    ->select(['n.dispositivoCliente_iddispositivoCliente', 'n.numeroTelefonico_numeroTelefonico'])
+                    ->orderByDesc('n.fechaAsignacion')
+                    ->orderByDesc('n.iddetNumerosDispositivo')
+                    ->get()
+                    ->groupBy('dispositivoCliente_iddispositivoCliente')
+                    ->map(function ($group) {
+                        $first = $group->first();
+                        return $first ? ($first->numeroTelefonico_numeroTelefonico ?? '-') : '-';
+                    })->all();
+
+                $numbersMap = $numbers;
+            }
+
+            $grouped = $dispositivosRows->map(function ($d) use ($numbersMap) {
+                $arr = (array) $d;
+                $arr['numero'] = $numbersMap[$arr['iddispositivoCliente']] ?? '-';
+                return $arr;
+            })->groupBy('vehiculo_placa')->map(function ($group) {
                 return $group->map(function ($d) {
                     return (array) $d;
                 })->all();
@@ -102,6 +125,7 @@ class VehiculosController extends Controller
                         'label' => 'Dispositivos cliente',
                         'columns' => [
                             ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo', 'type' => 'text'],
+                            ['key' => 'numero', 'label' => 'Número', 'type' => 'text'],
                             ['key' => 'marcaDispositivo', 'label' => 'Marca', 'type' => 'text'],
                             ['key' => 'modeloDispositivo', 'label' => 'Modelo', 'type' => 'text'],
                             ['key' => 'fechaInstalacion', 'label' => 'Fecha de instalación', 'type' => 'date'],
@@ -113,6 +137,11 @@ class VehiculosController extends Controller
                 ];
 
                 $rowArr = (array) $row;
+                // Asignar número activo del primer dispositivo (si existe) al nivel del vehículo
+                $rowArr['numero'] = '-';
+                if (!empty($devices) && is_array($devices) && isset($devices[0]['numero'])) {
+                    $rowArr['numero'] = $devices[0]['numero'] ?? '-';
+                }
                 $rowArr['relation_groups'] = $relationGroups;
 
                 return (object) $rowArr;
@@ -127,6 +156,7 @@ class VehiculosController extends Controller
             'items' => $items,
             'columns' => [
                 ['key' => 'placa', 'label' => 'Placa', 'type' => 'text'],
+                ['key' => 'numero', 'label' => 'Número', 'type' => 'text'],
                 ['key' => 'cliente_nombre', 'label' => 'Cliente', 'type' => 'text'],
                 ['key' => 'tipo_vehiculo', 'label' => 'Tipo', 'type' => 'text'],
                 ['key' => 'anio', 'label' => 'Año', 'type' => 'text'],

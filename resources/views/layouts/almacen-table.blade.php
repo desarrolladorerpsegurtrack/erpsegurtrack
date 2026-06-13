@@ -1302,32 +1302,67 @@
 			border: 1px solid #d9e2ec !important;
 		}
 
+		/* Keep outer filters bar stacked (top actions + track below) */
 		.almacen-filters-bar {
 			display: flex;
 			flex-direction: column;
 			align-items: stretch;
-			gap: 1.20rem;
+			gap: 1.0rem;
 		}
 
 		.almacen-filters-row {
 			display: flex;
-			align-items: flex-end;
+			align-items: flex-start;
 			justify-content: space-between;
 			gap: 0.8rem;
+			flex-wrap: nowrap;
+		}
+
+		/* Ensure the search input grows and doesn't overflow */
+		.almacen-filter-item--search {
+			flex: 1 1 auto;
+			min-width: 0; /* allow shrinking inside flex */
+		}
+
+		/* Actions (botones) aligned to the right and wrap on small screens */
+		.almacen-filters-actions {
+			display: flex;
+			gap: 0.6rem;
+			align-items: center;
+			justify-content: flex-end;
 			flex-wrap: wrap;
+		}
+
+		/* Responsive behaviour: stack search above actions on small screens */
+		@media (max-width: 768px) {
+			.almacen-filters-row {
+				flex-direction: column;
+				align-items: stretch;
+				gap: 0.6rem;
+			}
+			.almacen-filters-actions {
+				justify-content: flex-start;
+			}
+			.almacen-filters-actions > * {
+				width: 100%;
+			}
+			.almacen-filters-actions > *:not(:first-child) {
+				margin-top: 0 !important;
+			}
 		}
 
 		.almacen-filters-row--top {
 			width: 100%;
 		}
 
+		/* Make the filters track responsive with grid auto-fill */
 		.almacen-filters-track {
-			display: flex;
-			gap: 0.5rem;
-			overflow: visible;
-			justify-content: start;
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+			gap: 0.8rem 1.0rem;
 			padding-bottom: 0.5rem;
-			flex-wrap: wrap;
+			width: 100%;
+			box-sizing: border-box;
 		}
 
 		.almacen-filter-item {
@@ -1335,15 +1370,17 @@
 			display: flex;
 			flex-direction: column;
 			gap: 0.25rem;
-			flex: 0 0 auto;
+			flex: 1 1 180px;
+			min-width: 0;
+			box-sizing: border-box;
 		}
 
 		.almacen-filter-item--tom {
-			width: 190px;
-			min-width: 190px;
-			max-width: 190px;
-				position: relative;
-				z-index: 30;
+			width: 100%;
+			min-width: 0;
+			max-width: 100%;
+			position: relative;
+			z-index: 30;
 		}
 
 		.almacen-filter-item--wide {

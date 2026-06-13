@@ -40,6 +40,7 @@ class ClientesController extends Controller
             'title' => 'Módulo Clientes',
             'singularTitle' => 'Cliente',
             'items' => $clientes,
+            'stats' => $stats,
             'columns' => [
                 ['key' => 'idcliente', 'label' => 'RUC/DNI', 'type' => 'text'],
                 ['key' => 'nombreComercial', 'label' => 'Nombre Comercial', 'type' => 'text', 'wrap' => true],
@@ -53,11 +54,6 @@ class ClientesController extends Controller
                     'wrap' => true,
                 ],
                 ['key' => 'estadoDetalle', 'label' => 'Estado', 'type' => 'status'],
-            ],
-            'stats' => [
-                ['label' => 'Total de Clientes', 'value' => $stats['total']],
-                ['label' => 'Clientes Activos', 'value' => $stats['active']],
-                ['label' => 'Clientes Inactivos', 'value' => $stats['inactive']],
             ],
             'filters' => [
                 [
@@ -150,7 +146,9 @@ class ClientesController extends Controller
         $direcciones = $this->clienteService->getDirecciones();
         $grupos = $this->clienteService->getGrupos();
         $ubigeos = $this->clienteService->getUbigeos();
-        $tiposContacto = $this->clienteService->getTiposContacto();
+        $currentUser = request()->session()->get('erp_auth.usuario');
+        $allowedContactTypes = $this->clienteService->getAllowedContactTypes($currentUser);
+        $tiposContacto = $this->clienteService->getTiposContacto($allowedContactTypes);        
         $contactosPayload = old('contactos_payload', '[]');
         $credencialesPayload = old('credenciales_payload', '[]');
         $canSeeCredencialesField = $this->currentUserCanViewCredenciales(request());
@@ -354,6 +352,20 @@ class ClientesController extends Controller
                     ],
                     'value' => [],
                 ],
+                [
+                    'name' => 'flag_integrador',
+                    'type' => 'switch',
+                    'label' => 'Integrador',
+                    'required' => false,
+                    'options' => [
+                        '1' => 'No',
+                    ],
+                    'switchLabels' => [
+                        'off' => 'No',
+                        'on' => 'Sí',
+                    ],
+                    'value' => [],
+                ],
             ],
         ]);
     }
@@ -395,8 +407,9 @@ class ClientesController extends Controller
             'estadoCliente_idestadoCliente' => ['required', 'integer', 'exists:estadocliente,idestadoCliente'],
             'direccionCliente_iddireccionCliente' => ['required', 'string', 'max:60', 'regex:/^(tmp-\d+|\d+)$/'],
             'grupoCliente_idgrupoCliente' => ['nullable', 'integer', 'exists:grupocliente,idgrupoCliente'],
-            'detraccion' => ['nullable', 'array'],
+            'detraccion' => ['nullable'],
             'detraccion.*' => ['in:1'],
+            'flag_integrador' => ['nullable'],
             'contactoSeleccionado' => ['nullable', 'string', 'max:60', 'regex:/^(tmp-\d+|\d+)$/'],
             'credencialSeleccionada' => ['nullable', 'string', 'max:60', 'regex:/^(tmp-\d+|\d+)$/'],
             'contactos_payload' => ['nullable', 'string'],
@@ -415,9 +428,17 @@ class ClientesController extends Controller
         $contactosPayload = (string) ($validated['contactos_payload'] ?? '[]');
         $direccionesPayload = (string) ($validated['direcciones_payload'] ?? '[]');
         $credencialesPayload = (string) ($validated['credenciales_payload'] ?? '[]');
-        $validated['detraccion'] = isset($validated['detraccion']) && is_array($validated['detraccion']) && in_array('1', $validated['detraccion'], true)
-            ? '1'
-            : '0';
+        $detr = $validated['detraccion'] ?? null;
+        $validated['detraccion'] = (
+            (is_array($detr) && in_array('1', $detr, true))
+            || $detr === '1' || $detr === 1 || $detr === 'on' || $detr === true
+        ) ? '1' : '0';
+
+        $fi = $validated['flag_integrador'] ?? null;
+        $validated['flag_integrador'] = (
+            (is_array($fi) && in_array('1', $fi, true))
+            || $fi === '1' || $fi === 1 || $fi === 'on' || $fi === true
+        ) ? '1' : '0';
         unset($validated['grupoCliente_idgrupoCliente'], $validated['contactoSeleccionado'], $validated['credencialSeleccionada'], $validated['contactos_payload'], $validated['direcciones_payload'], $validated['credenciales_payload'], $validated['direccionCliente_iddireccionCliente']);
 
         DB::transaction(function () use ($validated, $grupoId, $contactosPayload, $direccionesPayload, $credencialesPayload, &$selectedAddressId, $selectedContactId, $selectedCredencialId): void {
@@ -494,8 +515,9 @@ class ClientesController extends Controller
         $direcciones = $this->clienteService->getDirecciones($cliente);
         $grupos = $this->clienteService->getGrupos();
         $ubigeos = $this->clienteService->getUbigeos();
-        $tiposContacto = $this->clienteService->getTiposContacto();
-        $contactosCliente = $this->clienteService->getContactosByCliente($cliente);
+        $allowedContactTypes = $this->clienteService->getAllowedContactTypes($currentUser);
+        $tiposContacto = $this->clienteService->getTiposContacto($allowedContactTypes);
+        $contactosCliente = $this->clienteService->getContactosByCliente($cliente, $allowedContactTypes);
         $defaultContacto = DB::table('contacto')
             ->where('cliente_idcliente', $cliente)
             ->orderByDesc('default')
@@ -740,7 +762,21 @@ class ClientesController extends Controller
                         'off' => 'No',
                         'on' => 'Sí',
                     ],
-                    'value' => $record->detraccion === '1' ? ['1'] : [],
+                    'value' => (string) ($record->detraccion ?? '') === '1' ? ['1'] : [],
+                ],
+                [
+                    'name' => 'flag_integrador',
+                    'type' => 'switch',
+                    'label' => 'Integrador',
+                    'required' => false,
+                    'options' => [
+                        '1' => 'No',
+                    ],
+                    'switchLabels' => [
+                        'off' => 'No',
+                        'on' => 'Sí',
+                    ],
+                    'value' => (string) ($record->flag_integrador ?? '') === '1' ? ['1'] : [],
                 ],
             ],
             'extraSections' => [
@@ -868,8 +904,9 @@ class ClientesController extends Controller
             'estadoCliente_idestadoCliente' => ['required', 'integer', 'exists:estadocliente,idestadoCliente'],
             'direccionCliente_iddireccionCliente' => ['required', 'string', 'max:60', 'regex:/^(tmp-\d+|\d+)$/'],
             'grupoCliente_idgrupoCliente' => ['nullable', 'integer', 'exists:grupocliente,idgrupoCliente'],
-            'detraccion' => ['nullable', 'array'],
+            'detraccion' => ['nullable'],
             'detraccion.*' => ['in:1'],
+            'flag_integrador' => ['nullable'],
             'contactoSeleccionado' => ['nullable', 'string', 'max:60', 'regex:/^(tmp-\d+|\d+)$/'],
             'credencialSeleccionada' => ['nullable', 'string', 'max:60', 'regex:/^(tmp-\d+|\d+)$/'],
             'contactos_payload' => ['nullable', 'string'],
@@ -895,9 +932,17 @@ class ClientesController extends Controller
         $contactosPayload = (string) ($validated['contactos_payload'] ?? '[]');
         $direccionesPayload = (string) ($validated['direcciones_payload'] ?? '[]');
         $credencialesPayload = (string) ($validated['credenciales_payload'] ?? '[]');
-        $validated['detraccion'] = isset($validated['detraccion']) && is_array($validated['detraccion']) && in_array('1', $validated['detraccion'], true)
-            ? '1'
-            : '0';
+        $detr = $validated['detraccion'] ?? null;
+        $validated['detraccion'] = (
+            (is_array($detr) && in_array('1', $detr, true))
+            || $detr === '1' || $detr === 1 || $detr === 'on' || $detr === true
+        ) ? '1' : '0';
+
+        $fi = $validated['flag_integrador'] ?? null;
+        $validated['flag_integrador'] = (
+            (is_array($fi) && in_array('1', $fi, true))
+            || $fi === '1' || $fi === 1 || $fi === 'on' || $fi === true
+        ) ? '1' : '0';
         unset($validated['grupoCliente_idgrupoCliente'], $validated['contactos_payload'], $validated['direcciones_payload'], $validated['contactoSeleccionado'], $validated['credencialSeleccionada'], $validated['direccionCliente_iddireccionCliente'], $validated['credenciales_payload']);
 
         DB::transaction(function () use ($cliente, $validated, $grupoId, $contactosPayload, $direccionesPayload, $credencialesPayload, &$selectedAddressId, $selectedContactId, $selectedCredencialId): void {
@@ -1286,7 +1331,7 @@ class ClientesController extends Controller
         ]);
     }
 
-    public function contactosOpciones(string $cliente): JsonResponse
+    public function contactosOpciones(Request $request, string $cliente): JsonResponse
     {
         $exists = DB::table('cliente')->where('idcliente', $cliente)->exists();
         if (!$exists) {
@@ -1297,7 +1342,10 @@ class ClientesController extends Controller
             ], 404);
         }
 
-        $contactos = $this->clienteService->getContactosByCliente($cliente)->map(fn($contacto) => [
+        $currentUser = $request->session()->get('erp_auth.usuario');
+        $allowedContactTypes = $this->clienteService->getAllowedContactTypes($currentUser);
+
+        $contactos = $this->clienteService->getContactosByCliente($cliente, $allowedContactTypes)->map(fn($contacto) => [
             'id' => (int) $contacto->idcontacto,
             'label' => (string) $contacto->label_completo,
             'nombreApellido' => (string) ($contacto->nombreApellido ?? ''),
@@ -1338,6 +1386,15 @@ class ClientesController extends Controller
             'numero' => ['required', 'digits:9'],
             'numero2' => ['nullable', 'digits:9'],
         ]);
+
+        $currentUser = $request->session()->get('erp_auth.usuario');
+        $allowedContactTypes = $this->clienteService->getAllowedContactTypes($currentUser);
+        if (!in_array('*', $allowedContactTypes, true) && !in_array((int) $validated['tipoContacto_idtipoContacto'], $allowedContactTypes, true)) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'No tiene permiso para asignar este tipo de contacto.',
+            ], 403);
+        }
 
         $selectedCliente = $request->query('cliente', $cliente);
         $newId = DB::transaction(function () use ($validated, $selectedCliente) {
@@ -1413,6 +1470,15 @@ class ClientesController extends Controller
             'numero' => ['required', 'digits:9'],
             'numero2' => ['nullable', 'digits:9'],
         ]);
+
+        $currentUser = $request->session()->get('erp_auth.usuario');
+        $allowedContactTypes = $this->clienteService->getAllowedContactTypes($currentUser);
+        if (!in_array('*', $allowedContactTypes, true) && !in_array((int) $validated['tipoContacto_idtipoContacto'], $allowedContactTypes, true)) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'No tiene permiso para asignar este tipo de contacto.',
+            ], 403);
+        }
 
         DB::table('contacto')
             ->where('idcontacto', $contacto)

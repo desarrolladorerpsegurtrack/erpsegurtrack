@@ -248,11 +248,11 @@ class TicketsController extends Controller
     private function getTicketIndexColumns(): array
     {
         return [
+            ['key' => 'estado', 'label' => 'Estado', 'type' => 'estado'],
             ['key' => 'idticket', 'label' => 'Gestión', 'type' => 'text'],
             ['key' => 'usuarioEmisor', 'label' => 'Emisor', 'type' => 'text'],
             ['key' => 'tipo_operacion', 'label' => 'Tipo de operación', 'type' => 'text', 'wrap' => true],
             ['key' => 'usuarioReceptor', 'label' => 'Receptor', 'type' => 'text'],
-            ['key' => 'estado', 'label' => 'Estado', 'type' => 'estado'],
             ['key' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
             ['key' => 'fechaHoraRegistro', 'label' => 'Registro', 'type' => 'date'],
             ['key' => 'fechaHoraCierre', 'label' => 'Cierre', 'type' => 'date'],
@@ -488,6 +488,10 @@ class TicketsController extends Controller
 
         $messages = [
             'ImagenEvidencia.required' => 'El campo imagen/evidencia es obligatorio.',
+            'ImagenEvidencia.file' => 'El campo imagen/evidencia debe ser un archivo válido.',
+            'ImagenEvidencia.mimes' => 'El campo imagen/evidencia debe ser un archivo de tipo: jpg, jpeg, png, webp.',
+            'ImagenEvidencia' => 'El campo imagen/evidencia no debe superar los 5MB.',
+            'ImagenEvidencia.max' => 'El campo imagen/evidencia no debe superar los 5MB.',
         ];
 
         $rules['usuarioEmisor'] = ['required', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX];

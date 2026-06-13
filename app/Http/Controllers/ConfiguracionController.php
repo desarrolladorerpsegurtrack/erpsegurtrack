@@ -6303,7 +6303,16 @@ class ConfiguracionController extends Controller
             'fechaEmision' => ['nullable', 'date'],
             'fechaVencimiento' => ['nullable', 'date', 'after_or_equal:fechaEmision'],
             'fechaCargaSistema' => ['nullable', 'date'],
-        ]);
+        ], [
+            'idcertificadoSUNAT.required' => 'El campo Certificado SUNAT es obligatorio.',
+            'firmaDigital.image' => 'El archivo de Firma digital debe ser una imagen.',
+            'firmaDigital' => 'La Firma digital no debe ser mayor a 2MB.',
+            'archivoCertificadoPublico.file' => 'El Archivo certificado público debe ser un archivo válido.',
+            'archivoCertificadoPublico' => 'El Archivo certificado público no debe ser mayor a 5MB.',
+            'archivoCertificadoPrivado.file' => 'El Archivo certificado privado debe ser un archivo válido.',
+            'archivoCertificadoPrivado' => 'El Archivo certificado privado no debe ser mayor a 5MB.',
+        ]
+        );
 
         if ($request->hasFile('firmaDigital')) {
             $file = $request->file('firmaDigital');
@@ -7441,4 +7450,3 @@ class ConfiguracionController extends Controller
         return (string) $id;
     }
 }
-

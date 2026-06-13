@@ -57,6 +57,7 @@
                 'label' => 'Vehículos',
                 'columns' => [
                     ['key' => 'placa', 'label' => 'Vehículo'],
+                    ['key' => 'numero', 'label' => 'Número'],
                     ['key' => 'tipo_vehiculo', 'label' => 'Tipo'],
                     ['key' => 'anio', 'label' => 'Año'],
                     ['key' => 'marca', 'label' => 'Marca'],
@@ -72,6 +73,7 @@
                 'label' => 'Dispositivo cliente',
                 'columns' => [
                     ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo'],
+                    ['key' => 'numero', 'label' => 'Número'],
                     ['key' => 'vehiculo_placa', 'label' => 'Vehículo'],
                     ['key' => 'marcaDispositivo', 'label' => 'Marca'],
                     ['key' => 'modeloDispositivo', 'label' => 'Modelo'],
@@ -93,7 +95,7 @@
             }
         @endphp
 
-        @if($isClienteModule)
+        @if($isClienteModule && ($hasServices || $hasVehicles || $hasDevices))
             <!-- CONTENEDOR ACORDEÓN INTERACTIVO DE 3 NIVELES -->
             <div id="relation-panel-{{ $row->idcliente ?? 'generic' }}" class="flex flex-col gap-3 relation-panel-accordion"
                 data-client-id="{{ $row->idcliente ?? '' }}"
@@ -127,11 +129,11 @@
                 <!-- NIVEL 1: SERVICIO CLIENTE -->
                 @if($hasServices)
                     <div class="level-container level-1-container">
-                        <div class="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+                        <div class="overflow-hidden rounded-xl border border-black bg-white shadow-sm">
                             <div
-                                class="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 flex justify-between items-center gap-4 bg-slate-50/50">
+                                class="border-b border-black px-4 py-3 text-sm font-semibold text-slate-800 bg-slate-200 flex justify-between items-center gap-4">
                                 <span>Servicios Cliente</span>
-                                <span class="text-xs text-slate-400 font-normal">Haz clic en una fila para ver sus
+                                <span class="text-xs text-slate-200 font-normal">Haz clic en una fila para ver sus
                                     vehículos</span>
                             </div>
                             <div class="overflow-x-auto">
@@ -147,15 +149,15 @@
                                     }
                                     if (!empty($serviceTimestamps)) $serviceMaxTs = max($serviceTimestamps);
                                 @endphp
-                                <table class="w-full text-left text-sm">
-                                    <thead>
-                                        <tr class="border-b border-slate-100 bg-slate-50/20">
+                                <table class="w-full text-left text-sm border-collapse border border-black">
+                                    <thead class="bg-slate-300 text-slate-800">
+                                        <tr>
                                             @foreach(($serviceGroup['columns'] ?? []) as $col)
-                                                <th class="px-4 py-3 whitespace-nowrap font-semibold text-slate-600">
+                                                <th class="px-4 py-3 whitespace-nowrap font-semibold border-b border-black">
                                                     {{ $col['label'] ?? '' }}
                                                 </th>
                                             @endforeach
-                                            <th class="w-10"></th>
+                                            <th class="w-10 border-b border-black"></th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -172,7 +174,7 @@
                                                     }
                                                 }
                                             @endphp
-                                            <tr style="{{ $recVigenteStyle }}" class="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/80 cursor-pointer transition-colors service-row-clickable"
+                                            <tr style="{{ $recVigenteStyle }}" class="bg-slate-100 border-b border-black hover:bg-slate-200 cursor-pointer transition-colors service-row-clickable"
                                                 data-vehicle-placa="{{ $record['vehiculo_placa'] ?? '' }}"
                                                 data-service-id="{{ $record['idservicioCliente'] ?? '' }}">
                                                 @foreach(($serviceGroup['columns'] ?? []) as $columnIndex => $column)
@@ -187,7 +189,7 @@
                                                             && \Illuminate\Support\Facades\Route::has($editConfig['route']);
                                                     @endphp
                                                     <td
-                                                        class="px-4 py-3 align-middle {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
+                                                        class="px-4 py-3 align-middle border-b border-black {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
                                                         @if($relationType === 'status' || $relationKey === 'estado')
                                                             @php
                                                                 $isActive = false;
@@ -246,7 +248,7 @@
                                                         @endif
                                                     </td>
                                                 @endforeach
-                                                <td class="px-3 py-3 align-middle text-right text-slate-400">
+                                                <td class="px-3 py-3 align-middle text-right text-slate-400 border-b border-black">
                                                     <i data-lucide="chevron-right" class="h-4 w-4 stroke-[2]"></i>
                                                 </td>
                                             </tr>
@@ -261,11 +263,11 @@
                 <!-- NIVEL 2: VEHÍCULOS -->
                 @if($hasVehicles || $hasServices)
                     <div class="level-container level-2-container hidden">
-                        <div class="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+                        <div class="overflow-hidden rounded-xl border border-black bg-white shadow-sm">
                             <div
-                                class="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 flex justify-between items-center gap-4 bg-slate-50/50">
+                                class="border-b border-black px-4 py-3 text-sm font-semibold text-slate-800 bg-slate-200 flex justify-between items-center gap-4">
                                 <span class="lvl2-title-label">Vehículos del Cliente</span>
-                                <span class="text-xs text-slate-400 font-normal">Haz clic en una fila para ver sus
+                                <span class="text-xs text-slate-200 font-normal">Haz clic en una fila para ver sus
                                     dispositivos</span>
                             </div>
                             <div class="overflow-x-auto">
@@ -281,15 +283,15 @@
                                     }
                                     if (!empty($vehicleTimestamps)) $vehicleMaxTs = max($vehicleTimestamps);
                                 @endphp
-                                <table class="w-full text-left text-sm">
-                                    <thead>
-                                        <tr class="border-b border-slate-100 bg-slate-50/20">
+                                <table class="w-full text-left text-sm border-collapse border border-black">
+                                    <thead class="bg-slate-300 text-slate-800">
+                                        <tr>
                                             @foreach(($vehicleGroup['columns'] ?? []) as $col)
-                                                <th class="px-4 py-3 whitespace-nowrap font-semibold text-slate-600">
+                                                <th class="px-4 py-3 whitespace-nowrap font-semibold border-b border-black">
                                                     {{ $col['label'] ?? '' }}
                                                 </th>
                                             @endforeach
-                                            <th class="w-10"></th>
+                                            <th class="w-10 border-b border-black"></th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -306,7 +308,7 @@
                                                     }
                                                 }
                                             @endphp
-                                            <tr style="{{ $recVigenteStyle }}" class="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/80 cursor-pointer transition-colors vehicle-row-clickable"
+                                            <tr style="{{ $recVigenteStyle }}" class="bg-slate-100 border-b border-black hover:bg-slate-200 cursor-pointer transition-colors vehicle-row-clickable"
                                                 data-placa="{{ $record['placa'] ?? '' }}">
                                                 @foreach(($vehicleGroup['columns'] ?? []) as $columnIndex => $column)
                                                     @php
@@ -320,7 +322,7 @@
                                                             && \Illuminate\Support\Facades\Route::has($editConfig['route']);
                                                     @endphp
                                                     <td
-                                                        class="px-4 py-3 align-middle {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
+                                                        class="px-4 py-3 align-middle border-b border-black {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
                                                         @if($relationType === 'status' || $relationKey === 'estado')
                                                             @php
                                                                 $isActive = false;
@@ -379,7 +381,7 @@
                                                         @endif
                                                     </td>
                                                 @endforeach
-                                                <td class="px-3 py-3 align-middle text-right text-slate-400">
+                                                <td class="px-3 py-3 align-middle text-right text-slate-400 border-b border-black">
                                                     <i data-lucide="chevron-right" class="h-4 w-4 stroke-[2]"></i>
                                                 </td>
                                             </tr>
@@ -401,11 +403,11 @@
                 <!-- NIVEL 3: DISPOSITIVOS -->
                 @if($hasDevices || $hasVehicles || $hasServices)
                     <div class="level-container level-3-container hidden">
-                        <div class="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+                        <div class="overflow-hidden rounded-md border border-black bg-white shadow-sm">
                             <div
-                                class="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 flex justify-between items-center gap-4 bg-slate-50/50">
+                                class="border-b border-black px-4 py-3 text-sm font-semibold text-slate-800 bg-slate-200 flex justify-between items-center gap-4">
                                 <span class="lvl3-title-label">Dispositivos del Vehículo</span>
-                                <span class="text-xs text-slate-400 font-normal">Detalle de Dispositivos</span>
+                                <span class="text-xs text-slate-200 font-normal">Detalle de Dispositivos</span>
                             </div>
                             <div class="overflow-x-auto">
                                 @php
@@ -420,11 +422,11 @@
                                     }
                                     if (!empty($deviceTimestamps)) $deviceMaxTs = max($deviceTimestamps);
                                 @endphp
-                                <table class="w-full text-left text-sm">
-                                    <thead>
-                                        <tr class="border-b border-slate-100 bg-slate-50/20">
+                                <table class="w-full text-left text-sm border-collapse border border-black">
+                                    <thead class="bg-slate-300 text-slate-800">
+                                        <tr>
                                             @foreach(($deviceGroup['columns'] ?? []) as $col)
-                                                <th class="px-4 py-3 whitespace-nowrap font-semibold text-slate-600">
+                                                <th class="px-4 py-3 whitespace-nowrap font-semibold border-b border-black">
                                                     {{ $col['label'] ?? '' }}
                                                 </th>
                                             @endforeach
@@ -444,7 +446,7 @@
                                                     }
                                                 }
                                             @endphp
-                                            <tr style="{{ $recVigenteStyle }}" class="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/80 device-row"
+                                            <tr style="{{ $recVigenteStyle }}" class="bg-slate-100 border-b border-black hover:bg-slate-200 device-row"
                                                 data-vehicle-placa="{{ $record['vehiculo_placa'] ?? '' }}">
                                                 @foreach(($deviceGroup['columns'] ?? []) as $columnIndex => $column)
                                                     @php
@@ -458,7 +460,7 @@
                                                             && \Illuminate\Support\Facades\Route::has($editConfig['route']);
                                                     @endphp
                                                     <td
-                                                        class="px-4 py-3 align-middle {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
+                                                        class="px-4 py-3 align-middle border-b border-black {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
                                                         @if($relationType === 'status' || $relationKey === 'estado')
                                                             @php
                                                                 $isActive = false;
@@ -543,17 +545,17 @@
                     $editConfig = $relationEditRoutes[$groupKey] ?? null;
                 @endphp
 
-                <div class="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
-                    <div class="border-b border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 bg-slate-50/50">
+                <div class="overflow-hidden rounded-xl border border-black bg-white shadow-sm">
+                    <div class="border-b border-black px-4 py-3 text-sm font-semibold text-slate-800 bg-slate-200">
                         {{ $relationGroup['label'] ?? 'Relación' }}
                     </div>
 
                     <div class="overflow-x-auto">
-                        <table class="w-full text-left text-sm">
-                            <thead>
-                                <tr class="border-b border-slate-100 bg-slate-50/20">
+                        <table class="w-full text-left text-sm border-collapse border border-black">
+                            <thead class="bg-slate-300 text-slate-800">
+                                <tr>
                                     @foreach(($relationGroup['columns'] ?? []) as $relationColumn)
-                                        <th class="px-4 py-3 whitespace-nowrap font-semibold text-slate-600">
+                                        <th class="px-4 py-3 whitespace-nowrap font-semibold border-b border-black">
                                             {{ $relationColumn['label'] ?? '' }}
                                         </th>
                                     @endforeach
@@ -564,7 +566,7 @@
                                     @php
                                         $editValue = $editConfig ? data_get($relationRecord, $editConfig['key']) : null;
                                     @endphp
-                                    <tr class="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/50 transition-colors">
+                                    <tr class="bg-slate-100 border-b border-black hover:bg-slate-200 transition-colors">
                                         @foreach(($relationGroup['columns'] ?? []) as $columnIndex => $relationColumn)
                                             @php
                                                 $relationValue = data_get($relationRecord, $relationColumn['key'] ?? '') ?? '-';
@@ -578,7 +580,7 @@
                                             @endphp
 
                                             <td
-                                                class="px-4 py-3 align-middle {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
+                                                class="px-4 py-3 align-middle border-b border-black {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
                                                 @if($relationType === 'status' || $relationKey === 'estado')
                                                     @php
                                                         $isActive = false;

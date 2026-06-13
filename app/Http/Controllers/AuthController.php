@@ -17,7 +17,7 @@ use Throwable;
 class AuthController extends Controller
 {
     private const DEFAULT_MODULES = ['personal', 'roles', 'usuarios', 'clientes', 'configuracion', 'almacen'];
-    private const DEFAULT_ACTIONS = ['ver', 'crear', 'editar', 'eliminar'];
+    private const DEFAULT_ACTIONS = ['ver', 'crear', 'editar', 'eliminar', 'exportar'];
     private const LOGIN_MAX_ATTEMPTS = 5;
     private const LOGIN_DECAY_SECONDS = 60;
 
@@ -90,7 +90,16 @@ class AuthController extends Controller
             personalDni: $usuario->personal_dniPersonal
         );
 
-        return redirect()->intended(route('home'));
+        $authData = $request->session()->get('erp_auth', []);
+        $redirectUrl = $this->determineDefaultRedirectUrl($authData);
+
+        $intendedUrl = $request->session()->pull('url.intended');
+
+        if (!$intendedUrl || trim($intendedUrl, '/') === trim(url('/'), '/') || trim($intendedUrl, '/') === trim(route('home'), '/')) {
+            return redirect($redirectUrl);
+        }
+
+        return redirect($intendedUrl);
     }
 
     public function logout(Request $request): RedirectResponse
@@ -109,9 +118,18 @@ class AuthController extends Controller
 
         $request->session()->forget('erp_auth');
         $request->session()->invalidate();
-        $request->session()->regenerateToken();
-
         return redirect()->route('login');
+    }
+
+    private function determineDefaultRedirectUrl(array $authData): string
+    {
+        $routeName = \App\Support\ErpPermission::getDefaultRedirectRoute($authData);
+        
+        try {
+            return route($routeName);
+        } catch (\Exception $e) {
+            return route('home');
+        }
     }
 
     private function getUserRoleRows(string $usuario): Collection

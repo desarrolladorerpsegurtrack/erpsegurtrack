@@ -222,7 +222,7 @@ class ErpPermission
         'vigencias_oferta' => 'configuracion.vigencia_oferta',
         'vigencia-oferta' => 'configuracion.vigencia_oferta',
         'vigencia_oferta' => 'configuracion.vigencia_oferta',
-        
+
     ];
 
     private const SISTEMA_ROUTE_RULES = [
@@ -434,7 +434,7 @@ class ErpPermission
             'configuracion.tipo_operacion', 'configuracion.tipos_operacion', 'configuracion.tipo-operacion', 'configuracion.tipos-operacion' => 'configuracion.tipo_operacion',
             'configuracion.detalle_lista_precio', 'configuracion.detallelistaprecio', 'configuracion.detalle-lista-precio', 'detalle_lista_precio', 'detallelistaprecio', 'detalle-lista-precio' => 'configuracion.detalle_lista_precio',
             'configuracion.elemento_almacen', 'configuracion.elementoalmacen', 'configuracion.elemento-almacen', 'elemento_almacen', 'elementoalmacen', 'elemento-almacen' => 'almacen.elemento_almacen',
-        'almacen.elemento_almacen', 'almacen.elementoalmacen', 'almacen.elemento-almacen' => 'almacen.elemento_almacen',
+            'almacen.elemento_almacen', 'almacen.elementoalmacen', 'almacen.elemento-almacen' => 'almacen.elemento_almacen',
             'configuracion.vista', 'configuracion.vistas', 'vista', 'vistas' => 'configuracion.vista',
             'configuracion.flujo', 'configuracion.flujos', 'flujo', 'flujos' => 'configuracion.flujo',
             'configuracion.flujoregla', 'configuracion.flujoreglas', 'configuracion.flujo-regla', 'configuracion.flujo_regla', 'flujoregla', 'flujoreglas' => 'configuracion.flujoregla',
@@ -453,7 +453,7 @@ class ErpPermission
             'cliente', 'clientes', 'direccioncliente', 'direccion cliente' => 'clientes',
             'configuracion', 'configuración', 'settings', 'setting' => 'configuracion',
             'sistema', 'sistemas' => 'sistema',
-           
+
             'estadocliente', 'estado cliente' => 'configuracion.estado',
             default => self::normalizeCompoundPermissionKey($normalized),
         };
@@ -547,7 +547,8 @@ class ErpPermission
         }
 
         $routeNameLower = mb_strtolower($routeName);
-        if (str_contains($routeNameLower, 'modules.lineas-chips.detallesimcard.import.')
+        if (
+            str_contains($routeNameLower, 'modules.lineas-chips.detallesimcard.import.')
             || str_contains($routeNameLower, 'modules.lineas-chips.detallesimcard.preview.export')
             || str_contains($routeNameLower, 'modules.lineas-chips.detallesimcard.bulk-deactivate')
         ) {
@@ -560,7 +561,7 @@ class ErpPermission
         if (str_starts_with($routeNameLower, 'modules.tickets.') && in_array($last, ['advance', 'cancel'], true)) {
             return 'ver';
         }
-        
+
         if (in_array($last, ['store', 'crear-rapido'], true)) {
             return 'crear';
         }
@@ -588,5 +589,45 @@ class ErpPermission
             default => 'ver',
         };
     }
-}
 
+    public static function getDefaultRedirectRoute(array $authData): string
+    {
+        $roles = collect($authData['roles'] ?? [])->map(fn($role) => mb_strtolower(trim((string) $role)))->filter();
+        if ($roles->contains('admin')) {
+            return 'home';
+        }
+        $permissions = collect($authData['permissions'] ?? []);
+        if (collect($permissions->get('inicio', []))->contains('ver')) {
+            return 'home';
+        }
+        $moduleRouteMap = [
+            'tickets' => 'modules.tickets',
+            'personal' => 'modules.personal',
+            'roles' => 'modules.roles',
+            'usuarios' => 'modules.usuarios',
+            'clientes.cliente' => 'modules.clientes',
+            'clientes.grupo_cliente' => 'modules.clientes.grupos.index',
+            'vehiculos' => 'modules.vehiculos',
+            'dispositivo_cliente' => 'modules.dispositivo-cliente',
+            'servicio_cliente' => 'modules.servicio-cliente',
+            'lineas_chips.numero_telefonico' => 'modules.lineas-chips.numeros-telefonico.index',
+            'ventas.planes_servicios' => 'modules.ventas.planes-servicios.index',
+            'almacen.almacen' => 'modules.almacen',
+            'configuracion.estado' => 'modules.configuracion.estados.index',
+            'sistema.vista' => 'modules.sistema.vistas.index',
+        ];
+        foreach ($moduleRouteMap as $permissionKey => $routeName) {
+            $parentModule = self::permissionKeyToModule($permissionKey);
+            $hasPermission = collect($permissions->get($permissionKey, []))->contains('ver') ||
+                ($parentModule && collect($permissions->get($parentModule, []))->contains('ver'));
+
+            if ($parentModule === 'tickets') {
+                $hasPermission = collect($permissions->get($permissionKey, []))->intersect(['ver', 'ver_flujo'])->isNotEmpty();
+            }
+            if ($hasPermission) {
+                return $routeName;
+            }
+        }
+        return 'home';
+    }
+}

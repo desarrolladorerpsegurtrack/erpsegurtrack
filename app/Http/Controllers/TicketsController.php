@@ -262,6 +262,7 @@ class TicketsController extends Controller
     private function buildTicketIndexFilters($tipoOperaciones): array
     {
         return [
+            
             [
                 'name' => 'estado',
                 'label' => 'Estado',
@@ -269,7 +270,7 @@ class TicketsController extends Controller
                     return ['value' => $estado, 'label' => $estado];
                 }, self::ESTADOS),
                 'placeholder' => 'Todos los estados',
-            ],
+            ], 
             [
                 'name' => 'tipo_operacion',
                 'label' => 'Tipo de operacion',

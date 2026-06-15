@@ -5,6 +5,121 @@
         text-overflow: ellipsis !important;
         max-width: calc(100% - 16px) !important;
     }
+
+    .imeis-salida-col {
+        visibility: hidden;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+    }
+
+    .imeis-salida-col.is-visible {
+        visibility: visible;
+        opacity: 1;
+    }
+
+    /* Responsive Table Styles */
+    .device-table-header {
+        display: block;
+    }
+
+    .device-row-container {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 120px 110px minmax(0, 1fr) 44px;
+        gap: 16px;
+        align-items: center;
+        padding: 8px 20px;
+        margin: 4px 0;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+    }
+
+    .device-row-col {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .device-row-col-start {
+        justify-content: flex-start;
+        width: 100%;
+    }
+
+    .device-row-col-end {
+        justify-content: flex-end;
+    }
+
+    .device-mobile-label {
+        display: none;
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .device-mobile-label-mb {
+        margin-bottom: 0.25rem;
+    }
+
+    .btn-quitar-text {
+        display: none;
+    }
+
+    @media (max-width: 767px) {
+        .imeis-salida-col {
+            display: none;
+        }
+
+        .imeis-salida-col.is-visible {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .device-table-header {
+            display: none !important;
+        }
+
+        .device-row-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            padding: 16px;
+            margin: 8px 0;
+            border-radius: 12px;
+        }
+
+        .device-row-col {
+            width: 100%;
+            justify-content: space-between;
+        }
+
+        .device-row-col-start {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .device-row-col-end {
+            justify-content: flex-end;
+            border-top: 1px solid #f1f5f9;
+            padding-top: 12px;
+            margin-top: 4px;
+        }
+
+        .device-mobile-label {
+            display: block;
+        }
+
+        .btn-quitar-text {
+            display: inline-block;
+            font-size: 0.875rem;
+            font-weight: 600;
+            margin-right: 0.5rem;
+        }
+    }
 </style>
 <div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm" data-devices-salida-inline>
     <div class="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
@@ -24,7 +139,7 @@
 
     <div class="mt-4">
         <div class="border border-slate-200 bg-white shadow-sm rounded-xl">
-            <div class="border-b border-slate-200 bg-slate-50" style="padding: 12px 20px;">
+            <div class="device-table-header border-b border-slate-200 bg-slate-50" style="padding: 12px 20px;">
                 <div style="display:grid; grid-template-columns: minmax(0,1fr) 120px 110px minmax(0,1fr) 44px; gap:16px; align-items:center;"
                     class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
                     <div style="text-align:left;">Dispositivo <span
@@ -49,10 +164,10 @@
 </div>
 
 <template data-device-salida-row-template>
-    <div data-device-salida-row
-        style="display:grid; grid-template-columns: minmax(0,1fr) 120px 110px minmax(0,1fr) 44px; gap:16px; align-items:center; padding:8px 20px; margin:4px 0; border:1px solid #e2e8f0; border-radius:8px; background:#fff; box-shadow:0 1px 2px rgba(15,23,42,.04);">
+    <div data-device-salida-row class="device-row-container">
         {{-- Columna dispositivo --}}
-        <div style="min-width:0;">
+        <div class="device-row-col device-row-col-start">
+            <label class="device-mobile-label device-mobile-label-mb">Dispositivo</label>
             <select
                 class="tom-select tom-select--compact w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-primary focus:ring-1 focus:ring-primary"
                 data-device-salida-select style="width:100%;">
@@ -67,33 +182,41 @@
         </div>
 
         {{-- Columna cantidad --}}
-        <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-            <input data-device-salida-qty type="number" min="1" step="1" value="1"
-                class="w-16 rounded-md border border-slate-300 px-3 py-1.5 text-sm text-center focus:border-primary focus:ring-1 focus:ring-primary" />
-            <span data-salida-qty-warning
-                class="hidden text-[10px] text-red-600 font-medium text-center leading-tight">Excede stock
-                disponible</span>
+        <div class="device-row-col device-row-col-start">
+            <label class="device-mobile-label">Cantidad</label>
+            <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+                <input data-device-salida-qty type="number" min="1" step="1" value="1"
+                    class="w-16 rounded-md border border-slate-300 px-3 py-1.5 text-sm text-center focus:border-primary focus:ring-1 focus:ring-primary" />
+                <span data-salida-qty-warning
+                    class="hidden text-[10px] text-red-600 font-medium text-center leading-tight">Excede stock
+                    disponible</span>
+            </div>
         </div>
 
         {{-- Columna IMEIs Manual --}}
-        <div style="display:flex; align-items:center; justify-content:center;">
-            <input type="hidden" data-device-salida-manual-hidden value="0">
-            <input data-device-salida-manual type="checkbox" value="1"
-                class="w-4 h-4 text-primary border-slate-300 rounded focus:ring-primary cursor-pointer" />
+        <div class="device-row-col">
+            <label class="device-mobile-label">IMEIs Manual</label>
+            <div class="flex items-center">
+                <input type="hidden" data-device-salida-manual-hidden value="0">
+                <input data-device-salida-manual type="checkbox" value="1"
+                    class="w-4 h-4 text-primary border-slate-300 rounded focus:ring-primary cursor-pointer" />
+            </div>
         </div>
 
         {{-- Columna IMEI manual --}}
-        <div class="imeis-salida-col" style="min-width:0; visibility:hidden; opacity:0; transition:opacity 0.15s ease;">
+        <div class="imeis-salida-col device-row-col device-row-col-start">
+            <label class="device-mobile-label device-mobile-label-mb">IMEIs a retirar</label>
             <textarea data-device-salida-imeis rows="1"
                 class="w-full rounded-lg border border-slate-300 px-3 py-1 text-sm focus:border-primary focus:ring-1 focus:ring-primary"
                 placeholder="EJM: IMEI1, IMEI2" style="min-height:2.4rem; max-height:4rem; resize:none;"></textarea>
         </div>
 
         {{-- Columna quitar --}}
-        <div style="display:flex; align-items:center; justify-content:end; padding-top:6px;">
+        <div class="device-row-col device-row-col-end">
             <button type="button" data-remove-device-salida title="Quitar fila" style="color:#B91c1c"
-                class="hover:scale-110 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
+                class="flex items-center hover:scale-110 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
                 {{ ($readOnly ?? false) ? 'disabled' : '' }}>
+                <span class="btn-quitar-text">Quitar dispositivo</span>
                 <span class="text-lg leading-none">X</span>
             </button>
         </div>
@@ -161,11 +284,9 @@
             const area = row.querySelector('[data-device-salida-imeis]');
             if (!col) return;
             if (isChecked) {
-                col.style.visibility = 'visible';
-                col.style.opacity = '1';
+                col.classList.add('is-visible');
             } else {
-                col.style.visibility = 'hidden';
-                col.style.opacity = '0';
+                col.classList.remove('is-visible');
                 if (area) area.value = '';
             }
         }

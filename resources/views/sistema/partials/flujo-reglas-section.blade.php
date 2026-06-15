@@ -48,7 +48,14 @@
         @endphp
 
         <div class="mt-2">
-            <div class="border border-slate-200 bg-white shadow-sm">
+            <style>
+                @media (max-width: 767px) {
+                    .flujo-scroll-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+                    .flujo-scroll-inner { min-width: 720px; }
+                }
+            </style>
+            <div class="flujo-scroll-wrapper">
+                <div class="border border-slate-200 bg-white shadow-sm flujo-scroll-inner">
                 <div class="border-b border-slate-200 bg-slate-50" style="padding: 12px 20px;">
                     <div style="display:grid;grid-template-columns:48px minmax(0,1fr) 120px 120px 44px;gap:16px;align-items:center;" class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
                         <div style="text-align:center;">Mover</div>

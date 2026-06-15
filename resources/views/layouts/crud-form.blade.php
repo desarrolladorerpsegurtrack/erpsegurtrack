@@ -219,6 +219,43 @@
             box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
             overflow: hidden;
         }
+
+        /* Quick actions: mantenemos flex en escritorio, grid en mobile */
+        .quick-actions-grid {
+            display: flex;
+            gap: 0.375rem;
+            align-items: center;
+        }
+
+        @media (max-width: 640px) {
+            .quick-actions-grid {
+                display: grid;
+                grid-template-columns: auto auto;
+                gap: 0.5rem;
+                align-items: center;
+            }
+            .quick-actions-grid .quick-pick-btn {
+                grid-column: 1 / -1;
+                justify-self: center;
+                width: auto;
+            }
+        }
+
+        @media (max-width: 420px) {
+            .quick-actions-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .quick-item-text {
+            flex: 1 1 0%;
+            min-width: 0;
+        }
+
+        .quick-modal-header { flex-wrap: wrap; }
+        @media (max-width: 640px) {
+            .quick-modal-header { flex-wrap: nowrap; gap: 0.5rem; align-items: center; }
+        }
         .vista-selector-search {
             width: 100%;
             border: 1px solid #d1d5db;
@@ -449,8 +486,55 @@
             }
         }
         @media (max-width: 720px) {
+            .vista-selector-shell {
+                grid-template-columns: 1fr;
+            }
+            .vista-selector-panel {
+                order: 2;
+            }
+            .vista-selected-panel {
+                order: 1;
+            }
             .vista-selected-head {
                 display: none;
+            }
+            .vista-selected-list {
+                max-height: 12rem;
+            }
+            .vista-selector-list {
+                max-height: 14rem;
+            }
+        }
+        @media (max-width: 480px) {
+            .vista-selected-row {
+                grid-template-columns: minmax(0, 1fr) auto;
+                gap: 0.4rem;
+            }
+            .vista-selected-row-detail,
+            .vista-selected-row-state {
+                display: none;
+            }
+            .vista-selector-option {
+                padding: 0.6rem 0.7rem;
+            }
+            .vista-selector-search {
+                font-size: 0.84rem;
+                padding: 0.6rem 0.75rem;
+            }
+        }
+
+        /* Forzar orden en móvil: primero buscar/seleccionar, luego seleccionadas */
+        @media (max-width: 640px) {
+            .vista-selector-shell {
+                display: flex;
+                flex-direction: column;
+                gap: 0.75rem;
+            }
+            .vista-selector-panel {
+                order: 1;
+            }
+            .vista-selected-panel {
+                order: 2;
             }
         }
         input.custom-checkbox {
@@ -668,17 +752,55 @@
             transition: background-color 0.2s ease, border-color 0.2s ease;
             z-index: 1;
         }
+        .permissions-card-table-wrapper {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+        }
+        .permissions-card-table {
+            width: 100%;
+            min-width: 500px;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 0.88rem;
+        }
+        .permissions-card-table th,
+        .permissions-card-table td {
+            border: 1px solid #e2e8f0;
+            padding: 0.48rem 0.12rem;
+            text-align: center;
+            background-color: #ffffff;
+        }
+        .permissions-card-table thead th {
+            background-color: #f1f5f9;
+            color: #475569;
+            font-size: 0.78rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            padding: 0.6rem 0.5rem; /* mayor espacio horizontal en headers */
+            white-space: nowrap;
+        }
+        /* Encabezados de acciones (no primera columna) con ancho mínimo para respirar */
+        .permissions-card-table thead th:not(:first-child) {
+            min-width: 100px;
+            padding-left: 0.6rem;
+            padding-right: 0.6rem;
+        }
+        /* Checkbox circular para acciones dentro de la tabla de permisos */
         .permission-action-checkbox-wrapper {
             position: relative;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 1.2rem;
-            height: 1.2rem;
+            width: 1.55rem;
+            height: 1.55rem;
             border: 1px solid #cbd5e1;
             border-radius: 9999px;
             background-color: #ffffff;
-            transition: border-color 0.2s ease, background-color 0.2s ease;
+            transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
         }
         .permission-action-checkbox {
             position: absolute;
@@ -692,16 +814,15 @@
             z-index: 2;
         }
         .permission-action-checkbox-box {
-            width: 0.95rem;
-            height: 0.95rem;
+            width: 1.25rem;
+            height: 1.25rem;
             border-radius: 9999px;
             border: 1px solid transparent;
             background-color: #ffffff;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            position: relative;
-            transition: background-color 0.2s ease, border-color 0.2s ease;
+            transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
             z-index: 1;
         }
         .permission-action-checkbox-box::after {
@@ -710,8 +831,8 @@
             height: 0.42rem;
             border-radius: 9999px;
             background-color: transparent;
-            transition: background-color 0.2s ease, transform 0.2s ease;
             transform: scale(0);
+            transition: transform 0.15s ease, background-color 0.15s ease;
         }
         .permission-action-checkbox:checked + .permission-action-checkbox-box {
             background-color: #dc2626;
@@ -1123,7 +1244,6 @@
                 max-width: 100%;
                 overflow-x: hidden;
                 overflow-y: visible;
-                -webkit-overflow-scrolling: touch;
             }
             .permissions-module-tabs-shell {
                 margin-bottom: 0.65rem;
@@ -1137,7 +1257,6 @@
                 min-width: 0;
                 width: 100%;
             }
-            
             .permissions-module-tab {
                 font-size: 0.74rem;
                 padding: 0.58rem 0.6rem;
@@ -1192,21 +1311,49 @@
                 font-size: 0.74rem;
                 padding: 0.32rem 0.62rem;
             }
-            
+
+            /* ── Responsive: mostrar tabla de escritorio dentro de contenedor con scroll horizontal ── */
+            .permissions-card-table-wrapper {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
             .permissions-card-table {
-                min-width: 460px;
-                font-size: 0.82rem;
+                display: table;
+                min-width: 220px; /* fuerza ancho mínimo para mostrar columnas en móviles y activar scroll */
+                width: max-content;
+                font-size: 0.84rem;
+                border-collapse: collapse;
+                table-layout: auto;
             }
-            .permissions-card-table thead th {
-                font-size: 0.72rem;
-                white-space: nowrap;
+            .permissions-card-table thead {
+                display: table-header-group;
             }
-            .permissions-card-table th:first-child,
-            .permissions-card-table td:first-child {
-                min-width: 120px;
+            .permissions-card-table tbody {
+                display: table-row-group;
+            }
+            .permissions-card-table tbody tr {
+                display: table-row;
+                border: 1px solid #e2e8f0;
+                background-color: #ffffff;
+            }
+            .permissions-card-table tbody td:first-child {
+                font-size: 0.84rem;
+                font-weight: 600;
+                color: #1e293b;
+                text-align: left;
+                padding: 0.48rem 0.4rem;
+                min-width: 160px;
+            }
+            .permissions-card-table tbody td.permissions-action-cell {
+                min-width: 52px;
+                padding: 0.3rem 0.4rem;
+                text-align: center;
+            }
+            .permissions-card-table tbody td.permissions-action-cell::before {
+                display: none;
             }
             .permissions-action-cell {
-                width: 40px;
+                width: 54px;
             }
         }
 
@@ -1214,32 +1361,24 @@
             .permissions-module-tabs {
                 grid-template-columns: 1fr;
             }
-
             .permissions-module-tab {
                 font-size: 0.72rem;
                 padding: 0.55rem 0.65rem;
             }
-
             .permissions-card {
                 padding: 0.55rem;
             }
-
-            .permissions-card-table {
-                min-width: 380px;
-                font-size: 0.72rem;
+            .permissions-card-table tbody tr {
+                padding: 0.45rem 0.5rem;
             }
-
-            .permissions-card-table thead th {
-                font-size: 0.68rem;
+            .permissions-card-table tbody td:first-child {
+                font-size: 0.8rem;
             }
-
-            .permissions-card-table th:first-child,
-            .permissions-card-table td:first-child {
-                min-width: 108px;
+            .permissions-card-table tbody td.permissions-action-cell {
+                min-width: 44px;
             }
-
-            .permissions-action-cell {
-                width: 38px;
+            .permissions-card-table tbody td.permissions-action-cell::before {
+                font-size: 0.58rem;
             }
         }
 
@@ -1272,6 +1411,33 @@
             max-height: calc(100vh - 2.5rem);
             overflow: auto;
             border-radius: 12px;
+        }
+        /* Modal dialog specific adjustments to ensure proper scrolling and padding on small screens */
+        .modal-dialog {
+            width: 720px;
+            max-width: 92%;
+            margin: 1rem auto;
+            position: relative;
+            border-radius: 20px;
+            background: #ffffff;
+            box-shadow: 0 20px 40px rgba(2,6,23,0.12);
+            max-height: calc(100vh - 2.5rem);
+            overflow: auto;
+        }
+        .modal-dialog .modal-content {
+            padding: 40px 48px;
+            text-align: left;
+        }
+        @media (max-width: 640px) {
+            .modal-dialog {
+                width: 100%;
+                max-width: 100%;
+                border-radius: 12px;
+                margin: 0.5rem;
+            }
+            .modal-dialog .modal-content {
+                padding: 18px 20px;
+            }
         }
         @media (min-width: 768px) {
             [id$="-modal"] {
@@ -2831,9 +2997,9 @@
                                                                                                     $isHiddenAction = ($isAuditoriaRow && !in_array($actionKey, ['ver', 'exportar'], true)) || ($isCredentialRow && $actionKey === 'exportar');
                                                                                                 @endphp
                                                                                                 @if($isHiddenAction)
-                                                                                                            <td class="permissions-action-cell"></td>
+                                                                                                            <td class="permissions-action-cell" data-col-label="{{ $actionLabel }}"></td>
                                                                                                         @else
-                                                                                                        <td class="permissions-action-cell">
+                                                                                                        <td class="permissions-action-cell" data-col-label="{{ $actionLabel }}">
                                                                                                             <label class="permission-action-checkbox-wrapper">
                                                                                                                 <input
                                                                                                                     type="checkbox"
@@ -2911,9 +3077,9 @@
                                                                                             $isChecked = !empty($permissionValue[$subKey][$actionKey]);
                                                                                         @endphp
                                                                                                 @if($isEditForbidden || $isDeleteForbidden || $isActionHidden || $isHistorialFlujoHidden)
-                                                                                                    <td class="permissions-action-cell"></td>
+                                                                                                    <td class="permissions-action-cell" data-col-label="{{ $actionLabel }}"></td>
                                                                                                 @else
-                                                                                                    <td class="permissions-action-cell">
+                                                                                                    <td class="permissions-action-cell" data-col-label="{{ $actionLabel }}">
                                                                                                         <label class="permission-action-checkbox-wrapper">
                                                                                                             <input
                                                                                                                 type="checkbox"
@@ -2942,9 +3108,9 @@
                                                                                                 $isHiddenAction = ($isTicketsModule && in_array($actionKey, ['editar', 'eliminar'], true)) || ($isAuditoriaModule && $actionKey !== 'ver');
                                                                                             @endphp
                                                                                             @if($isHiddenAction)
-                                                                                                <td class="permissions-action-cell"></td>
+                                                                                                <td class="permissions-action-cell" data-col-label="{{ $actionLabel }}"></td>
                                                                                             @else
-                                                                                            <td class="permissions-action-cell">
+                                                                                            <td class="permissions-action-cell" data-col-label="{{ $actionLabel }}">
                                                                                                 <label class="permission-action-checkbox-wrapper">
                                                                                                     <input
                                                                                                         type="checkbox"
@@ -3361,8 +3527,16 @@
                         if (submitBtn) submitBtn.textContent = submitText;
                         modal.style.display = 'flex';
                         modal.style.justifyContent = 'center';
-                        modal.style.alignItems = 'center';
+                        // Use center alignment on larger screens, but align to top on small devices
+                        modal.style.alignItems = (window.innerWidth >= 768) ? 'center' : 'flex-start';
+                        // Ensure body doesn't scroll while modal is open
                         document.body.style.overflow = 'hidden';
+                        // Ensure the dialog has proper max-height and scrolling
+                        const dialogEl = modal.querySelector('.modal-dialog') || modal.querySelector('> div');
+                        if (dialogEl) {
+                            dialogEl.style.maxHeight = 'calc(100vh - 2.5rem)';
+                            dialogEl.style.overflow = 'auto';
+                        }
                         return new Promise((resolve) => {
                             const cleanup = () => {
                                 modal.style.display = 'none';
@@ -3378,12 +3552,12 @@
                     };
                 </script>
 
-    <div id="delete-confirmation-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;" role="dialog" aria-modal="true" aria-labelledby="delete-confirmation-title" aria-describedby="delete-confirmation-message">
-        <div style="width:720px;max-width:92%;margin:0 auto;position:relative;border-radius:20px;background:#ffffff;box-shadow:0 20px 40px rgba(2,6,23,0.12);overflow:hidden;">
+    <div id="delete-confirmation-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;background:rgba(0,0,0,0.8);" role="dialog" aria-modal="true" aria-labelledby="delete-confirmation-title" aria-describedby="delete-confirmation-message">
+        <div class="modal-dialog">
             <button type="button" data-delete-modal-close style="position:absolute;right:16px;top:16px;height:44px;width:44px;border-radius:9999px;border:1px solid #e6e9ee;background:#fff;color:#6b7280;display:inline-flex;align-items:center;justify-content:center;" aria-label="Cerrar">
                 <i data-lucide="x" style="width:16px;height:16px"></i>
             </button>
-            <div style="padding:40px 48px;text-align:left;">
+            <div class="modal-content">
                 <div style="margin:0 auto 24px;display:flex;height:64px;width:64px;align-items:center;justify-content:center;border-radius:9999px;border:1px solid #ef4444;background:#fff7f7;color:#ef4444;">
                     <i data-lucide="alert-circle" style="width:22px;height:22px"></i>
                 </div>
@@ -3431,8 +3605,8 @@
 
                 <div class="grid gap-5 bg-white p-7 md:grid-cols-2">
                     <div>
-                        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-                            <div class="flex items-center gap-2">
+                        <div class="mb-3 flex flex-wrap items-center justify-between gap-3 quick-modal-header">
+                            <div class="flex items-center gap-0.5">
                                 <h4 class="text-sm font-bold text-slate-900">Direcciones</h4>
                                 <span id="quick-direccion-count" class="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-600">0</span>
                             </div>
@@ -3988,11 +4162,11 @@
                             (isSelected ? 'border-primary bg-red-50/50 ring-1 ring-inset ring-red-200' : 'border-slate-200 bg-white hover:border-slate-300');
 
                         const text = document.createElement('div');
-                        text.className = 'pr-2 text-xs text-slate-700 leading-5';
+                        text.className = 'quick-item-text pr-2 text-xs text-slate-700 leading-5';
                         text.textContent = String(item.label ?? '');
 
                         const actions = document.createElement('div');
-                        actions.className = 'flex items-center gap-1.5';
+                        actions.className = 'quick-actions-grid';
 
                         const editBtn = document.createElement('button');
                         editBtn.type = 'button';
@@ -4022,7 +4196,7 @@
 
                         const pickBtn = document.createElement('button');
                         pickBtn.type = 'button';
-                        pickBtn.className = 'min-w-[102px] rounded border px-2.5 py-1.5 text-[11px] font-medium shadow-sm ' +
+                        pickBtn.className = 'rounded border px-2.5 py-1.5 text-[11px] font-medium shadow-sm quick-pick-btn ' +
                             (isSelected
                                 ? 'border-primary bg-primary text-white'
                                 : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50');
@@ -4348,8 +4522,8 @@
                 </div>
                 <div class="grid gap-5 bg-white p-7 md:grid-cols-2">
                     <div>
-                        <div class="mb-2 flex flex-wrap items-center justify-between gap-3">
-                            <div class="flex items-center gap-2">
+                        <div class="mb-2 flex flex-wrap items-center justify-between gap-3 quick-modal-header">
+                            <div class="flex items-center gap-0.5">
                                 <h4 class="text-sm font-bold text-slate-900">Contactos</h4>
                                 <span id="quick-contacto-count" class="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-600">0</span>
                             </div>
@@ -4873,11 +5047,11 @@
                             (isSelected ? 'border-primary bg-red-50/50' : 'border-slate-200 bg-white hover:border-slate-300');
 
                         const text = document.createElement('div');
-                        text.className = 'pr-2 text-xs text-slate-700 leading-5';
+                        text.className = 'quick-item-text pr-2 text-xs text-slate-700 leading-5';
                         text.textContent = String(item.label || '');
 
                         const actions = document.createElement('div');
-                        actions.className = 'flex items-center gap-1.5';
+                        actions.className = 'quick-actions-grid';
 
                         const editBtn = document.createElement('button');
                         editBtn.type = 'button';
@@ -4923,7 +5097,7 @@
 
                         const pickBtn = document.createElement('button');
                         pickBtn.type = 'button';
-                        pickBtn.className = 'min-w-[102px] rounded border px-2.5 py-1.5 text-[11px] font-medium shadow-sm ' +
+                        pickBtn.className = 'rounded border px-2.5 py-1.5 text-[11px] font-medium shadow-sm quick-pick-btn ' +
                             (isSelected
                                 ? 'border-primary bg-primary text-white'
                                 : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50');
@@ -5207,8 +5381,8 @@
                 </div>
                 <div class="grid gap-5 bg-white p-7 md:grid-cols-2">
                     <div>
-                        <div class="mb-2 flex flex-wrap items-center justify-between gap-3">
-                            <div class="flex items-center gap-2">
+                        <div class="mb-2 flex flex-wrap items-center justify-between gap-3 quick-modal-header">
+                            <div class="flex items-center gap-0.5">
                                 <h4 class="text-sm font-bold text-slate-900">Credenciales</h4>
                                 <span id="quick-credencial-count" class="rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-600">0</span>
                             </div>
@@ -5767,15 +5941,15 @@
                         const isSelected = String(selectedCredencialId) === id;
 
                         const row = document.createElement('div');
-                        row.className = 'flex items-center justify-between mb-2 gap-3 rounded-md border p-2 transition ' +
+                        row.className = 'flex items-center justify-between mb-2 gap-6 rounded-md border p-2 transition ' +
                             (isSelected ? 'border-primary bg-red-50/50' : 'border-slate-200 bg-white hover:border-slate-300');
 
                         const text = document.createElement('div');
-                        text.className = 'pr-2 text-xs text-slate-700 leading-5';
+                        text.className = 'quick-item-text pr-2 text-xs text-slate-700 leading-5';
                         text.textContent = String(item.label || '');
 
                         const actions = document.createElement('div');
-                        actions.className = 'flex items-center gap-1.5';
+                        actions.className = 'quick-actions-grid';
 
                         const canEditCredencial = currentCredentialCanEdit === 'true';
                         const canDeleteCredencial = currentCredentialCanDelete === 'true';
@@ -5829,7 +6003,7 @@
 
                         const pickBtn = document.createElement('button');
                         pickBtn.type = 'button';
-                        pickBtn.className = 'min-w-[102px] rounded border px-2.5 py-1.5 text-[11px] font-medium shadow-sm ' +
+                        pickBtn.className = 'rounded border px-2.5 py-1.5 text-[11px] font-medium shadow-sm quick-pick-btn ' +
                             (isSelected
                                 ? 'border-primary bg-primary text-white'
                                 : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50');

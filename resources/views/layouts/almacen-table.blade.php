@@ -1307,12 +1307,12 @@
 			display: flex;
 			flex-direction: column;
 			align-items: stretch;
-			gap: 1.0rem;
+			gap: 1.5rem;
 		}
 
 		.almacen-filters-row {
 			display: flex;
-			align-items: flex-start;
+			align-items: flex-end;
 			justify-content: space-between;
 			gap: 0.8rem;
 			flex-wrap: nowrap;
@@ -1333,12 +1333,10 @@
 			flex-wrap: wrap;
 		}
 
-		/* Responsive behaviour: stack search above actions on small screens */
+		/* Responsive behaviour: order layout vertically */
 		@media (max-width: 768px) {
 			.almacen-filters-row {
-				flex-direction: column;
-				align-items: stretch;
-				gap: 0.6rem;
+				display: contents;
 			}
 			.almacen-filters-actions {
 				justify-content: flex-start;
@@ -1381,6 +1379,11 @@
 			max-width: 100%;
 			position: relative;
 			z-index: 30;
+		}
+
+		/* Eleva el z-index del contenedor padre por encima del resto cuando su Tom Select está activo/abierto */
+		.almacen-filter-item--tom:has(.dropdown-active) {
+			z-index: 99 !important;
 		}
 
 		.almacen-filter-item--wide {
@@ -1698,20 +1701,27 @@
 
 		@media (max-width: 768px) {
 			.almacen-filters-bar {
+				display: flex;
 				flex-direction: column;
 				align-items: stretch;
 			}
 
 			.almacen-filters-row {
-				flex-direction: column;
-				align-items: stretch;
+				display: contents;
 			}
 
 			.almacen-filter-item--search {
+				order: 1;
 				max-width: none;
+				flex: 0 0 auto;
+			}
+
+			.almacen-filters-track {
+				order: 2;
 			}
 
 			.almacen-filters-actions {
+				order: 3;
 				justify-content: stretch;
 			}
 

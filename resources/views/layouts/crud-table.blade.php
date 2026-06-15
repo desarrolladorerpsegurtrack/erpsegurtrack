@@ -900,8 +900,8 @@
                 </form>
             @endif
             @if(!empty($bulkDeactivateRoute))
-                <div id="detallesimcard-bulk-deactivate-modal" class="fixed inset-0 hidden items-center justify-center px-4 py-6" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.78);" role="dialog" aria-modal="true" aria-labelledby="detallesimcard-bulk-title">
-                    <div class="w-full rounded-lg overflow-hidden rounded-[1.25rem] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.16)] flex flex-col max-h-[85vh]" style="max-width: 980px;">
+                <div id="detallesimcard-bulk-deactivate-modal" class="fixed inset-0 hidden items-start justify-center px-4 py-6" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.78);" role="dialog" aria-modal="true" aria-labelledby="detallesimcard-bulk-title">
+                    <div class="w-full rounded-lg overflow-hidden rounded-[1.25rem] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.16)] flex flex-col max-h-[85vh] modal-dialog" style="max-width: 980px;">
                         <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
                             <h3 id="detallesimcard-bulk-title" class="text-lg font-semibold text-slate-800">Dar de baja números telefónicos</h3>
                             <button type="button" data-close-detallesimcard-modal="bulk-deactivate" class="ml-auto rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700">
@@ -977,7 +977,7 @@
                                             Aqui es donde se va a visualizar los datos
                                         </div>
                                         <div id="detallesimcard-bulk-preview-content" class="hidden">
-                                            <div class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+                                            <div class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
                                                 <div><span class="block text-slate-500">Filas validas</span><span id="detallesimcard-bulk-stat-valid" class="font-semibold">0</span></div>
                                                 <div><span class="block text-slate-500">A dar de baja</span><span id="detallesimcard-bulk-stat-new" class="font-semibold text-emerald-700">0</span></div>
                                                 <div><span class="block text-slate-500">Vacías / inválidas</span><span id="detallesimcard-bulk-stat-empty-invalid" class="font-semibold text-amber-700">0</span></div>
@@ -1021,8 +1021,8 @@
                 </div>
             @endif
 
-            <div id="detallesimcard-bulk-deactivate-confirmation-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:10000;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;" role="dialog" aria-modal="true" aria-labelledby="detallesimcard-bulk-deactivate-confirmation-title" aria-describedby="detallesimcard-bulk-deactivate-confirmation-message">
-                <div style="width:640px;max-width:92%;margin:0 auto;position:relative;border-radius:10px;background:#ffffff;box-shadow:0 20px 40px rgba(2,6,23,0.12);overflow:hidden;">
+            <div id="detallesimcard-bulk-deactivate-confirmation-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:10000;background:rgba(0,0,0,0.8);" role="dialog" aria-modal="true" aria-labelledby="detallesimcard-bulk-deactivate-confirmation-title" aria-describedby="detallesimcard-bulk-deactivate-confirmation-message">
+                <div class="modal-dialog" style="width:640px;max-width:92%;margin:0.75rem auto;position:relative;border-radius:10px;background:#ffffff;box-shadow:0 20px 40px rgba(2,6,23,0.12);overflow:hidden;">
                     <button type="button" data-close-deactivate-confirmation-modal aria-label="Cerrar"  style="position:absolute;right:16px;top:14px;border:0;background:transparent;color:#6b7280;padding:8px;cursor:pointer;">
                         <i data-lucide="x" style="width:18px;height:18px"></i>
                     </button>
@@ -1041,8 +1041,8 @@
                 </div>
             </div>
 
-            <div id="detallesimcard-bulk-validation-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:10001;background:rgba(0,0,0,0.72);align-items:center;justify-content:center;" role="dialog" aria-modal="true" aria-labelledby="detallesimcard-bulk-validation-title" aria-describedby="detallesimcard-bulk-validation-message">
-                <div style="width:760px;max-width:94%;margin:0 auto;position:relative;border-radius:10px;background:#ffffff;box-shadow:0 20px 50px rgba(2,6,23,0.18);overflow:hidden;">
+            <div id="detallesimcard-bulk-validation-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:10001;background:rgba(0,0,0,0.72);" role="dialog" aria-modal="true" aria-labelledby="detallesimcard-bulk-validation-title" aria-describedby="detallesimcard-bulk-validation-message">
+                <div class="modal-dialog" style="width:760px;max-width:94%;margin:0.75rem auto;position:relative;border-radius:10px;background:#ffffff;box-shadow:0 20px 50px rgba(2,6,23,0.18);overflow:hidden;">
                     <div style="padding:24px 28px 18px;border-bottom:1px solid #e5e7eb;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
                         <div>
                             <h2 id="detallesimcard-bulk-validation-title" style="margin:0;font-size:18px;font-weight:700;color:#111827;">Validación previa requerida</h2>
@@ -1064,8 +1064,8 @@
 
             <!-- Carga de numeros nuevos -->
             @if(!empty($importPreviewRoute) && !empty($importProcessRoute))
-                <div id="detallesimcard-import-modal" class="fixed inset-0 hidden items-center justify-center px-4" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.78);" role="dialog" aria-modal="true" aria-labelledby="detallesimcard-import-title">
-                    <div class="w-full rounded-lg max-w-2xl max-h-[calc(100vh-4rem)] overflow-hidden rounded-[1.25rem] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.16)]">
+                <div id="detallesimcard-import-modal" class="fixed inset-0 hidden items-start justify-center px-4" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.78);" role="dialog" aria-modal="true" aria-labelledby="detallesimcard-import-title">
+                    <div class="w-full rounded-lg max-w-2xl max-h-[calc(100vh-4rem)] overflow-hidden rounded-[1.25rem] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.16)] modal-dialog">
                         <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
                             <h3 id="detallesimcard-import-title" class="text-lg font-semibold text-slate-800">Cargar números por archivo</h3>
                             <button type="button" data-close-detallesimcard-modal="import" class="rounded-full ml-auto p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700">
@@ -1093,7 +1093,7 @@
 
                             <div id="detallesimcard-import-preview" class="mt-4 rounded-[1rem] border border-slate-200 bg-white p-4 min-h-[20rem] shadow-sm">
                                 @if(is_array($detallesimcardImportPreview ?? null))
-                                    <div class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+                                    <div class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
                                         <div><span class="block text-slate-500">Filas válidas</span><span class="font-semibold">{{ (int) ($detallesimcardImportPreview['candidateCount'] ?? 0) }}</span></div>
                                         <div><span class="block text-slate-500">Nuevas</span><span class="font-semibold text-emerald-700">{{ (int) ($detallesimcardImportPreview['newRows'] ?? 0) }}</span></div>
                                         <div><span class="block text-slate-500">Vacías</span><span class="font-semibold text-amber-700">{{ (int) ($detallesimcardImportPreview['emptyRows'] ?? 0) }}</span></div>
@@ -1716,19 +1716,28 @@
                 };
 
                 const sortRows = (index, direction) => {
-                    const rows = Array.from(tbody.querySelectorAll('tr')).filter((row) => {
+                    const parentRows = Array.from(tbody.children).filter((row) => {
+                        if (row.tagName !== 'TR') return false;
                         const firstCell = row.children[0];
-                        return !(row.children.length === 1 && firstCell && firstCell.hasAttribute('colspan'));
+                        const isColspan = row.children.length === 1 && firstCell && firstCell.hasAttribute('colspan');
+                        const isHistory = row.hasAttribute('data-history-row');
+                        return !isColspan && !isHistory;
                     });
 
-                    const isNumeric = rows.every((row) => {
-                        const value = getCellValue(row, index).replace(/[,\s]/g, '');
+                    const rowObjects = parentRows.map(parent => {
+                        const next = parent.nextElementSibling;
+                        const child = (next && next.hasAttribute('data-history-row')) ? next : null;
+                        return { parent, child };
+                    });
+
+                    const isNumeric = rowObjects.every(({ parent }) => {
+                        const value = getCellValue(parent, index).replace(/[,\s]/g, '');
                         return value !== '' && !Number.isNaN(Number(value));
                     });
 
-                    rows.sort((a, b) => {
-                        const aVal = getCellValue(a, index);
-                        const bVal = getCellValue(b, index);
+                    rowObjects.sort((a, b) => {
+                        const aVal = getCellValue(a.parent, index);
+                        const bVal = getCellValue(b.parent, index);
                         if (isNumeric) {
                             const aNum = Number(aVal.replace(/[,\s]/g, ''));
                             const bNum = Number(bVal.replace(/[,\s]/g, ''));
@@ -1738,7 +1747,12 @@
                         return direction === 'desc' ? -result : result;
                     });
 
-                    rows.forEach((row) => tbody.appendChild(row));
+                    rowObjects.forEach(({ parent, child }) => {
+                        tbody.appendChild(parent);
+                        if (child) {
+                            tbody.appendChild(child);
+                        }
+                    });
                 };
 
                 headers.forEach((header) => {
@@ -2166,6 +2180,8 @@
                 target.classList.add('hidden');
                 target.classList.remove('flex');
                 target.style.display = 'none';
+                // reset alignment so next open uses correct placement
+                try { target.style.alignItems = ''; } catch(e) {}
                 if (type === 'import') {
                     clearImportPreviewModal();
                 }
@@ -2186,9 +2202,23 @@
                 if (type === 'import') {
                     clearImportPreviewModal();
                 }
+                // display modal and choose alignment: center on desktop, top on small screens
+                const align = (window.innerWidth >= 768) ? 'center' : 'flex-start';
                 target.style.display = 'flex';
+                target.style.alignItems = align;
                 target.classList.remove('hidden');
                 target.classList.add('flex');
+                // ensure the dialog itself can scroll if content exceeds viewport
+                const dialog = target.querySelector('.modal-dialog') || target.querySelector('> div');
+                if (dialog) {
+                    dialog.style.maxHeight = 'calc(100vh - 2.5rem)';
+                    dialog.style.overflow = 'auto';
+                    // small screens take full width
+                    if (window.innerWidth < 640) {
+                        dialog.style.width = '100%';
+                        dialog.style.margin = '0.5rem';
+                    }
+                }
                 document.body.style.overflow = 'hidden';
             };
 
@@ -2401,7 +2431,7 @@
                 }
 
                 const summaryHtml = `
-                    <div class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+                    <div class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
                         <div><span class="block text-slate-500">Filas válidas</span><span class="font-semibold">${preview.candidateCount}</span></div>
                         <div><span class="block text-slate-500">Nuevas</span><span class="font-semibold text-emerald-700">${preview.newRows}</span></div>
                         <div><span class="block text-slate-500">Vacías</span><span class="font-semibold text-amber-700">${preview.emptyRows}</span></div>

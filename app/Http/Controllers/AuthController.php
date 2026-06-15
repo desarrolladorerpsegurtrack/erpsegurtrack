@@ -123,7 +123,7 @@ class AuthController extends Controller
 
     private function determineDefaultRedirectUrl(array $authData): string
     {
-        $routeName = \App\Support\ErpPermission::getDefaultRedirectRoute($authData);
+        $routeName = ErpPermission::getDefaultRedirectRoute($authData);
         
         try {
             return route($routeName);

@@ -492,6 +492,10 @@
             z-index: 30;
         }
 
+        .ticket-filter-item--tom:has(.dropdown-active) {
+			z-index: 99 !important;
+		}
+
         .ticket-filter-item--wide {
             min-width: 210px;
         }

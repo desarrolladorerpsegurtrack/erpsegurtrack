@@ -47,7 +47,7 @@
                     <th>ID Compra</th>
                     <td>{{ $note->idcompras ?? '-' }}</td>
                     <th>Fecha</th>
-                    <td>{{ $note->fechaRealizacion ? Carbon::parse($note->fechaRealizacion)->format('d/m/Y H:i') : '-' }}</td>
+                    <td>{{ $note->fechaRealizacion ? Carbon::parse($note->fechaRealizacion)->locale('es')->isoFormat('D MMM YYYY, HH:mm') : '-' }}</td>
                 </tr>
                 <tr> 
                     <th>Usuario</th>

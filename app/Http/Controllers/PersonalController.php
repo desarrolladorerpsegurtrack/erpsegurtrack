@@ -73,6 +73,7 @@ class PersonalController extends Controller
         $inactivosPersonal = max($totalPersonal - $activosPersonal, 0);
 
         $personales = $baseQuery
+            ->orderByRaw("CASE WHEN p.estado = '1' THEN 0 ELSE 1 END") 
             ->orderBy('p.apellido')
             ->orderBy('p.nombre')
             ->paginate($this->resolvePerPage($request))
@@ -199,7 +200,7 @@ class PersonalController extends Controller
         $filename = 'personal_export_' . now()->format('Ymd_His') . '.' . $format;
 
         if (!empty($selectedIds) && is_array($selectedIds)) {
-            $rows = $baseQuery->whereIn('p.idpersonal', array_values($selectedIds))->orderBy('p.apellido')->orderBy('p.nombre')->get();
+            $rows = $baseQuery->whereIn('p.dniPersonal', array_values($selectedIds))->orderBy('p.apellido')->orderBy('p.nombre')->get();
 
             if ($format === 'xlsx') {
                 return $this->exportXlsxResponse($rows, $columns, $filename);

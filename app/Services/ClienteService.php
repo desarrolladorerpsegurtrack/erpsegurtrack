@@ -41,11 +41,13 @@ class ClienteService
                     ->orWhere('ec.detalle', '!=', 'Inactivo');
             })
             ->count();
+        $rubro = (clone $query)->distinct('c.rubro')->count('c.rubro');
 
         return [
-            'total' => $totalClientes,
-            'active' => $clientesActivos,
-            'inactive' => max($totalClientes - $clientesActivos, 0),
+            'Total de Clientes' => $totalClientes,
+            'Clientes Activos' => $clientesActivos,
+            'Clientes Inactivos' => max($totalClientes - $clientesActivos, 0),
+            'Total de Rubro' => $rubro,
         ];
     }
 

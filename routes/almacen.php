@@ -37,6 +37,7 @@ Route::middleware('erp.module:almacen.nota_ingreso')->group(function () {
     Route::post('/modulos/almacen/nota-ingreso/export/{format}', [AlmacenNotaIngresoController::class, 'export'])->name('modules.almacen.nota-ingreso.export.post')->where('format', 'pdf|xlsx');
     Route::get('/modulos/almacen/nota-ingreso/{id}/pdf', [AlmacenNotaIngresoController::class, 'downloadPdf'])->name('modules.almacen.nota-ingreso.pdf');
     Route::get('/modulos/almacen/nota-ingreso/crear', [AlmacenNotaIngresoController::class, 'create'])->name('modules.almacen.nota-ingreso.create');
+    Route::get('/modulos/almacen/nota-ingreso/imeis-preview', [AlmacenNotaIngresoController::class, 'imeisPreview'])->name('modules.almacen.nota-ingreso.imeis-preview');
     Route::post('/modulos/almacen/nota-ingreso', [AlmacenNotaIngresoController::class, 'store'])->name('modules.almacen.nota-ingreso.store');
     Route::get('/modulos/almacen/nota-ingreso/{id}/editar', [AlmacenNotaIngresoController::class, 'edit'])->name('modules.almacen.nota-ingreso.edit');
     Route::put('/modulos/almacen/nota-ingreso/{id}', [AlmacenNotaIngresoController::class, 'update'])->name('modules.almacen.nota-ingreso.update');
@@ -49,7 +50,8 @@ Route::middleware('erp.module:almacen.nota_salida')->group(function () {
     Route::get('/modulos/almacen/nota-salida/export/{format}', [AlmacenNotaSalidaController::class, 'export'])->name('modules.almacen.nota-salida.export')->where('format', 'pdf|xlsx');
     Route::post('/modulos/almacen/nota-salida/export/{format}', [AlmacenNotaSalidaController::class, 'export'])->name('modules.almacen.nota-salida.export.post')->where('format', 'pdf|xlsx');
     Route::get('/modulos/almacen/nota-salida/{id}/pdf', [AlmacenNotaSalidaController::class, 'downloadPdf'])->name('modules.almacen.nota-salida.pdf');
-    Route::get('/modulos/almacen/nota-salida/informe/export/{format}', [AlmacenNotaSalidaController::class, 'exportExecutionReport'])->name('modules.almacen.nota-salida.report-export')->where('format', 'pdf|xlsx');
+    Route::get('/modulos/almacen/nota-salida/informe/export/{format}', [AlmacenNotaSalidaController::class, 'export'])->name('modules.almacen.nota-salida.report-export')->where('format', 'pdf|xlsx');
+    Route::get('/modulos/almacen/nota-salida/imeis-preview', [AlmacenNotaSalidaController::class, 'imeisPreview'])->name('modules.almacen.nota-salida.imeis-preview');
     Route::get('/modulos/almacen/nota-salida/crear', [AlmacenNotaSalidaController::class, 'create'])->name('modules.almacen.nota-salida.create');
     Route::post('/modulos/almacen/nota-salida', [AlmacenNotaSalidaController::class, 'store'])->name('modules.almacen.nota-salida.store');
     Route::get('/modulos/almacen/nota-salida/{id}/editar', [AlmacenNotaSalidaController::class, 'edit'])->name('modules.almacen.nota-salida.edit');

@@ -5,7 +5,7 @@
     "scripts": {
         "build": "vite build",
         "dev": "vite",
-        "ws-server": "node server/ws-server.js"
+        "ws-server": "node --env-file=.env server/ws-server.js"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",

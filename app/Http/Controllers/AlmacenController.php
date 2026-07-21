@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
@@ -192,6 +193,13 @@ class AlmacenController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $validated = $this->validateAlmacen($request);
+        // manejar subida de imagen (si existe)
+        if ($request->hasFile('imagen') && $request->file('imagen')->isValid()) {
+            $file = $request->file('imagen');
+            $filename = 'almacenimg_' . uniqid() . '.' . $file->getClientOriginalExtension();
+            $path = $file->storeAs('almacen', $filename, 'public');
+            $validated['imagen'] = $path; // almacen/<filename>
+        }
         $payload = $this->preparePayload($validated);
 
         $newId = null;
@@ -246,6 +254,18 @@ class AlmacenController extends Controller
         }
 
         $validated = $this->validateAlmacen($request);
+        // manejar subida de imagen y reemplazo
+        $existingImage = DB::table('almacen')->where('idalmacen', $id)->value('imagen');
+        if ($request->hasFile('imagen') && $request->file('imagen')->isValid()) {
+            $file = $request->file('imagen');
+            $filename = 'almacenimg_' . uniqid() . '.' . $file->getClientOriginalExtension();
+            $path = $file->storeAs('almacen', $filename, 'public');
+            $validated['imagen'] = $path; // almacen/<filename>
+            // borrar anterior si existe
+            if (!empty($existingImage) && Storage::disk('public')->exists($existingImage)) {
+                Storage::disk('public')->delete($existingImage);
+            }
+        }
         $payload = $this->preparePayload($validated);
 
         DB::transaction(function () use ($payload, $request, $id): void {
@@ -267,6 +287,11 @@ class AlmacenController extends Controller
         }
 
         try {
+            // eliminar archivo de imagen asociado si existe
+            $existingImage = DB::table('almacen')->where('idalmacen', $id)->value('imagen');
+            if (!empty($existingImage) && Storage::disk('public')->exists($existingImage)) {
+                Storage::disk('public')->delete($existingImage);
+            }
             DB::table('almacen')->where('idalmacen', $id)->delete();
             $this->publishResourceEvent(self::LOCK_RESOURCE, (string) $id, 'deleted');
             $this->releaseLockIfOwned($request, self::LOCK_RESOURCE, (string) $id);
@@ -294,6 +319,7 @@ class AlmacenController extends Controller
             ->whereRaw("LOWER(TRIM(COALESCE(te.nombre, ''))) NOT LIKE '%servicio%'")
             ->select(
                 'a.idalmacen',
+                'a.imagen',
                 'a.empresaPropietaria_RUC',
                 'a.modelo_idmodelo',
                 'a.tipoElemento_idtipoElemento',
@@ -504,6 +530,13 @@ class AlmacenController extends Controller
                 'maxlength' => 200,
                 'placeholder' => 'Información adicional sobre el elemento en el almacén', 
             ],
+            [
+                'name' => 'imagen',
+                'type' => 'file',
+                'label' => 'Imagen',
+                'required' => false,
+                'placeholder' => '',
+            ],
         ];
     }
 
@@ -520,6 +553,9 @@ class AlmacenController extends Controller
             'detalle' => ['nullable', 'string', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
             'precio' => ['nullable', 'numeric', 'min:0'],
             'renovacion' => ['nullable', 'integer', 'min:0'],
+            'imagen' => ['nullable', 'image', 'max:2048'],
+        ], [
+            'imagen' => 'La foto no debe ser menor a 2MB.',
         ]);
     }
 
@@ -538,6 +574,7 @@ class AlmacenController extends Controller
             'renovacion' => array_key_exists('renovacion', $validated) && $validated['renovacion'] !== null
                 ? (int) $validated['renovacion']
                 : 0,
+            'imagen' => $this->nullableString($validated['imagen'] ?? null),
         ];
     }
 

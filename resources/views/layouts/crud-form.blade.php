@@ -1418,7 +1418,7 @@
             max-width: 92%;
             margin: 1rem auto;
             position: relative;
-            border-radius: 20px;
+            border-radius: 15px;
             background: #ffffff;
             box-shadow: 0 20px 40px rgba(2,6,23,0.12);
             max-height: calc(100vh - 2.5rem);
@@ -1780,6 +1780,9 @@
                         var vehiculoCrear = fieldset.querySelector('input[name="permissions[vehiculos][crear]"]');
                         var vehiculoEditar = fieldset.querySelector('input[name="permissions[vehiculos][editar]"]');
                         var conditionalRows = fieldset.querySelectorAll('tr.credential-permission-row, tr.dependent-permission-row');
+                        var cotVer = fieldset.querySelector('input[name="permissions[ventas.cotizaciones][ver]"]');
+                        var cotCrear = fieldset.querySelector('input[name="permissions[ventas.cotizaciones][crear]"]');
+                        var cotEditar = fieldset.querySelector('input[name="permissions[ventas.cotizaciones][editar]"]');
 
                         conditionalRows.forEach(function (row) {
                             var submodule = row.dataset.submodule;
@@ -1791,6 +1794,8 @@
                             var hasVehiculoCreateOrEdit = (vehiculoCrear && vehiculoCrear.checked) || (vehiculoEditar && vehiculoEditar.checked);
                             var lineasDetalleVer = fieldset.querySelector('input[name="permissions[lineas_chips.detallesimcard][ver]"]');
                             var hasLineasDetalleVer = lineasDetalleVer && lineasDetalleVer.checked;
+                            var hasCotVer = cotVer && cotVer.checked;
+                            var hasCotCreateOrEdit = (cotCrear && cotCrear.checked) || (cotEditar && cotEditar.checked);
 
                             if (submodule === 'clientes.credenciales') {
                                 canUse = hasClienteVer && hasClienteCreateOrEdit;
@@ -1798,6 +1803,9 @@
                                 canUse = true;
                             } else if (submodule === 'lineas_chips.cargar_numeros' || submodule === 'lineas_chips.bajar_numeros') {
                                 canUse = hasLineasDetalleVer;
+                            } else if (submodule === 'ventas.personal') {
+                                // DNI Personal only enabled when Cotizaciones has Crear + (Editar or Eliminar)
+                                canUse = hasCotVer && hasCotCreateOrEdit;
                             }
 
                             row.querySelectorAll('input.permission-switch-input').forEach(function (input) {
@@ -2028,7 +2036,8 @@
                 document.querySelectorAll(
                     'input[name="permissions[clientes.cliente][ver]"], input[name="permissions[clientes.cliente][crear]"], input[name="permissions[clientes.cliente][editar]"],' +
                     'input[name="permissions[vehiculos][ver]"], input[name="permissions[vehiculos][crear]"], input[name="permissions[vehiculos][editar]"],' +
-                    'input[name="permissions[lineas_chips.detallesimcard][ver]"]'
+                    'input[name="permissions[lineas_chips.detallesimcard][ver]"],' +
+                    'input[name="permissions[ventas.cotizaciones][ver]"], input[name="permissions[ventas.cotizaciones][crear]"], input[name="permissions[ventas.cotizaciones][editar]"], input[name="permissions[ventas.cotizaciones][eliminar]"]'
                 ).forEach(function (input) {
                     input.addEventListener('change', function (ev) {
                         try { updateCredentialRows.call(this, ev); } catch (e) { }
@@ -2137,6 +2146,9 @@
                     <!-- FORMULARIO -->
                     <form id="main-crud-form" method="POST" action="{{ $formAction }}" enctype="multipart/form-data" class="box box--stacked flex flex-col p-5">
                         @csrf
+                        @if(isset($return_route))
+                            <input type="hidden" name="return_route" value="{{ e($return_route) }}">
+                        @endif
                         @if($mode === 'edit')
                             @method('PUT')
                         @endif
@@ -2822,6 +2834,7 @@
                                                         'configuracion.forma_pago',
                                                         'configuracion.certificadosunat',
                                                         'configuracion.tributo',
+                                                        'configuracion.paquetes',
                                                         'configuracion.tipo_documento',
                                                     ],
                                                     'Personal' => [
@@ -2966,8 +2979,11 @@
                                                                                     <table class="permissions-card-table">
                                                                                         @php
                                                                                             $tablePermissionActions = collect($permissionActions)
-                                                                                                ->except('ver_flujo')
-                                                                                                ->all();
+                                                                                                ->except('ver_flujo');
+                                                                                            if ($moduleEntry['moduleKey'] !== 'ventas') {
+                                                                                                $tablePermissionActions = $tablePermissionActions->except(['aprobar', 'anular']);
+                                                                                            }
+                                                                                            $tablePermissionActions = $tablePermissionActions->all();
                                                                                         @endphp
                                                                                         <thead>
                                                                                             <tr>
@@ -3034,6 +3050,9 @@
                                                                                     // Para el resto removemos la columna "Ver flujo" cuando no aplica
                                                                                     $tablePermissionActions = $tablePermissionActions->except('ver_flujo');
                                                                                 }
+                                                                                if ($moduleEntry['moduleKey'] !== 'ventas') {
+                                                                                    $tablePermissionActions = $tablePermissionActions->except(['aprobar', 'anular']);
+                                                                                }
                                                                                 $tablePermissionActions = $tablePermissionActions->all();
                                                                             @endphp
                                                                             <thead>
@@ -3062,8 +3081,14 @@
                                                                                             $credentialDisabled = $isCredentialRow && !($clienteVer && ($clienteCrear || $clienteEditar));
                                                                                             $deviceDisabled = false;
                                                                                             $lineasChildDisabled = $isLineasChildRow && !$lineasDetalleVer;
-                                                                                            $isConditionalRow = $isCredentialRow || $isDeviceRow || $isLineasChildRow;
-                                                                                            $rowDisabled = $credentialDisabled || $deviceDisabled || $lineasChildDisabled;
+                                                                                            $isDniPersonalRow = $subKey === 'ventas.personal';
+                                                                                            $cotizacionesActions = $permissionValue['ventas.cotizaciones'] ?? [];
+                                                                                            $cotCrear = !empty($cotizacionesActions['crear']);
+                                                                                            $cotEditar = !empty($cotizacionesActions['editar']);
+                                                                                            $cotEliminar = !empty($cotizacionesActions['eliminar']);
+                                                                                            $dniDisabled = $isDniPersonalRow && !($cotCrear && ($cotEditar || $cotEliminar));
+                                                                                            $isConditionalRow = $isCredentialRow || $isDeviceRow || $isLineasChildRow || $isDniPersonalRow;
+                                                                                            $rowDisabled = $credentialDisabled || $deviceDisabled || $lineasChildDisabled || $dniDisabled;
                                                                                         @endphp
                                                                                         <tr data-submodule="{{ $subKey }}" data-parent-module="{{ $moduleEntry['moduleKey'] }}" data-dependency="{{ $isLineasChildRow ? 'lineas_chips.detallesimcard' : '' }}" class="{{ $isConditionalRow ? 'credential-permission-row' : '' }} {{ $isLineasChildRow ? 'dependent-permission-row' : '' }} {{ $rowDisabled ? 'credential-row-disabled' : '' }}">
                                                                                             <td>{{ $subLabel }}</td>
@@ -3071,9 +3096,10 @@
                                                                                         @php
                                                                                             $isEditForbidden = in_array($subKey, ['lineas_chips.detallesimcard', 'lineas_chips.numero_dispositivo'], true) && $actionKey === 'editar';
                                                                                             $isDeleteForbidden = $isTicketsRow && in_array($actionKey, ['editar', 'eliminar'], true);
-                                                                                            $isVerOnlyRow = in_array($subKey, ['lineas_chips.cargar_numeros', 'lineas_chips.bajar_numeros'], true);
+                                                                                            $isVerOnlyRow = in_array($subKey, ['lineas_chips.cargar_numeros', 'lineas_chips.bajar_numeros', 'ventas.personal'], true);
+                                                                                            $isApprovalAction = in_array($actionKey, ['aprobar', 'anular'], true);
                                                                                             $isHistorialFlujoHidden = $isHistorialFlujoRow && !in_array($actionKey, ['ver', 'exportar'], true);
-                                                                                            $isActionHidden = ($isVerOnlyRow && !in_array($actionKey, ['ver', 'exportar'], true)) || ($isCredentialRow && $actionKey === 'exportar');
+                                                                                            $isActionHidden = ($isVerOnlyRow && !in_array($actionKey, ['ver', 'exportar'], true)) || ($isCredentialRow && $actionKey === 'exportar') || ($isApprovalAction && $subKey !== 'ventas.cotizaciones');
                                                                                             $isChecked = !empty($permissionValue[$subKey][$actionKey]);
                                                                                         @endphp
                                                                                                 @if($isEditForbidden || $isDeleteForbidden || $isActionHidden || $isHistorialFlujoHidden)
@@ -3663,7 +3689,7 @@
                                 <button type="button" id="quick-direccion-cancel" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-100" style=" border-color: #000000; color: #000000;">Cancelar</button>
                                 <button type="submit" id="quick-direccion-submit" class="rounded-lg border-0 px-5 py-2.5 text-xs font-semibold shadow-lg transition duration-200" style="background-color: #c1121f; color: #ffffff;">Guardar direccion</button>
                             </div>
-                            <p id="quick-direccion-feedback" class="text-xs"></p>
+                            <p id="quick-direccion-feedback" class="text-xs" style="margin-top: 1rem; color: #c1121f;"></p>
                         </form>
                     </div>
                 </div>
@@ -6316,6 +6342,7 @@
 
         document.getElementById('btnEditar').addEventListener('click', async function() {
             window.crudFormEditUnlocked = true;
+            window.dispatchEvent(new Event('crudFormEditUnlockedChange'));
             const lockResource = document.getElementById('erp-lock-resource')?.value || '';
             const lockId = document.getElementById('erp-lock-id')?.value || '';
 
@@ -6335,6 +6362,15 @@
             const fields = document.querySelectorAll('input, select, textarea');
             fields.forEach(field => {
                 field.disabled = false;
+            });
+
+            // Habilitar botones que estaban deshabilitados por la vista inicial de solo lectura.
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(button => {
+                if (button.id === 'btnEditar') {
+                    return;
+                }
+                button.disabled = false;
             });
 
             // Habilitar TomSelect específicamente (instancias y wrappers)
@@ -6838,6 +6874,7 @@
             const isIdclienteEditable = () => !editButton || editButton.style.display === 'none';
             const initialTipoValue = String(tipoSelect.value ?? '').trim();
             const initialIdValue = String(idInput.value ?? '').trim();
+            let lastTipo = initialTipoValue;
 
             // Crear botón de consulta junto al label del identificador (RUC/DNI), estilo "Crear rápido".
             let consultBtn = idContainer?.querySelector('button[data-consult-button]');
@@ -6849,7 +6886,24 @@
                 consultBtn.style.display = 'none';
                 consultBtn.setAttribute('style', 'background-color: #dc2626 !important; color: #fff !important; display: none;');
                 consultBtn.className = 'ml-1 inline-flex items-center gap-1 rounded border border-red-600 px-2 py-1 text-xs transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-opacity-50 disabled:cursor-not-allowed disabled:opacity-70';
-                consultBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35"/><circle cx="11" cy="11" r="6" /></svg><span class="ml-1">Consultar</span>';
+                consultBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35"/><circle cx="11" cy="11" r="6" /></svg>' +
+                    '<span class="ml-1 consult-text">Consultar</span>' +
+                    '<span class="ml-2 h-4 w-4 consult-spinner hidden" role="status" aria-live="polite">' +
+                    '<svg class="h-full w-full" width="25" viewBox="0 0 120 30" xmlns="http://www.w3.org/2000/svg" fill="#ffffff">' +
+                    '<circle cx="15" cy="15" r="15">' +
+                    '<animate values="15;9;15" attributeName="r" from="15" to="15" begin="0s" dur="0.8s" calcMode="linear" repeatCount="indefinite"></animate>' +
+                    '<animate values="1;.5;1" attributeName="fill-opacity" from="1" to="1" begin="0s" dur="0.8s" calcMode="linear" repeatCount="indefinite"></animate>' +
+                    '</circle>' +
+                    '<circle cx="60" cy="15" r="9" fill-opacity="0.3">' +
+                    '<animate values="9;15;9" attributeName="r" from="9" to="9" begin="0s" dur="0.8s" calcMode="linear" repeatCount="indefinite"></animate>' +
+                    '<animate values=".5;1;.5" attributeName="fill-opacity" from="0.5" to="0.5" begin="0s" dur="0.8s" calcMode="linear" repeatCount="indefinite"></animate>' +
+                    '</circle>' +
+                    '<circle cx="105" cy="15" r="15">' +
+                    '<animate values="15;9;15" attributeName="r" from="15" to="15" begin="0s" dur="0.8s" calcMode="linear" repeatCount="indefinite"></animate>' +
+                    '<animate values="1;.5;1" attributeName="fill-opacity" from="1" to="1" begin="0s" dur="0.8s" calcMode="linear" repeatCount="indefinite"></animate>' +
+                    '</circle>' +
+                    '</svg>' +
+                    '</span>';
                 // Insertar al nivel del label, conservando el asterisco y la estructura del label.
                 const labelContainer = idLabel?.querySelector(':scope > span') || idLabel;
                 if (idHelp) {
@@ -6863,15 +6917,14 @@
                     const tipo = tipoSelect.value === '1' ? 'ruc' : 'dni';
                     const valor = idInput.value.trim();
 
-                    if (!valor) {
-                        alert('Por favor, ingresa un número de documento.');
-                        return;
-                    }
-
                     consultBtn.disabled = true;
                     const btnOriginalHtml = consultBtn.innerHTML;
-                    consultBtn.innerHTML = '<span class="ml-1">Consultando...</span>';
-
+                    // Mostrar texto de 'Consultando' y el spinner (si existen los elementos), evitando innerHTML cuando sea posible
+                    const consultTextEl = consultBtn.querySelector('.consult-text');
+                    const consultSpinnerEl = consultBtn.querySelector('.consult-spinner');
+                    if (consultTextEl) consultTextEl.textContent = 'Consultando';
+                    if (consultSpinnerEl) consultSpinnerEl.classList.remove('hidden');
+                    else consultBtn.innerHTML = '<span class="ml-1">Consultando...</span>';               
                     try {
                         const response = await fetch(`/api/consultar-documento?tipo=${tipo}&valor=${valor}`);
                         const data = await response.json();
@@ -7004,14 +7057,9 @@
                                     selectDireccion.dispatchEvent(new Event('change', { bubbles: true }));
                                 }
                             }
-
-                            alert('¡Datos encontrados y autocompletados exitosamente!');
-                        } else {
-                            alert(data.message || 'No se encontraron datos para este documento.');
-                        }
+                        } 
                     } catch (error) {
                         console.error("Error en la petición:", error);
-                        alert('Error de conexión al consultar el documento.');
                     } finally {
                         consultBtn.disabled = false;
                         consultBtn.innerHTML = btnOriginalHtml;
@@ -7040,6 +7088,21 @@
 
             const updateIdclienteField = () => {
                 const tipoValue = String(tipoSelect.value ?? '').trim();
+                // Si cambió el tipo de cliente, reiniciar el valor del input
+                if (tipoValue !== lastTipo) {
+                    try {
+                        // Limpia el valor, resetea validez y dispara evento input para que cualquier mask/validator observe el cambio
+                        if (String(idInput.value || '').length > 0) {
+                            idInput.value = '';
+                            idInput.setCustomValidity('');
+                            idInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    } catch (e) {
+                        // silenciar errores de compatibilidad
+                        console.warn('Error al resetear idcliente tras cambio de tipo:', e);
+                    }
+                    lastTipo = tipoValue;
+                }
                 const hasSelection = tipoValue === '1' || tipoValue === '0';
                 const isEmpresa = tipoValue === '1';
                 const labelText = hasSelection ? (isEmpresa ? 'RUC' : 'DNI') : 'Cliente';
@@ -7082,18 +7145,29 @@
                 }
 
                 if (hasSelection) {
-                    idInput.maxLength = fieldLength;
                     if (shouldStrictValidate) {
-                        idInput.minLength = fieldLength;
+                        // Evitar excepción cuando se reduce maxLength por debajo del minlength actual:
+                        // si el nuevo fieldLength es menor que el minlength existente, primero bajar minlength,
+                        // luego aplicar maxLength. En caso contrario, aplicar maxLength primero.
+                        const currentMin = Number(idInput.minLength || 0);
+                        if (fieldLength < currentMin) {
+                            idInput.minLength = fieldLength;
+                            idInput.maxLength = fieldLength;
+                        } else {
+                            idInput.maxLength = fieldLength;
+                            idInput.minLength = fieldLength;
+                        }
                         idInput.pattern = `^[0-9]{${fieldLength}}$`;
                     } else {
+                        // No strict: permitir cualquier longitud hasta fieldLength
                         idInput.minLength = 0;
+                        idInput.maxLength = fieldLength;
                         idInput.pattern = '^[0-9]*$';
                     }
                     idInput.inputMode = 'numeric';
                 } else {
-                    idInput.maxLength = 11;
                     idInput.minLength = 0;
+                    idInput.maxLength = 11;
                     idInput.pattern = '^[0-9]{8,11}$';
                     idInput.inputMode = 'numeric';
                 }
@@ -7365,18 +7439,10 @@
                     event.preventDefault();
                     loadRelationSummary()
                         .then((summary) => {
-                            const relations = Array.isArray(summary.relations) ? summary.relations : [];
-                            if (relations.length > 0) {
-                                openRelationModal(summary);
-                                return;
-                            }
-
-                            relationConfirmationConfirmed = true;
-                            mainForm.submit();
+                            openRelationModal(summary);
                         })
                         .catch(() => {
-                            relationConfirmationConfirmed = true;
-                            mainForm.submit();
+                            openRelationModal(null);
                         });
                     return;
                 }
@@ -7431,6 +7497,12 @@
 
                 const inputNombres = nombresApellidosWrapper.querySelector('#pn_nombres');
                 const inputApellidos = nombresApellidosWrapper.querySelector('#pn_apellidos');
+                const isInitialReadOnly = !!document.getElementById('btnEditar') && window.crudFormEditUnlocked !== true;
+
+                if (isInitialReadOnly) {
+                    inputNombres.disabled = true;
+                    inputApellidos.disabled = true;
+                }
 
                 // Split existing value
                 if (razonSocialInput.value && tipoClienteSelect.value === '0') {

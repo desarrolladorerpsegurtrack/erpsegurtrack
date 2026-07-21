@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Illuminate\Support\Carbon;
+use App\Services\CorrelativoService;
 
 class ConfiguracionController extends Controller
 {
@@ -1778,9 +1779,9 @@ class ConfiguracionController extends Controller
                     'type' => 'text',
                     'label' => 'RUC',
                     'required' => true,
-                    'maxlength' => 10,
-                    'minlength' => 10,
-                    'helpText' => 'Identificador fiscal. Solo números',
+                    'maxlength' => 11,
+                    'minlength' => 11,
+                    'helpText' => 'Solo números, exactamente 11 dígitos',
                 ],
                 [
                     'name' => 'razonSocial',
@@ -1879,9 +1880,9 @@ class ConfiguracionController extends Controller
                     'type' => 'text',
                     'label' => 'RUC',
                     'required' => true,
-                    'maxlength' => 10,
-                    'minlength' => 10,
-                    'helpText' => 'Identificador fiscal. Solo números',
+                    'maxlength' => 11,
+                    'minlength' => 11,
+                    'helpText' => 'Solo números, exactamente 11 dígitos',
                 ],
                 [
                     'name' => 'razonSocial',
@@ -2542,6 +2543,426 @@ class ConfiguracionController extends Controller
         }
 
         return $this->exportPdfResponse($rows, $columns, 'Listado de Tributos', $filename);
+    }
+
+    public function paquetesIndex(Request $request): View
+    {
+        $baseQuery = DB::table('paquetes');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idpaquetes', 'like', $term)
+                    ->orWhere('nombre', 'like', $term)
+                    ->orWhere('descripcion', 'like', $term);
+            });
+        }
+
+        $items = $baseQuery
+            ->orderBy('idpaquetes')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
+
+        // Adjuntar detallepaquete (almacén + precio) a cada fila como relation_groups
+        try {
+            $pageIds = collect($items->items())->pluck('idpaquetes')->filter()->values()->all();
+                if (!empty($pageIds)) {
+                $detalles = DB::table('detallepaquete as dp')
+                    ->leftJoin('almacen as a', 'dp.almacen_idalmacen', '=', 'a.idalmacen')
+                    ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
+                    ->leftJoin('modelo as m', 'a.modelo_idmodelo', '=', 'm.idmodelo')
+                    ->leftJoin('marca as ma', 'm.marca_idmarca', '=', 'ma.idmarca')
+                    ->leftJoin('tipoelemento as te', 'a.tipoElemento_idtipoElemento', '=', 'te.idtipoElemento')
+                    ->leftJoin('plataforma as p', 'te.plataforma_idplataforma', '=', 'p.idplataforma')
+                    ->whereIn('dp.paquetes_idpaquetes', $pageIds)
+                    ->select([
+                        'dp.paquetes_idpaquetes',
+                        'dp.precio',
+                        'a.idalmacen',
+                        'a.detalle as almacen_detalle',
+                        'ep.razonSocial',
+                        'm.nombreModelo',
+                        'ma.nombreMarca',
+                        'te.nombre as tipoelemento_nombre',
+                        'te.detalle as tipoelemento_detalle',
+                        'p.nombrePlataforma',
+                    ])
+                    ->orderBy('dp.iddetallepaquete')
+                    ->get()
+                    ->groupBy('paquetes_idpaquetes');
+
+                $collection = $items->getCollection()->map(function ($row) use ($detalles) {
+                    $pk = data_get($row, 'idpaquetes');
+                    $groupRecords = [];
+                    if (isset($detalles[$pk])) {
+                        $groupRecords = collect($detalles[$pk])->map(function ($d) {
+                            $empresa = trim((string) ($d->razonSocial ?? '')) ?: 'Sin empresa';
+                            $modelo = trim((string) ($d->nombreModelo ?? '')) ?: 'Sin modelo';
+                            $marca = trim((string) ($d->nombreMarca ?? '')) ?: 'Sin marca';
+                            $tipo = trim((string) ($d->tipoelemento_nombre ?? '')) ?: 'Sin tipo';
+                            $detalle = trim((string) ($d->tipoelemento_detalle ?? '')) ?: 'Sin detalle';
+                            $plataforma = trim((string) ($d->nombrePlataforma ?? '')) ?: 'Sin plataforma';
+
+                            $isPlanServicio = preg_match('/\b(?:PLAN|SERVICIO)\b/i', $tipo) === 1 || preg_match('/\b(?:PLAN|SERVICIO)\b/i', $detalle) === 1;
+                            $label = $isPlanServicio
+                                ? sprintf('%s - %s - %s - %s', $empresa, $tipo, $detalle, $plataforma)
+                                : sprintf('%s - %s - %s - %s - %s - %s', $empresa, $modelo, $marca, $tipo, $detalle, $plataforma);
+
+                            return [
+                                'almacen_label' => $label,
+                                'precio' => is_null($d->precio) ? '-' : 'S/' . (string) $d->precio,
+                            ];
+                        })->values()->all();
+                    }
+
+                    // Para que la UI sea igual a la de Flujos, usamos el campo `history`
+                    // y definimos `historyColumns` en la vista. El layout renderiza
+                    // el panel expandible exactamente como en flujosIndex.
+                    if (!empty($groupRecords)) {
+                        $row->history = collect($groupRecords)->map(function ($r) {
+                            return (object) [
+                                'almacen_label' => $r['almacen_label'] ?? '-',
+                                'precio' => $r['precio'] ?? '-',
+                            ];
+                        })->values();
+                    }
+
+                    return $row;
+                });
+
+                $items->setCollection($collection);
+            }
+        } catch (\Throwable $e) {
+            // No fallar la lista si ocurre un problema; sólo no mostrar relaciones
+        }
+
+        return view('configuracion.paquetes.paquetes', [
+            'title' => 'Configuracion: Paquetes',
+            'singularTitle' => 'Paquete',
+            'items' => $items,
+            'columns' => [
+                ['key' => 'idpaquetes', 'label' => 'ID', 'type' => 'text'],
+                ['key' => 'nombre', 'label' => 'Nombre', 'type' => 'text'],
+                ['key' => 'descripcion', 'label' => 'Descripción', 'type' => 'text'],
+            ],
+            'exportRoutes' => [
+                'pdf' => route('modules.configuracion.paquetes.export', ['format' => 'pdf']),
+                'xlsx' => route('modules.configuracion.paquetes.export', ['format' => 'xlsx']),
+            ],
+            'stats' => [
+                ['label' => 'Total de paquetes', 'value' => (clone $baseQuery)->count()],
+            ],
+            'filters' => $this->configuracionListFilters(__FUNCTION__),
+            'historyColumns' => [
+                ['key' => 'almacen_label', 'label' => 'Almacén', 'type' => 'text'],
+                ['key' => 'precio', 'label' => 'Precio', 'type' => 'text'],
+            ],
+            'historyTitle' => 'Detalle del paquete',
+            'createRoute' => route('modules.configuracion.paquetes.create'),
+            'editRoute' => 'modules.configuracion.paquetes.edit',
+            'showRoute' => 'modules.configuracion.paquetes.edit',
+            'destroyRoute' => 'modules.configuracion.paquetes.destroy',
+            'identifierKey' => 'idpaquetes',
+            'lockResource' => 'configuracion.paquetes',
+        ]);
+    }
+
+    public function paquetesCreate(): View
+    {
+        $almacenOptions = DB::table('almacen as a')
+            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
+            ->leftJoin('modelo as m', 'a.modelo_idmodelo', '=', 'm.idmodelo')
+            ->leftJoin('marca as ma', 'm.marca_idmarca', '=', 'ma.idmarca')
+            ->leftJoin('tipoelemento as te', 'a.tipoElemento_idtipoElemento', '=', 'te.idtipoElemento')
+            ->leftJoin('plataforma as p', 'te.plataforma_idplataforma', '=', 'p.idplataforma')
+            ->select([
+                'a.idalmacen',
+                'a.detalle',
+                'ep.razonSocial',
+                'm.nombreModelo',
+                'ma.nombreMarca',
+                'te.nombre as tipoelemento_nombre',
+                'te.detalle as tipoelemento_detalle',
+                'p.nombrePlataforma',
+            ])
+            ->orderBy('ep.razonSocial')
+            ->orderBy('ma.nombreMarca')
+            ->orderBy('m.nombreModelo')
+            ->orderBy('a.detalle')
+            ->get()
+            ->map(function ($r) {
+                $empresa = trim((string) ($r->razonSocial ?? '')) ?: 'Sin empresa';
+                $modelo = trim((string) ($r->nombreModelo ?? '')) ?: 'Sin modelo';
+                $marca = trim((string) ($r->nombreMarca ?? '')) ?: 'Sin marca';
+                $tipo = trim((string) ($r->tipoelemento_nombre ?? '')) ?: 'Sin tipo';
+                $detalle = trim((string) ($r->tipoelemento_detalle ?? '')) ?: 'Sin detalle';
+                $plataforma = trim((string) ($r->nombrePlataforma ?? '')) ?: 'Sin plataforma';
+
+                $isPlanServicio = preg_match('/\b(?:PLAN|SERVICIO)\b/i', $tipo) === 1 || preg_match('/\b(?:PLAN|SERVICIO)\b/i', $detalle) === 1;
+                $label = $isPlanServicio
+                    ? sprintf('%s - %s - %s - %s', $empresa, $tipo, $detalle, $plataforma)
+                    : sprintf('%s - %s - %s - %s - %s - %s', $empresa, $modelo, $marca, $tipo, $detalle, $plataforma);
+
+                return [
+                    'value' => $r->idalmacen,
+                    'label' => $label,
+                ];
+            })->values()->all();
+
+        return view('configuracion.paquetes.paquetes-form', [
+            'title' => 'Nuevo Paquete',
+            'mode' => 'create',
+            'formAction' => route('modules.configuracion.paquetes.store'),
+            'backRoute' => route('modules.configuracion.paquetes.index'),
+            'record' => null,
+            'fields' => [
+                [
+                    'name' => 'nombre',
+                    'type' => 'text',
+                    'label' => 'Nombre',
+                    'required' => true,
+                    'maxlength' => 200,
+                    'minlength' => 2,
+                    'helpText' => 'Solo letras. Mínimo 2 caracteres.',
+                ],
+                [
+                    'name' => 'descripcion',
+                    'type' => 'text',
+                    'label' => 'Descripción',
+                    'required' => false,
+                    'maxlength' => 300,
+                    'helpText' => 'Solo letras. Mínimo 2 caracteres.',
+                ],
+            ],
+            'extraSections' => [
+                [
+                    'view' => 'configuracion.paquetes._detalle_paquete_rows',
+                    'data' => [
+                        'almacenOptions' => $almacenOptions,
+                        'detallePaquetePayload' => '[]',
+                        'readOnly' => false,
+                    ],
+                ]
+            ],
+            'readOnly' => false,
+            'almacenOptions' => $almacenOptions,
+            'detallePaquetePayload' => '[]',
+        ]);
+    }
+
+    public function paquetesStore(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'nombre' => ['required', 'string', 'min:2', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
+            'descripcion' => ['nullable', 'string', 'max:300', 'regex:' . self::SAFE_TEXT_REGEX],
+            'detalle_paquete_payload' => ['nullable'],
+        ]);
+
+        $newId = null;
+        DB::transaction(function () use ($validated, $request, &$newId) {
+            $payload = collect($validated)->only(['nombre', 'descripcion'])->all();
+            $newId = DB::table('paquetes')->insertGetId($payload);
+            $this->syncDetallePaquetePayload($request, (int) $newId);
+            $this->publishResourceEvent('configuracion.paquetes', (string) $newId, 'created');
+        });
+
+        return redirect()
+            ->route('modules.configuracion.paquetes.index')
+            ->with('success', 'Paquete creado correctamente.');
+    }
+
+    public function paquetesEdit(int $id): View|RedirectResponse
+    {
+        $record = DB::table('paquetes')->where('idpaquetes', $id)->first();
+        if (!$record) {
+            return redirect()->route('modules.configuracion.paquetes.index')->with('error', 'Registro no encontrado.');
+        }
+        $almacenOptions = DB::table('almacen as a')
+            ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
+            ->leftJoin('modelo as m', 'a.modelo_idmodelo', '=', 'm.idmodelo')
+            ->leftJoin('marca as ma', 'm.marca_idmarca', '=', 'ma.idmarca')
+            ->leftJoin('tipoelemento as te', 'a.tipoElemento_idtipoElemento', '=', 'te.idtipoElemento')
+            ->leftJoin('plataforma as p', 'te.plataforma_idplataforma', '=', 'p.idplataforma')
+            ->select([
+                'a.idalmacen',
+                'ep.razonSocial',
+                'm.nombreModelo',
+                'ma.nombreMarca',
+                'te.nombre as tipoelemento_nombre',
+                'te.detalle as tipoelemento_detalle',
+                'p.nombrePlataforma',
+            ])
+            ->orderBy('ep.razonSocial')
+            ->orderBy('ma.nombreMarca')
+            ->orderBy('m.nombreModelo')
+            ->get()
+            ->map(function ($r) {
+                $empresa = trim((string) ($r->razonSocial ?? '')) ?: 'Sin empresa';
+                $modelo = trim((string) ($r->nombreModelo ?? '')) ?: 'Sin modelo';
+                $marca = trim((string) ($r->nombreMarca ?? '')) ?: 'Sin marca';
+                $tipo = trim((string) ($r->tipoelemento_nombre ?? '')) ?: 'Sin tipo';
+                $detalle = trim((string) ($r->tipoelemento_detalle ?? '')) ?: 'Sin detalle';
+                $plataforma = trim((string) ($r->nombrePlataforma ?? '')) ?: 'Sin plataforma';
+
+                $isPlanServicio = preg_match('/\b(?:PLAN|SERVICIO)\b/i', $tipo) === 1 || preg_match('/\b(?:PLAN|SERVICIO)\b/i', $detalle) === 1;
+                $label = $isPlanServicio
+                    ? sprintf('%s - %s - %s - %s', $empresa, $tipo, $detalle, $plataforma)
+                    : sprintf('%s - %s - %s - %s - %s - %s', $empresa, $modelo, $marca, $tipo, $detalle, $plataforma);
+
+                return [
+                    'value' => $r->idalmacen,
+                    'label' => $label,
+                ];
+            })->values()->all();
+
+        $detalleItems = $this->detailPaqueteItems($id)->map(function ($it) use ($almacenOptions) {
+            $label = collect($almacenOptions)->first(fn($o) => (string)$o['value'] === (string)$it->almacen_idalmacen)['label'] ?? ('Almacén ' . $it->almacen_idalmacen);
+            return [
+                'tempId' => (string) ($it->iddetallepaquete ?? ('tmp-' . uniqid())),
+                'almacen_idalmacen' => (int) $it->almacen_idalmacen,
+                'almacen_label' => $label,
+                'precio' => (string) $it->precio,
+            ];
+        })->values()->all();
+
+        return view('configuracion.paquetes.paquetes-form', [
+            'title' => 'Editar Paquete',
+            'mode' => 'edit',
+            'formAction' => route('modules.configuracion.paquetes.update', $id),
+            'backRoute' => route('modules.configuracion.paquetes.index'),
+            'record' => $record,
+            'fields' => [
+                [
+                    'name' => 'nombre',
+                    'type' => 'text',
+                    'label' => 'Nombre',
+                    'required' => true,
+                    'maxlength' => 200,
+                    'minlength' => 2,
+                    'helpText' => 'Solo letras. Mínimo 2 caracteres.',
+                ],
+                [
+                    'name' => 'descripcion',
+                    'type' => 'text',
+                    'label' => 'Descripción',
+                    'required' => false,
+                    'maxlength' => 300,
+                    'helpText' => 'Solo letras. Mínimo 2 caracteres.',
+                ],
+            ],
+            'extraSections' => [
+                [
+                    'view' => 'configuracion.paquetes._detalle_paquete_rows',
+                    'data' => [
+                        'almacenOptions' => $almacenOptions,
+                        'detallePaquetePayload' => json_encode($detalleItems, JSON_UNESCAPED_UNICODE),
+                        'readOnly' => true,
+                    ],
+                ]
+            ],
+            'readOnly' => true,
+            'almacenOptions' => $almacenOptions,
+            'detallePaquetePayload' => json_encode($detalleItems, JSON_UNESCAPED_UNICODE),
+        ] + $this->prepareLockViewData('configuracion.paquetes', (string) $id));
+    }
+
+    public function paquetesUpdate(Request $request, int $id): RedirectResponse
+    {
+        $exists = DB::table('paquetes')->where('idpaquetes', $id)->exists();
+        if (!$exists) {
+            return redirect()->route('modules.configuracion.paquetes.index')->with('error', 'Registro no encontrado.');
+        }
+
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.paquetes', (string) $id, 'paquete', 'modules.configuracion.paquetes.index')) {
+            return $redirect;
+        }
+
+        $validated = $request->validate([
+            'nombre' => ['required', 'string', 'min:2', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
+            'descripcion' => ['nullable', 'string', 'max:300', 'regex:' . self::SAFE_TEXT_REGEX],
+            'detalle_paquete_payload' => ['nullable'],
+        ]);
+
+        DB::transaction(function () use ($validated, $request, $id) {
+            $payload = collect($validated)->only(['nombre', 'descripcion'])->all();
+            DB::table('paquetes')->where('idpaquetes', $id)->update($payload);
+            $this->syncDetallePaquetePayload($request, $id);
+            $this->publishResourceEvent('configuracion.paquetes', (string) $id, 'updated');
+            $this->releaseLockIfOwned($request, 'configuracion.paquetes', (string) $id);
+        });
+
+        return redirect()
+            ->route('modules.configuracion.paquetes.index')
+            ->with('success', 'Paquete actualizado correctamente.');
+    }
+
+    public function paquetesDestroy(Request $request, int $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable($request, 'configuracion.paquetes', (string) $id, 'paquete', 'modules.configuracion.paquetes.index')) {
+            return $redirect;
+        }
+
+        try {
+            DB::table('paquetes')->where('idpaquetes', $id)->delete();
+            $this->publishResourceEvent('configuracion.paquetes', (string) $id, 'deleted');
+
+            return redirect()->route('modules.configuracion.paquetes.index')->with('success', 'Paquete eliminado correctamente.');
+        } catch (QueryException) {
+            return redirect()->route('modules.configuracion.paquetes.index')->with('error', 'No se puede eliminar el paquete porque tiene registros relacionados.');
+        }
+    }
+
+    public function paquetesExport(Request $request, string $format)
+    {
+        $format = strtolower($format);
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            abort(404);
+        }
+
+        $selectedIds = $request->input('selectedIds', []);
+
+        $baseQuery = DB::table('paquetes');
+        $this->applyConfiguracionListFilters($baseQuery, $request, __FUNCTION__);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query
+                    ->where('idpaquetes', 'like', $term)
+                    ->orWhere('nombre', 'like', $term)
+                    ->orWhere('descripcion', 'like', $term);
+            });
+        }
+
+        $columns = [
+            ['key' => 'idpaquetes', 'label' => 'ID'],
+            ['key' => 'nombre', 'label' => 'Nombre'],
+            ['key' => 'descripcion', 'label' => 'Descripción'],
+        ];
+
+        $filename = 'paquetes_export_' . now()->format('Ymd_His') . '.' . $format;
+
+        if (!empty($selectedIds) && is_array($selectedIds)) {
+            $rows = $baseQuery->whereIn('idpaquetes', array_values($selectedIds))->orderBy('idpaquetes')->get();
+
+            if ($format === 'xlsx') {
+                return $this->exportXlsxResponse($rows, $columns, $filename);
+            }
+
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Paquetes', $filename);
+        }
+
+        $rows = $baseQuery->orderBy('idpaquetes')->get();
+
+        if ($format === 'xlsx') {
+            return $this->exportXlsxResponse($rows, $columns, $filename);
+        }
+
+        return $this->exportPdfResponse($rows, $columns, 'Listado de Paquetes', $filename);
     }
 
     public function tecnologiasIndex(Request $request): View
@@ -3618,14 +4039,41 @@ class ConfiguracionController extends Controller
             'area' => ['nullable', 'string', 'min:1', 'max:1', 'regex:' . self::SAFE_TEXT_REGEX],
         ]);
 
+        // Resolve correlativo according to business rules
+        $requestedCorrelativo = array_key_exists('correlativo', $validated) ? ($validated['correlativo'] === null ? null : (int) $validated['correlativo']) : null;
+        $correlativoTarget = $this->resolveCorrelativoTarget($id);
+        $result = CorrelativoService::resolveCorrelativo($id, $requestedCorrelativo, $correlativoTarget['table'], $correlativoTarget['idColumn']);
+        // Ensure the final correlativo is persisted
+        $validated['correlativo'] = $result['final'];
+
         DB::table('tipodocumento')->where('idtipoDocumento', $id)->update($validated);
         $this->publishResourceEvent('configuracion.tipo_documento', (string) $id, 'updated');
 
         $this->releaseLockIfOwned($request, 'configuracion.tipo_documento', (string) $id);
 
-        return redirect()
-            ->route('modules.configuracion.tipos-documento.index')
-            ->with('success', 'Tipo de documento actualizado correctamente.');
+        $redirect = redirect()->route('modules.configuracion.tipos-documento.index');
+        if (!$result['accepted'] && $requestedCorrelativo !== null) {
+            $reason = $result['reason'] ?? 'rejected';
+            $message = 'Tipo de documento actualizado. Correlativo no modificado: ' . $reason . '.';
+            return $redirect->with('success', 'Tipo de documento actualizado correctamente.')->with('warning', $message);
+        }
+
+        return $redirect->with('success', 'Tipo de documento actualizado correctamente.');
+    }
+
+    private function resolveCorrelativoTarget(int $tipoDocumentoId): array
+    {
+        $tipo = DB::table('tipodocumento')->where('idtipoDocumento', $tipoDocumentoId)->first();
+        if (!$tipo) {
+            return ['table' => 'compras', 'idColumn' => 'idcompras'];
+        }
+
+        $detalle = trim((string) ($tipo->detalle ?? ''));
+        if (str_contains(mb_strtolower($detalle, 'UTF-8'), 'cotiz')) {
+            return ['table' => 'cotizacion', 'idColumn' => 'nroCotizacion'];
+        }
+
+        return ['table' => 'compras', 'idColumn' => 'idcompras'];
     }
 
     public function tiposDocumentoDestroy(Request $request, int $id): RedirectResponse
@@ -5379,6 +5827,81 @@ class ConfiguracionController extends Controller
             ->select(['idListaPrecio', 'nombreLista'])
             ->orderBy('nombreLista')
             ->get();
+    }
+
+    private function detailPaqueteItems(int $paqueteId)
+    {
+        return DB::table('detallepaquete')
+            ->select(['iddetallepaquete', 'paquetes_idpaquetes', 'almacen_idalmacen', 'precio'])
+            ->where('paquetes_idpaquetes', $paqueteId)
+            ->orderBy('iddetallepaquete')
+            ->get();
+    }
+
+    private function syncDetallePaquetePayload(Request $request, int $paqueteId): void
+    {
+        // Aceptamos tanto `detalle[]` (array desde formulario) como `detalle_paquete_payload` (JSON)
+        $rawDetalleArray = $request->input('detalle');
+        if (is_array($rawDetalleArray)) {
+            $payload = $rawDetalleArray;
+        } else {
+            $rawPayload = $request->input('detalle_paquete_payload', '[]');
+            $payload = is_string($rawPayload) ? json_decode($rawPayload, true) : $rawPayload;
+        }
+
+        if (!is_array($payload) || empty($payload)) {
+            DB::table('detallepaquete')->where('paquetes_idpaquetes', $paqueteId)->delete();
+            return;
+        }
+
+        $normalized = collect($payload)
+            ->filter(fn ($item) => is_array($item) || is_object($item))
+            ->map(function ($item): array {
+                $arr = is_array($item) ? $item : (array) $item;
+                return [
+                    // Usar exclusivamente el id de almacén enviado por el formulario.
+                    // NO tomar el valor de ListaPrecio_idListaPrecio como id de almacén.
+                    'almacen_idalmacen' => (int) data_get($arr, 'almacen_idalmacen', 0),
+                    'precio' => data_get($arr, 'precio', null),
+                ];
+            })
+            ->values()
+            ->all();
+
+        
+        $messages = [
+            'items.*.almacen_idalmacen.distinct' => 'El campo :attribute tiene un valor duplicado.',
+            'items.*.almacen_idalmacen.required' => 'El campo :attribute es obligatorio.',
+            'items.*.almacen_idalmacen.integer' => 'El campo :attribute debe ser un número entero.',
+            'items.*.almacen_idalmacen.exists' => 'El :attribute seleccionado no existe.',
+            'items.*.precio.required' => 'El campo precio es obligatorio.',
+            'items.*.precio.numeric' => 'El campo precio debe ser un número válido.',
+            'items.*.precio.min' => 'El campo precio debe ser como mínimo :min.',
+        ];
+
+        $customAttributes = [
+            'items.*.almacen_idalmacen' => 'almacén',
+            'items.*.precio' => 'precio',
+        ];
+
+        \Illuminate\Support\Facades\Validator::make(['items' => $normalized], [
+            'items' => ['array'],
+            'items.*.almacen_idalmacen' => ['required', 'integer', 'distinct', 'exists:almacen,idalmacen'],
+            'items.*.precio' => ['required', 'numeric', 'min:0'],
+        ], $messages, $customAttributes)->validate();
+
+        DB::transaction(function () use ($paqueteId, $normalized) {
+            DB::table('detallepaquete')->where('paquetes_idpaquetes', $paqueteId)->delete();
+
+            foreach ($normalized as $item) {
+                $newId = DB::table('detallepaquete')->insertGetId([
+                    'paquetes_idpaquetes' => $paqueteId,
+                    'almacen_idalmacen' => (int) $item['almacen_idalmacen'],
+                    'precio' => $item['precio'],
+                ]);
+                $this->publishResourceEvent('configuracion.detallepaquete', (string) $newId, 'created');
+            }
+        });
     }
 
     private function formatDateTimeForFormValue($value): ?string
@@ -7448,5 +7971,25 @@ class ConfiguracionController extends Controller
     private static function cargoLockId(int $id): string
     {
         return (string) $id;
+    }
+
+    public function getAlmacen($id)
+    {
+        $row = DB::table('almacen')->where('idalmacen', $id)->select('idalmacen as id', 'precio')->first();
+        if (!$row) {
+            return response()->json(null, 404);
+        }
+        return response()->json($row);
+    }
+
+    public function getAlmacenPrecios($id)
+    {
+        $precios = DB::table('detallelistaprecio as d')
+            ->leftJoin('listaprecio as lp', 'lp.idListaPrecio', '=', 'd.ListaPrecio_idListaPrecio')
+            ->where('d.almacen_idalmacen', $id)
+            ->select('d.precio', DB::raw('COALESCE(lp.nombreLista, "Sin lista") as lista'))
+            ->get();
+
+        return response()->json($precios);
     }
 }

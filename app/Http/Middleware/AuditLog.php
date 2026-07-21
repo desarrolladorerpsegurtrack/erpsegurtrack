@@ -127,6 +127,7 @@ class AuditLog
             'configuracion.tipo_elemento' => ['label' => 'tipo de elemento', 'table' => 'tipoelemento', 'primaryKey' => 'idtipoElemento'],
             'configuracion.tipo_documento' => ['label' => 'tipo de documento', 'table' => 'tipodocumento', 'primaryKey' => 'idtipoDocumento'],
             'configuracion.forma_pago' => ['label' => 'forma de pago', 'table' => 'formapago', 'primaryKey' => 'idformaPago'],
+            'configuracion.paquetes' => ['label' => 'paquete', 'table' => 'paquetes', 'primaryKey' => 'idpaquetes'],
             'configuracion.entidad_bancaria' => ['label' => 'entidad bancaria', 'table' => 'entidadbancaria', 'primaryKey' => 'identidadBancaria'],
             'configuracion.operador' => ['label' => 'operador', 'table' => 'operador', 'primaryKey' => 'idoperador'],
             'configuracion.tipo_vehiculo' => ['label' => 'tipo de vehículo', 'table' => 'tipovehiculo', 'primaryKey' => 'idtipoVehiculo'],

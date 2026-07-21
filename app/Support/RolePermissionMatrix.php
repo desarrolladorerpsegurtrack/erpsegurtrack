@@ -9,9 +9,15 @@ class RolePermissionMatrix
     private const PERMISSION_MODULES = [
         'inicio' => 'Inicio',
         'tickets' => 'Gestiones',
-        'personal' => 'Personal',
-        'roles' => 'Roles',
-        'usuarios' => 'Usuarios',
+        'ventas' => [
+            'label' => 'Ventas',
+            'submodules' => [
+                'ventas.planes_servicios' => 'Planes y servicios',
+                'ventas.cotizaciones' => 'Cotizaciones',
+                'ventas.personal' => 'DNI Personal',
+            ],
+        ],
+        'cuentasporcobrar' => 'Cuentas por Cobrar',
         'clientes' => [
             'label' => 'Clientes',
             'submodules' => [
@@ -23,7 +29,6 @@ class RolePermissionMatrix
                 'dispositivo_cliente' => 'Dispositivo cliente',
             ],
         ],
-        
         'lineas_chips' => [
             'label' => 'Lineas y Chips',
             'submodules' => [
@@ -33,12 +38,6 @@ class RolePermissionMatrix
                 'lineas_chips.detallesimcard' => 'Asignacion SimCard',
                 'lineas_chips.cargar_numeros' => 'Cargar números',
                 'lineas_chips.bajar_numeros' => 'Dar de Baja números',
-            ],
-        ],
-        'ventas' => [
-            'label' => 'Ventas',
-            'submodules' => [
-                'ventas.planes_servicios' => 'Planes y servicios',
             ],
         ],
         'almacen' => [
@@ -65,6 +64,7 @@ class RolePermissionMatrix
                 // Facturación módulo de configuración
                 'configuracion.certificadosunat' => 'Certificados SUNAT',
                 'configuracion.forma_pago' => 'Forma de pago',
+                'configuracion.paquetes' => 'Paquetes',
                 'configuracion.moneda' => 'Moneda',
                 'configuracion.tributo' => 'Tributo',
                 'configuracion.tipo_documento' => 'Tipo de documento',
@@ -94,6 +94,14 @@ class RolePermissionMatrix
                 
             ],
         ],
+        'usuario_personal' => [
+            'label' => 'Usuario y Personal',
+            'submodules' => [
+                'personal' => 'Personal',
+                'roles' => 'Roles',
+                'usuarios' => 'Usuarios',
+            ],
+        ],
         'sistema' => [
             'label' => 'Sistema',
             'submodules' => [
@@ -112,7 +120,13 @@ class RolePermissionMatrix
         'crear' => 'Crear',
         'editar' => 'Editar',
         'eliminar' => 'Eliminar',
+        'aprobar' => 'Aprobar',
+        'anular' => 'Anular',
         'exportar' => 'Exportar',
+    ];
+
+    private const MODULES_WITH_APROBAR_ANULAR = [
+        'ventas.cotizaciones',
     ];
 
     private const MODULES_WITHOUT_EDIT = [
@@ -129,6 +143,7 @@ class RolePermissionMatrix
         'lineas_chips.cargar_numeros',
         'lineas_chips.bajar_numeros',
         'configuracion.auditoria',
+        'ventas.personal',
         'sistema.historialflujo',
     ];
 
@@ -166,6 +181,10 @@ class RolePermissionMatrix
 
         foreach (array_keys($leafModules) as $moduleKey) {
             foreach (array_keys(self::PERMISSION_ACTIONS) as $actionKey) {
+                if (in_array($actionKey, ['aprobar', 'anular'], true) && !in_array($moduleKey, self::MODULES_WITH_APROBAR_ANULAR, true)) {
+                    continue;
+                }
+
                 if (in_array($moduleKey, self::MODULES_VER_ONLY, true) && !in_array($actionKey, ['ver', 'exportar'], true)) {
                     continue;
                 }
@@ -198,6 +217,10 @@ class RolePermissionMatrix
             $action = mb_strtolower(trim((string) (is_array($permission) ? ($permission['accion'] ?? '') : ($permission->accion ?? ''))));
 
             if ($module === '' || $action === '') {
+                continue;
+            }
+
+            if (in_array($action, ['aprobar', 'anular'], true) && !in_array($module, self::MODULES_WITH_APROBAR_ANULAR, true)) {
                 continue;
             }
 
@@ -242,6 +265,10 @@ class RolePermissionMatrix
             }
 
             foreach (array_keys(self::PERMISSION_ACTIONS) as $actionKey) {
+                if (in_array($actionKey, ['aprobar', 'anular'], true) && !in_array($moduleKey, self::MODULES_WITH_APROBAR_ANULAR, true)) {
+                    continue;
+                }
+
                 if (in_array($moduleKey, self::MODULES_VER_ONLY, true) && !in_array($actionKey, ['ver', 'exportar'], true)) {
                     continue;
                 }
@@ -324,6 +351,26 @@ class RolePermissionMatrix
 
             if (!$detalleSimCardActions->contains('ver')) {
                 $errors[] = 'Para asignar permisos de Cargar números o Bajar números debes dar primero permisos de Asignación SimCard: Ver.';
+            }
+        }
+
+        $hasDniPersonal = $permissionCollection->contains(function ($permission) {
+            return ($permission['modulo'] ?? '') === 'ventas.personal';
+        });
+
+        if ($hasDniPersonal) {
+            $cotActions = $permissionCollection
+                ->filter(fn ($permission) => ($permission['modulo'] ?? '') === 'ventas.cotizaciones')
+                ->pluck('accion')
+                ->map(fn ($action) => mb_strtolower(trim((string) $action)))
+                ->unique();
+                
+            $hasCotVer = $cotActions->contains('ver');
+            $hasCotCreateOrEdit = $cotActions->contains('crear') || $cotActions->contains('editar');
+
+
+            if (!$hasCotVer || !$hasCotCreateOrEdit) {
+                $errors[] = 'Para asignar permisos de DNI Personal debes dar primero permisos de Cotizaciones: Ver y Crear o Editar.';
             }
         }
 

@@ -36,7 +36,8 @@ class RolesService
         $query = $this->applyFilters($this->buildBaseQuery(), $this->extractFilters($request));
 
         return $query
-            ->orderByDesc('r.idrol')
+            ->orderByRaw("CASE WHEN r.estado = '1' THEN 0 ELSE 1 END")
+            ->orderByDesc('r.fechaCreacion')
             ->paginate($perPage)
             ->withQueryString();
     }

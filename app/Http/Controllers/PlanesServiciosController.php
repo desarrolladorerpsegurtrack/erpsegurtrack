@@ -11,6 +11,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use Illuminate\Support\Facades\Validator;
 
 class PlanesServiciosController extends Controller
 {
@@ -41,9 +42,10 @@ class PlanesServiciosController extends Controller
         $stats = [
             'total' => (clone $statsQuery)->count('a.idalmacen'),
             'empresaPropietaria_RUC' => (clone $statsQuery)->distinct('a.empresaPropietaria_RUC')->count('a.empresaPropietaria_RUC'),
+            'renovacion' => (clone $statsQuery)->where('a.renovacion', 1)->count('a.idalmacen'),
         ];
 
-        return view('ventas.planes-servicios.index', [
+        return view('ventas.planes-servicios.planesservicio', [
             'title' => 'Planes y servicios',
             'singularTitle' => 'Plan o servicio',
             'items' => $items,
@@ -66,6 +68,7 @@ class PlanesServiciosController extends Controller
             'stats' => [
                 ['label' => 'Total registros', 'value' => $stats['total']],
                 ['label' => 'Empresas', 'value' => $stats['empresaPropietaria_RUC']],
+                ['label' => 'Total de renovaciones', 'value' => $stats['renovacion'] ?? 0],
             ],
             'filters' => [
                 [
@@ -151,7 +154,7 @@ class PlanesServiciosController extends Controller
 
     public function create(): View
     {
-        return view('ventas.planes-servicios.form', [
+        return view('ventas.planes-servicios.planesservicio-form', [
             'title' => 'Nuevo plan o servicio',
             'moduleTitle' => 'Planes y servicios',
             'mode' => 'create',
@@ -169,9 +172,10 @@ class PlanesServiciosController extends Controller
         $payload = $this->preparePayload($validated);
 
         $newId = null;
-        DB::transaction(function () use ($payload, &$newId): void {
+        DB::transaction(function () use ($payload, &$newId, $request): void {
             $newId = DB::table('almacen')->insertGetId($payload);
             $this->publishResourceEvent(self::LOCK_RESOURCE, (string) $newId, 'created');
+            $this->syncDetalleListaPrecioPayload($request, (int) $newId);
         });
 
         return redirect()
@@ -189,7 +193,7 @@ class PlanesServiciosController extends Controller
                 ->with('error', 'No se encontro el registro solicitado.');
         }
 
-        return view('ventas.planes-servicios.form', [
+        return view('ventas.planes-servicios.planesservicio-form', [
             'title' => 'Editar plan o servicio',
             'moduleTitle' => 'Planes y servicios',
             'mode' => 'edit',
@@ -221,6 +225,7 @@ class PlanesServiciosController extends Controller
         DB::transaction(function () use ($payload, $request, $id): void {
             DB::table('almacen')->where('idalmacen', $id)->update($payload);
             $this->publishResourceEvent(self::LOCK_RESOURCE, (string) $id, 'updated');
+            $this->syncDetalleListaPrecioPayload($request, $id);
             $this->releaseLockIfOwned($request, self::LOCK_RESOURCE, (string) $id);
         });
 
@@ -280,7 +285,7 @@ class PlanesServiciosController extends Controller
                 DB::raw("CONCAT(COALESCE(a.empresaPropietaria_RUC, ''), ' - ', COALESCE(ep.razonSocial, 'Sin razón social')) as empresa_label"),
                 DB::raw("COALESCE(m.nombreModelo, 'Sin modelo') as modelo_label"),
                 DB::raw("COALESCE(ma.nombreMarca, 'Sin marca') as marca_label"),
-                DB::raw("COALESCE(NULLIF(TRIM(CONCAT_WS('-', COALESCE(te.nombre, ''), NULLIF(TRIM(COALESCE(te.detalle, '')), ''), NULLIF(TRIM(COALESCE(p.nombrePlataforma, '')), ''))), ''), 'Sin tipo') as tipo_elemento_label"),
+                DB::raw("COALESCE(te.nombre, 'Sin tipo') as tipo_elemento_label"),
                 DB::raw("COALESCE(tg.nombreTecnologia, 'Sin tecnología') as tecnologia_label"),
                 DB::raw("COALESCE(um.nomenclatura, 'Sin unidad') as unidad_medida_label")
             );
@@ -368,6 +373,24 @@ class PlanesServiciosController extends Controller
                 'required' => true,
                 'step' => '0.01',
                 'min' => '0',
+                'helpText' => 'Precio del elemento en el almacén.',
+                'quickCreateDetalleListaPrecio' => true,
+                'quickCreateDetalleListaPrecioPayloadInput' => 'detalle_lista_precio_payload',
+                'quickCreateDetalleListaPrecioOptions' => $this->listaprecioOptions(),
+                'quickCreateDetalleListaPrecioAlmacenId' => $almacenId,
+                'quickCreateDetalleListaPrecioAlmacenLabel' => $almacenId !== null
+                    ? 'Almacén #' . $almacenId
+                    : 'Se asignará automáticamente al guardar el registro.',
+                'quickCreateDetalleListaPrecioExisting' => $almacenId !== null ? $this->detailListaPrecioItems($almacenId)->map(function ($row): array {
+                    return [
+                        'id' => (string) data_get($row, 'iddetalleListaPrecio', ''),
+                        'almacen_idalmacen' => (string) data_get($row, 'almacen_idalmacen', ''),
+                        'ListaPrecio_idListaPrecio' => (string) data_get($row, 'ListaPrecio_idListaPrecio', ''),
+                        'listaprecio_nombre' => (string) data_get($row, 'listaprecio_nombre', ''),
+                        'precio' => (string) data_get($row, 'precio', ''),
+                        'label' => trim((string) data_get($row, 'listaprecio_nombre', '') . ' - S/ ' . number_format((float) data_get($row, 'precio', 0), 2, ',', '.')),
+                    ];
+                })->all() : [],
             ],
             [
                 'name' => 'renovacion',
@@ -439,6 +462,22 @@ class PlanesServiciosController extends Controller
             ]);
     }
 
+    private function listaprecioOptions(): Collection
+    {
+        return DB::table('listaprecio as lp')
+            ->orderBy('lp.nombreLista')
+            ->orderBy('lp.idListaPrecio')
+            ->get()
+            ->map(function ($row): array {
+                $nombre = trim((string) ($row->nombreLista ?? ''));
+
+                return [
+                    'value' => (string) $row->idListaPrecio,
+                    'label' => trim((string)($nombre !== '' ? $nombre : 'Sin nombre')),
+                ];
+            });
+    }
+
     private function tipoElementoOptions(): Collection
     {
         return DB::table('tipoelemento as te')
@@ -508,5 +547,63 @@ class PlanesServiciosController extends Controller
         }
 
         return 'S/ ' . number_format((float) $value, 2, ',', '.');
+    }
+
+    private function detailListaPrecioItems(int $almacenId): Collection
+    {
+        return DB::table('detallelistaprecio as d')
+            ->leftJoin('listaprecio as lp', 'lp.idListaPrecio', '=', 'd.ListaPrecio_idListaPrecio')
+            ->select([
+                'd.iddetalleListaPrecio',
+                'd.almacen_idalmacen',
+                'd.ListaPrecio_idListaPrecio',
+                'd.precio',
+                DB::raw('COALESCE(lp.nombreLista, "") as listaprecio_nombre'),
+            ])
+            ->where('d.almacen_idalmacen', $almacenId)
+            ->orderBy('d.iddetalleListaPrecio')
+            ->get();
+    }
+
+    private function syncDetalleListaPrecioPayload(Request $request, int $almacenId): void
+    {
+        $rawPayload = $request->input('detalle_lista_precio_payload', '[]');
+        $payload = is_string($rawPayload) ? json_decode($rawPayload, true) : $rawPayload;
+
+        if (!is_array($payload) || $payload === []) {
+            return;
+        }
+
+        $normalized = collect($payload)
+            ->filter(fn ($item) => is_array($item))
+            ->map(function (array $item): array {
+                return [
+                    'ListaPrecio_idListaPrecio' => (int) data_get($item, 'ListaPrecio_idListaPrecio', data_get($item, 'listaprecio_id', 0)),
+                    'precio' => data_get($item, 'precio', null),
+                ];
+            })
+            ->values()
+            ->all();
+
+        Validator::make(['items' => $normalized], [
+            'items' => ['array'],
+            'items.*.ListaPrecio_idListaPrecio' => ['required', 'integer', 'exists:listaprecio,idListaPrecio'],
+            'items.*.precio' => ['required', 'numeric', 'min:0'],
+        ])->validate();
+
+        DB::transaction(function () use ($almacenId, $normalized): void {
+            DB::table('detallelistaprecio')
+                ->where('almacen_idalmacen', $almacenId)
+                ->delete();
+
+            foreach ($normalized as $item) {
+                $newId = DB::table('detallelistaprecio')->insertGetId([
+                    'almacen_idalmacen' => $almacenId,
+                    'ListaPrecio_idListaPrecio' => (int) $item['ListaPrecio_idListaPrecio'],
+                    'precio' => $item['precio'],
+                ]);
+                $this->publishResourceEvent('configuracion.detalle_lista_precio', (string) $newId, 'created');
+            }
+        });
     }
 }

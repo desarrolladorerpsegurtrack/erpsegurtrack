@@ -22,6 +22,7 @@ class ErpPermissionRouteResolutionTest extends TestCase
             'modules.vehiculos.index' => 'vehiculos',
             'modules.dispositivo-cliente.index' => 'dispositivo_cliente',
             'modules.vehiculos.edit' => 'vehiculos',
+            'modules.cuentasporcobrar.index' => 'cuentasporcobrar',
             'modules.servicio-cliente.index' => 'servicio_cliente',
             'modules.servicio-cliente.export' => 'servicio_cliente',
             'modules.configuracion.estados.index' => 'configuracion.estado',
@@ -31,6 +32,8 @@ class ErpPermissionRouteResolutionTest extends TestCase
             'modules.configuracion.auditoria.index' => 'configuracion.auditoria',
             'modules.configuracion' => 'configuracion',
             'modules.ventas' => 'ventas.planes_servicios',
+            'modules.ventas.cotizaciones.index' => 'ventas.cotizaciones',
+            'modules.ventas.cotizaciones.crear' => 'ventas.cotizaciones',
         ];
 
         foreach ($cases as $routeName => $expectedPermissionKey) {
@@ -61,6 +64,15 @@ class ErpPermissionRouteResolutionTest extends TestCase
     {
         $this->assertSame('clientes.credenciales', ErpPermission::normalizePermissionKey('clientes.credenciales'));
         $this->assertSame('clientes.credenciales', ErpPermission::normalizePermissionKey('clientes.credencial'));
+    }
+
+    public function test_normalizes_cuentasporcobrar_permission_key(): void
+    {
+        $this->assertSame('cuentasporcobrar', ErpPermission::normalizePermissionKey('cuentasporcobrar'));
+        $this->assertSame('cuentasporcobrar', ErpPermission::normalizePermissionKey('cuentas-por-cobrar'));
+        $this->assertSame('cuentasporcobrar', ErpPermission::normalizePermissionKey('cuenta por cobrar'));
+        $this->assertSame('cuentasporcobrar', ErpPermission::normalizePermissionKey('cuentasporcobrar.index'));
+        $this->assertSame('cuentasporcobrar', ErpPermission::normalizePermissionKey('cuentas-por-cobrar.ver'));
     }
 
     public function test_normalizes_almacen_leaf_permission_key(): void
@@ -96,8 +108,8 @@ class ErpPermissionRouteResolutionTest extends TestCase
 
         $this->assertArrayHasKey('lineas_chips.cargar_numeros', $matrix);
         $this->assertArrayHasKey('lineas_chips.bajar_numeros', $matrix);
-        $this->assertSame(['ver' => false], $matrix['lineas_chips.cargar_numeros']);
-        $this->assertSame(['ver' => false], $matrix['lineas_chips.bajar_numeros']);
+        $this->assertSame(['ver' => false, 'exportar' => false], $matrix['lineas_chips.cargar_numeros']);
+        $this->assertSame(['ver' => false, 'exportar' => false], $matrix['lineas_chips.bajar_numeros']);
 
         $stored = [
             ['modulo' => 'lineas_chips.cargar_numeros', 'accion' => 'crear'],
@@ -106,8 +118,8 @@ class ErpPermissionRouteResolutionTest extends TestCase
         ];
 
         $mapped = \App\Support\RolePermissionMatrix::matrixFromStoredPermissions($stored);
-        $this->assertSame(['ver' => true], $mapped['lineas_chips.cargar_numeros']);
-        $this->assertSame(['ver' => false], $mapped['lineas_chips.bajar_numeros']);
+        $this->assertSame(['ver' => true, 'exportar' => false], $mapped['lineas_chips.cargar_numeros']);
+        $this->assertSame(['ver' => false, 'exportar' => false], $mapped['lineas_chips.bajar_numeros']);
     }
 
     public function test_validate_dependencies_requires_detallesimcard_ver_before_cargar_o_bajar_numeros(): void

@@ -49,6 +49,11 @@ class LineasChipsController extends Controller
             $baseQuery->where('n.estado', $estadoFilter);
         }
 
+         $numeroFilter = trim((string) $request->input('numero', ''));
+        if ($numeroFilter !== '') {
+            $baseQuery->where('n.numeroTelefonico', $numeroFilter);
+        }
+
         $simCardFilter = trim((string) $request->input('simcard', ''));
         if ($simCardFilter !== '') {
             $baseQuery->whereExists(function ($query) use ($simCardFilter) {
@@ -111,6 +116,18 @@ class LineasChipsController extends Controller
             ],
             'filters' => [
                 [
+                    'name' => 'numero',
+                    'label' => 'Numero',
+                    'type' => 'text',
+                    'placeholder' => 'Filtrar por Numero',
+                ],
+                [
+                    'name' => 'simcard',
+                    'label' => 'SimCard',
+                    'type' => 'text',
+                    'placeholder' => 'Filtrar por SimCard',
+                ],
+                [
                     'name' => 'estado',
                     'label' => 'Estado',
                     'type' => 'select',
@@ -120,12 +137,7 @@ class LineasChipsController extends Controller
                     ],
                     'placeholder' => 'Todos',
                 ],
-                [
-                    'name' => 'simcard',
-                    'label' => 'SimCard',
-                    'type' => 'text',
-                    'placeholder' => 'Filtrar por SimCard',
-                ],
+                
             ],
             'createRoute' => route('modules.lineas-chips.numeros-telefonico.create'),
             'editRoute' => 'modules.lineas-chips.numeros-telefonico.edit',
@@ -780,14 +792,6 @@ class LineasChipsController extends Controller
             ],
             'filters' => [
                 [
-                    'name' => 'estado',
-                    'label' => 'Estado',
-                    'options' => [
-                        ['value' => '1', 'label' => 'Activo'],
-                        ['value' => '0', 'label' => 'Inactivo'],
-                    ],
-                ],
-                [
                     'name' => 'idsimCard',
                     'label' => 'ID SimCard',
                     'type' => 'text',
@@ -806,6 +810,14 @@ class LineasChipsController extends Controller
                         ->map(fn ($label, $value): array => ['value' => (string) $value, 'label' => (string) $label])
                         ->values()
                         ->all(),
+                ],
+                [
+                    'name' => 'estado',
+                    'label' => 'Estado',
+                    'options' => [
+                        ['value' => '1', 'label' => 'Activo'],
+                        ['value' => '0', 'label' => 'Inactivo'],
+                    ],
                 ],
             ],
             'createRoute' => route('modules.lineas-chips.simcard.create'),
@@ -1314,7 +1326,7 @@ class LineasChipsController extends Controller
             )
             ->where('d.estado', '0')
             ->orderByRaw("CASE WHEN d.estado = '0' THEN 0 ELSE 1 END")
-            ->orderBy('d.iddetalleSimCard')
+            ->orderByDesc('d.fechaAsignacion')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
 
@@ -1757,6 +1769,16 @@ class LineasChipsController extends Controller
             });
         }
 
+        $vehiculoFilter = trim((string) $request->input('vehiculo', ''));
+        if ($vehiculoFilter !== '') {
+            $baseQuery->where('dc.vehiculo_placa', 'like', '%' . $vehiculoFilter . '%');
+        }
+
+        $clienteFilter = trim((string) $request->input('cliente', ''));
+        if ($clienteFilter !== '') {
+            $baseQuery->where('c.nombreComercial', 'like', '%' . $clienteFilter . '%');
+        }
+
         $numeroTelefonicoFilter = trim((string) $request->input('numeroTelefonico', ''));
         if ($numeroTelefonicoFilter !== '') {
             $baseQuery->where('d.numeroTelefonico_numeroTelefonico', 'like', '%' . $numeroTelefonicoFilter . '%');
@@ -1775,6 +1797,7 @@ class LineasChipsController extends Controller
                     ->where('d.iddetNumerosDispositivo', 'like', $term)
                     ->orWhere('d.dispositivoCliente_iddispositivoCliente', 'like', $term)
                     ->orWhere('dc.vehiculo_placa', 'like', $term)
+                    ->orWhere('c.nombreComercial', 'like', $term)
                     ->orWhere('d.numeroTelefonico_numeroTelefonico', 'like', $term)
                     ->orWhere('dc.marcaDispositivo', 'like', $term)
                     ->orWhere('dc.modeloDispositivo', 'like', $term);
@@ -1803,7 +1826,7 @@ class LineasChipsController extends Controller
                 'd.fechaAsignacion',
                 DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as nombre_cliente'),'n.estado',
             )
-            ->orderBy('d.iddetNumerosDispositivo')
+            ->orderBy('d.iddetNumerosDispositivo', 'desc')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
 
@@ -1888,6 +1911,18 @@ class LineasChipsController extends Controller
                     'label' => 'Dispositivo',
                     'type' => 'text',
                     'placeholder' => 'Filtrar por dispositivo o placa',
+                ],
+                [
+                    'name' => 'vehiculo',
+                    'label' => 'Vehículo',
+                    'type' => 'text',
+                    'placeholder' => 'Filtrar por vehículo',
+                ],
+                [
+                    'name' => 'cliente',
+                    'label' => 'Cliente',
+                    'type' => 'text',
+                    'placeholder' => 'Filtrar por cliente',
                 ],
                 [
                     'name' => 'numeroTelefonico',

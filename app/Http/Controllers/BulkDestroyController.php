@@ -20,6 +20,20 @@ class BulkDestroyController extends Controller
                 'redirectRoute' => 'modules.personal',
                 'label' => 'personal',
             ],
+            'modules.ventas.planes-servicios.bulk-destroy' => [
+                'table' => 'almacen',
+                'primaryKey' => 'idalmacen',
+                'lockResource' => 'ventas.planes_servicios',
+                'redirectRoute' => 'modules.ventas.planes-servicios.index',
+                'label' => 'plan o servicio',
+            ],
+            'modules.ventas.cotizaciones.bulk-destroy' => [
+                'table' => 'cotizacion',
+                'primaryKey' => 'nroCotizacion',
+                'lockResource' => 'ventas.cotizaciones',
+                'redirectRoute' => 'modules.ventas.cotizaciones.index',
+                'label' => 'cotización',
+            ],
             'modules.roles.bulk-destroy' => [
                 'table' => 'rol',
                 'primaryKey' => 'idrol',
@@ -40,6 +54,13 @@ class BulkDestroyController extends Controller
                 'lockResource' => 'servicio_cliente',
                 'redirectRoute' => 'modules.servicio-cliente',
                 'label' => 'servicio cliente',
+            ],
+            'modules.dispositivo-cliente.bulk-destroy' => [
+                'table' => 'dispositivocliente',
+                'primaryKey' => 'iddispositivoCliente',
+                'lockResource' => 'dispositivo_cliente',
+                'redirectRoute' => 'modules.dispositivo-cliente',
+                'label' => 'dispositivo cliente',
             ],
             'modules.vehiculos.bulk-destroy' => [
                 'table' => 'vehiculo',

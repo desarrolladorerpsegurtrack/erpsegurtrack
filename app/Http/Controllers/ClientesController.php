@@ -140,7 +140,7 @@ class ClientesController extends Controller
         return $this->exportPdfResponse($rows, $columns, 'Listado de Clientes', $filename);
     }
 
-    public function create(): View
+    public function create(Request $request): View
     {
         $estados = $this->clienteService->getEstados();
         $direcciones = $this->clienteService->getDirecciones();
@@ -160,6 +160,7 @@ class ClientesController extends Controller
             'readOnly' => false,
             'formAction' => route('modules.clientes.store'),
             'backRoute' => route('modules.clientes'),
+            'return_route' => $request->query('return_route'),
             'record' => null,
             'canSeeCredencialesField' => $canSeeCredencialesField,
             'fields' => [
@@ -419,6 +420,8 @@ class ClientesController extends Controller
             'idcliente.unique' => 'El cliente ya está registrado.',
             'idcliente.digits' => 'El cliente debe tener 8 dígitos si es persona natural o 11 si es empresa.',
             'rubro.max' => 'El rubro no debe tener más de 50 caracteres.',
+            'direccionCliente_iddireccionCliente' => 'La dirección seleccionada no es válida.',
+            'direc'
         ]);
 
         $grupoId = $validated['grupoCliente_idgrupoCliente'] ?? null;
@@ -465,6 +468,14 @@ class ClientesController extends Controller
                 $this->clienteService->syncClientContact($validated['idcliente'], $selectedContactId);
             }
         });
+
+        $returnRoute = $request->input('return_route');
+        if ($returnRoute === 'modules.ventas.cotizaciones.create') {
+            return redirect()
+                ->route($returnRoute, ['cliente_idcliente' => $validated['idcliente']])
+                ->with('success', 'Cliente creado correctamente.');
+        }
+
         return redirect()
             ->route('modules.clientes')
             ->with('success', 'Cliente creado correctamente.');
@@ -1204,6 +1215,8 @@ class ClientesController extends Controller
             'direccion' => ['required', 'string', 'min:5', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
             'linkUbicacion' => ['nullable', 'url', 'max:300'],
             'ubigeo_idubigeo' => ['required', 'integer', 'exists:ubigeo,idubigeo'],
+        ], [
+            'linkUbicacion.url' => "El campo 'Link ubicación' debe ser una URL válida (p. ej. https://www.google.com/maps/...).",
         ]);
 
         $newId = DB::transaction(function () use ($validated, $cliente) {
@@ -1263,6 +1276,8 @@ class ClientesController extends Controller
             'direccion' => ['required', 'string', 'min:5', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
             'linkUbicacion' => ['nullable', 'url', 'max:300'],
             'ubigeo_idubigeo' => ['required', 'integer', 'exists:ubigeo,idubigeo'],
+        ], [
+            'linkUbicacion.url' => "El campo 'Link ubicación' debe ser una URL válida (p. ej. https://www.google.com/maps/...).",
         ]);
 
         DB::table('direccioncliente')

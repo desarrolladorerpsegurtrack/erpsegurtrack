@@ -139,7 +139,7 @@ trait ExportableList
             $headerCell = $columnLetter . $headerRow;
             $sheet->getStyle($headerCell)->getFont()->setBold(true);
             $sheet->getStyle($headerCell)->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)->getStartColor()->setARGB('FFF2F2F2');
-            $sheet->getStyle($headerCell)->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_LEFT);
+            $sheet->getStyle($headerCell)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
             $sheet->getStyle($headerCell)->getBorders()->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
 
             // Wrap text for data rows if requested

@@ -129,12 +129,11 @@
                 <!-- NIVEL 1: SERVICIO CLIENTE -->
                 @if($hasServices)
                     <div class="level-container level-1-container">
-                        <div class="overflow-hidden rounded-xl border border-black bg-white shadow-sm">
+                        <div class="overflow-hidden rounded-md border border-black bg-white shadow-sm">
                             <div
                                 class="border-b border-black px-4 py-3 text-sm font-semibold text-slate-800 bg-slate-200 flex justify-between items-center gap-4">
                                 <span>Servicios Cliente</span>
-                                <span class="text-xs text-slate-200 font-normal">Haz clic en una fila para ver sus
-                                    vehículos</span>
+                                <span class="text-xs text-slate-200 font-normal">Haz clic en una fila para ver sus vehículos</span>
                             </div>
                             <div class="overflow-x-auto">
                                 @php
@@ -263,12 +262,11 @@
                 <!-- NIVEL 2: VEHÍCULOS -->
                 @if($hasVehicles || $hasServices)
                     <div class="level-container level-2-container hidden">
-                        <div class="overflow-hidden rounded-xl border border-black bg-white shadow-sm">
+                        <div class="overflow-hidden rounded-md border border-black bg-white shadow-sm">
                             <div
                                 class="border-b border-black px-4 py-3 text-sm font-semibold text-slate-800 bg-slate-200 flex justify-between items-center gap-4">
                                 <span class="lvl2-title-label">Vehículos del Cliente</span>
-                                <span class="text-xs text-slate-200 font-normal">Haz clic en una fila para ver sus
-                                    dispositivos</span>
+                                <span class="text-xs text-slate-200 font-normal">Haz clic en una fila para ver sus dispositivos</span>
                             </div>
                             <div class="overflow-x-auto">
                                 @php
@@ -545,7 +543,7 @@
                     $editConfig = $relationEditRoutes[$groupKey] ?? null;
                 @endphp
 
-                <div class="overflow-hidden rounded-xl border border-black bg-white shadow-sm">
+                <div class="overflow-hidden rounded-md border border-black bg-white shadow-sm">
                     <div class="border-b border-black px-4 py-3 text-sm font-semibold text-slate-800 bg-slate-200">
                         {{ $relationGroup['label'] ?? 'Relación' }}
                     </div>

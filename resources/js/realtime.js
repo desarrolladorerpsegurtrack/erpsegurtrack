@@ -93,9 +93,100 @@ window.ERPRealtime = {
                     return;
                 }
 
+
                 if (payload?.resource === 'user' && payload?.id === this.currentUser) {
                     this.notify('Tus permisos han sido actualizados. Se recargará la aplicación para aplicar los cambios.', 'info');
                     window.location.href = '/';
+                    return;
+                }
+
+                // Notificaciones dirigidas al usuario (por ejemplo: nueva gestión asignada, pero enviada globalmente)
+                const isNotificationForUser = payload?.type === 'resource.changed' && payload?.resource === 'notification' && payload?.id === this.currentUser;
+                // Notificaciones dirigidas a la vista (por ejemplo: nueva gestión asignada enviada a la vista)
+                const isNotificationForVista = payload?.type === 'resource.changed' && payload?.resource === 'vista' && payload?.action === 'ticket.assigned';
+
+                if (isNotificationForUser || isNotificationForVista) {
+                    const message = (payload.meta && payload.meta.message) ? payload.meta.message : 'Tienes una nueva gestión para atender.';
+                    const url = payload.meta && payload.meta.url ? payload.meta.url : null;
+
+                    // Log para depuración rápida en consola
+                    console.info('[Realtime] notification payload received:', payload);
+
+                    // Intentar usar plantilla HTML oculta si existe (nueva plantilla `notification-template`)
+                    const template = document.getElementById('notification-template');
+                    if (template && typeof Toastify === 'function') {
+                        try {
+                            const wrapper = template.cloneNode(true);
+                            // Usar el nodo principal copiado para preservar la estructura completa.
+                            const node = wrapper.firstElementChild || wrapper;
+                            node.id = '';
+                            node.classList.remove('hidden');
+
+                            // Actualizar texto y enlace si existen elementos esperados
+                            const textEl = node.querySelector('#notification-template-text');
+                            if (textEl) {
+                                textEl.textContent = message;
+                                textEl.id = '';
+                            }
+                            const actionEl = node.querySelector('#notification-template-action');
+                            if (actionEl) {
+                                const defaultUrl = actionEl.dataset.defaultUrl || '/';
+                                const targetUrl = url || defaultUrl;
+                                actionEl.textContent = 'Atenderlo';
+                                actionEl.setAttribute('href', targetUrl);
+                                actionEl.addEventListener('click', function (e) {
+                                    e.preventDefault();
+                                    window.location.href = targetUrl;
+                                });
+                                actionEl.id = '';
+                            }
+
+                            // Mostrar Toastify como sticky (duration -1) y con Close (X)
+                            Toastify({
+                                node: node,
+                                duration: -1,
+                                close: true,
+                                gravity: 'top',
+                                style: {
+                                    background: "#ffffff",
+                                    color: "#1e293b",
+                                },
+                                position: 'right',
+                                stopOnFocus: true,
+                                onClick: function () {},
+                            }).showToast();
+                        } catch (e) {
+                            console.warn('[Realtime] error showing template notification', e);
+                        }
+                        return;
+                    }
+
+                    // Fallback textual si no hay plantilla o Toastify
+                    if (typeof Toastify === 'function') {
+                        Toastify({
+                            text: message,
+                            duration: -1,
+                            close: true,
+                            gravity: 'top',
+                            position: 'right',
+                            stopOnFocus: true,
+                            onClick: function () {
+                                if (url) {
+                                    window.location.href = url;
+                                }
+                            }
+                        }).showToast();
+                    } else {
+                        // Último recurso: alert/confirm
+                        if (url) {
+                            if (confirm(message + '\nAbrir la gestión ahora?')) {
+                                window.location.href = url;
+                            }
+                        } else {
+                            alert(message);
+                        }
+                    }
+
                     return;
                 }
 
@@ -248,6 +339,21 @@ window.ERPRealtime = {
         }
 
         this.subscribeResource('user', this.currentUser);
+        // Suscribirse además a notificaciones dirigidas al usuario
+        this.subscribeResource('notification', this.currentUser);
+
+        // Suscribirse a las vistas que el usuario tiene permitidas
+        const allowedVistasMeta = document.querySelector('meta[name="erp-allowed-vistas"]');
+        if (allowedVistasMeta) {
+            try {
+                const vistas = JSON.parse(allowedVistasMeta.content);
+                vistas.forEach(vistaId => {
+                    this.subscribeResource('vista', vistaId.toString());
+                });
+            } catch (e) {
+                console.warn('[Realtime] Error al parsear erp-allowed-vistas:', e);
+            }
+        }
     },
 
     leaveLock(resource, id) {

@@ -40,11 +40,12 @@ class DispositivoClienteController extends Controller
 
         if ($search = trim((string) $request->query('q', ''))) {
             $term = '%' . $search . '%';
-            $query->where(function ($query) use ($term) {
+            $query->where(function ($query) use ($term) {   
                 $query
                     ->where('d.iddispositivoCliente', 'like', $term)
                     ->orWhere('d.vehiculo_placa', 'like', $term)
                     ->orWhere('v.placa', 'like', $term)
+                    ->orWhere('c.nombreComercial', 'like', $term)
                     ->orWhere('d.marcaDispositivo', 'like', $term)
                     ->orWhere('d.modeloDispositivo', 'like', $term);
             });
@@ -60,6 +61,10 @@ class DispositivoClienteController extends Controller
             $query->where('d.vehiculo_placa', 'like', "%{$placa}%");
         }
 
+        if ($cliente = trim((string) $request->query('nombreComercial', ''))) {
+            $query->where('c.nombreComercial', 'like', "%{$cliente}%");
+        }
+
         if ($marca = trim((string) $request->query('marcaDispositivo', ''))) {
             $query->where('d.marcaDispositivo', 'like', "%{$marca}%");
         }
@@ -72,8 +77,10 @@ class DispositivoClienteController extends Controller
             $query->where('d.estado', $estado);
         }
 
+
         $items = $query
-            ->orderBy('d.iddispositivoCliente')
+            ->orderByRaw("CASE WHEN d.estado = '1' THEN 0 ELSE 1 END")
+            ->orderByDesc('d.fechaInstalacion')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
         // Añadir los grupos de relación (números de dispositivo) en cada fila para permitir
@@ -182,6 +189,12 @@ class DispositivoClienteController extends Controller
                     'label' => 'Vehículo',
                     'type' => 'text',
                     'placeholder' => 'Buscar placa',
+                ],
+                [
+                    'name' => 'nombreComercial',
+                    'label' => 'Cliente',
+                    'type' => 'text',
+                    'placeholder' => 'Buscar cliente',
                 ],
                 [
                     'name' => 'marcaDispositivo',

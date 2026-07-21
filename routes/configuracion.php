@@ -4,6 +4,9 @@ use App\Http\Controllers\ConfiguracionController;
 use App\Http\Controllers\BulkDestroyController;
 use Illuminate\Support\Facades\Route;
 
+Route::get('/api/almacen/{id}', [ConfiguracionController::class, 'getAlmacen'])->name('api.almacen.show');
+Route::get('/api/almacen/{id}/precios', [ConfiguracionController::class, 'getAlmacenPrecios'])->name('api.almacen.precios');
+
 Route::middleware('erp.module:configuracion')->group(function () {
     Route::get('/modulos/configuracion', [ConfiguracionController::class, 'index'])->name('modules.configuracion');
 
@@ -208,6 +211,16 @@ Route::middleware('erp.module:configuracion')->group(function () {
     Route::put('/modulos/configuracion/certificados-sunat/{id}', [ConfiguracionController::class, 'certificadosUnatUpdate'])->name('modules.configuracion.certificados-sunat.update');
     Route::delete('/modulos/configuracion/certificados-sunat/bulk-destroy', [BulkDestroyController::class, 'destroy'])->name('modules.configuracion.certificados-sunat.bulk-destroy');
     Route::delete('/modulos/configuracion/certificados-sunat/{id}', [ConfiguracionController::class, 'certificadosUnatDestroy'])->name('modules.configuracion.certificados-sunat.destroy');
+
+    Route::get('/modulos/configuracion/paquetes', [ConfiguracionController::class, 'paquetesIndex'])->name('modules.configuracion.paquetes.index');
+    Route::get('/modulos/configuracion/paquetes/export/{format}', [ConfiguracionController::class, 'paquetesExport'])->name('modules.configuracion.paquetes.export')->where('format', 'pdf|xlsx');
+    Route::post('/modulos/configuracion/paquetes/export/{format}', [ConfiguracionController::class, 'paquetesExport'])->name('modules.configuracion.paquetes.export.post')->where('format', 'pdf|xlsx');
+    Route::get('/modulos/configuracion/paquetes/crear', [ConfiguracionController::class, 'paquetesCreate'])->name('modules.configuracion.paquetes.create');
+    Route::post('/modulos/configuracion/paquetes', [ConfiguracionController::class, 'paquetesStore'])->name('modules.configuracion.paquetes.store');
+    Route::get('/modulos/configuracion/paquetes/{id}/editar', [ConfiguracionController::class, 'paquetesEdit'])->name('modules.configuracion.paquetes.edit');
+    Route::put('/modulos/configuracion/paquetes/{id}', [ConfiguracionController::class, 'paquetesUpdate'])->name('modules.configuracion.paquetes.update');
+    Route::delete('/modulos/configuracion/paquetes/bulk-destroy', [BulkDestroyController::class, 'destroy'])->name('modules.configuracion.paquetes.bulk-destroy');
+    Route::delete('/modulos/configuracion/paquetes/{id}', [ConfiguracionController::class, 'paquetesDestroy'])->name('modules.configuracion.paquetes.destroy');
 
     Route::get('/modulos/configuracion/empresapropietaria', [ConfiguracionController::class, 'empresapropietariaIndex'])->name('modules.configuracion.empresapropietaria.index');
     Route::get('/modulos/configuracion/empresapropietaria/export/{format}', [ConfiguracionController::class, 'empresapropietariaExport'])->name('modules.configuracion.empresapropietaria.export')->where('format', 'pdf|xlsx');

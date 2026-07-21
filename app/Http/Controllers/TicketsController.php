@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Permission\HandlesResourceLock;
+use App\Services\TicketsService;
 use App\Support\ResourceLock;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,6 +17,10 @@ use Illuminate\View\View;
 class TicketsController extends Controller
 {
     use HandlesResourceLock;
+
+    public function __construct(private readonly TicketsService $ticketsService)
+    {
+    }
 
     protected const SAFE_TEXT_REGEX = '/^[^;<>`]+$/u';
 
@@ -73,30 +78,9 @@ class TicketsController extends Controller
     private function resolveTicketIndexContext(Request $request): array
     {
         $authData = $request->session()->get('erp_auth', []);
-        $userRoles = collect($authData['roles'] ?? [])
-            ->map(fn ($role) => mb_strtolower(trim((string) $role)))
-            ->filter()
-            ->values();
-        $isAdmin = $userRoles->contains('admin');
-        $currentPermissions = collect($authData['permissions']['tickets'] ?? [])
-            ->map(fn ($value) => \App\Support\ErpPermission::normalizeAction((string) $value))
-            ->filter()
-            ->unique()
-            ->values();
+        $ctx = $this->ticketsService->resolveAuthContext($authData);
 
-        return [
-            'authData' => $authData,
-            'currentUser' => (string) ($authData['usuario'] ?? 'anonimo'),
-            'isAdmin' => $isAdmin,
-            'canSeeFlow' => $isAdmin || $currentPermissions->contains('ver_flujo'),
-            'canAttendTickets' => $isAdmin || $currentPermissions->contains('ver'),
-            'allowedVistaIds' => collect($authData['allowed_vistas'] ?? [])
-                ->map(fn ($id) => is_numeric($id) ? (int) $id : null)
-                ->filter(fn ($id) => $id !== null && $id > 0)
-                ->unique()
-                ->values()
-                ->all(),
-        ];
+        return array_merge($ctx, ['authData' => $authData]);
     }
 
     private function buildTicketIndexQuery(array $context)
@@ -213,7 +197,7 @@ class TicketsController extends Controller
         $row->is_locked = $lockInfo !== null;
         $row->locked_by_other = $row->is_locked && $row->lock_usuario !== null && $row->lock_usuario !== $currentUser;
 
-        $displayInfo = $this->resolveTicketListDisplayInfo($row);
+        $displayInfo = $this->ticketsService->resolveTicketListDisplayInfo($row);
         $row->usuarioReceptor = $displayInfo['receptor'];
         $row->estado_fase_texto = $displayInfo['fase_texto'];
         $row->estado_accion_texto = $displayInfo['accion_texto'];
@@ -262,7 +246,7 @@ class TicketsController extends Controller
     private function buildTicketIndexFilters($tipoOperaciones): array
     {
         return [
-            
+
             [
                 'name' => 'estado',
                 'label' => 'Estado',
@@ -270,7 +254,7 @@ class TicketsController extends Controller
                     return ['value' => $estado, 'label' => $estado];
                 }, self::ESTADOS),
                 'placeholder' => 'Todos los estados',
-            ], 
+            ],
             [
                 'name' => 'tipo_operacion',
                 'label' => 'Tipo de operacion',
@@ -345,6 +329,9 @@ class TicketsController extends Controller
         $ticketId = (int) ($validated['idticket'] ?? $ticketId);
 
         $authUser = (string) $request->session()->get('erp_auth.usuario', '');
+        $resolvedUserLabel = $this->resolveUserDisplayName($authUser, $validated['usuarioEmisor'] ?? null);
+        $validated['usuarioEmisor'] = $resolvedUserLabel;
+        $validated['usuarioReceptor'] = $validated['usuarioReceptor'] ?? null;
         $historialUser = $authUser !== ''
             ? $authUser
             : (string) ($validated['usuarioEmisor'] ?? 'anonimo');
@@ -354,6 +341,31 @@ class TicketsController extends Controller
         // Emitir evento realtime para que las listas se actualicen sin recargar.
         $this->publishResourceEvent('ticket', (string) $ticketId, 'created');
 
+        // Notificar a todos los usuarios con permiso para la primera vista del flujo
+        $flujo = $this->resolveFlujoForTicket((int) $validated['tipoOperacion_idtipoOperacion']);
+        if ($flujo) {
+            $reglas = $this->getFlujoReglas((int) $flujo->idflujo);
+            $firstRule = $reglas->first();
+            if ($firstRule) {
+                $this->publishResourceEvent('vista', (string) $firstRule->vista_idvista, 'ticket.assigned', [
+                    'message' => 'Tienes una nueva gestión para atender.',
+                    'ticketId' => (int) $ticketId,
+                    'url' => route('modules.tickets'),
+                ]);
+            }
+        }
+
+        // Si el ticket tiene un usuario receptor asignado, enviar una notificación
+        // dirigida específicamente a ese usuario para avisarle que debe atenderlo.
+        $receptor = trim((string) ($validated['usuarioReceptor'] ?? ''));
+        if ($receptor !== '') {
+            $this->publishResourceEvent('notification', $receptor, 'created', [
+                'message' => 'Tienes una nueva gestión para atender.',
+                'ticketId' => (int) $ticketId,
+                'url' => route('modules.tickets'),
+            ]);
+        }
+
         return redirect()
             ->route('modules.tickets')
             ->with('success', 'Ticket creado correctamente.');
@@ -362,24 +374,11 @@ class TicketsController extends Controller
     public function latestRow(Request $request)
     {
         $authData = $request->session()->get('erp_auth', []);
-        $userRoles = collect($authData['roles'] ?? [])
-            ->map(fn ($role) => mb_strtolower(trim((string) $role)))
-            ->filter()
-            ->values();
-        $isAdmin = $userRoles->contains('admin');
-        $currentPermissions = collect($authData['permissions']['tickets'] ?? [])
-            ->map(fn ($value) => \App\Support\ErpPermission::normalizeAction((string) $value))
-            ->filter()
-            ->unique()
-            ->values();
-        $canSeeFlow = $isAdmin || $currentPermissions->contains('ver_flujo');
-        $canAttendTickets = $isAdmin || $currentPermissions->contains('ver');
-        $allowedVistaIds = collect($authData['allowed_vistas'] ?? [])
-            ->map(fn ($id) => is_numeric($id) ? (int) $id : null)
-            ->filter(fn ($id) => $id !== null && $id > 0)
-            ->unique()
-            ->values()
-            ->all();
+        $ctx = $this->ticketsService->resolveAuthContext($authData);
+        $isAdmin = $ctx['isAdmin'];
+        $canSeeFlow = $ctx['canSeeFlow'];
+        $canAttendTickets = $ctx['canAttendTickets'];
+        $allowedVistaIds = $ctx['allowedVistaIds'];
 
         $latestHistorySubquery = DB::table('historialflujo as hf')
             ->select('hf.ticket_idticket', DB::raw('MAX(hf.idhistorialflujo) as max_historial_id'))
@@ -441,20 +440,20 @@ class TicketsController extends Controller
         $row->is_locked = $lockInfo !== null;
         $row->locked_by_other = $row->is_locked && $row->lock_usuario !== null && $row->lock_usuario !== (string) ($authData['usuario'] ?? '');
 
-        $displayInfo = $this->resolveTicketListDisplayInfo($row);
+        $displayInfo = $this->ticketsService->resolveTicketListDisplayInfo($row);
         $row->usuarioReceptor = $displayInfo['receptor'];
         $row->estado_fase_texto = $displayInfo['fase_texto'];
         $row->estado_accion_texto = $displayInfo['accion_texto'];
 
         $columns = [
-            ['key' => 'idticket', 'label' => 'Gestión', 'type' => 'text' ],
+            ['key' => 'idticket', 'label' => 'Gestión', 'type' => 'text'],
             ['key' => 'usuarioEmisor', 'label' => 'Emisor', 'type' => 'text'],
             ['key' => 'tipo_operacion', 'label' => 'Tipo de operacion', 'type' => 'text', 'wrap' => true],
             ['key' => 'usuarioReceptor', 'label' => 'Receptor', 'type' => 'text'],
             ['key' => 'estado', 'label' => 'Estado', 'type' => 'estado'],
             ['key' => 'detalle', 'label' => 'Detalle', 'type' => 'text'],
             ['key' => 'fechaHoraRegistro', 'label' => 'Registro', 'type' => 'date'],
-            ['key' => 'fechaHoraCierre', 'label' => 'Cierre', 'type' => 'date'],               
+            ['key' => 'fechaHoraCierre', 'label' => 'Cierre', 'type' => 'date'],
         ];
 
         $showActionsColumn = true;
@@ -592,11 +591,10 @@ class TicketsController extends Controller
                 'name' => 'ImagenEvidencia',
                 'type' => 'file',
                 'label' => 'Imagen / evidencia',
-                'required' => true,
+                'required' => false,
                 'fileKind' => 'file',
                 'accept' => 'image/jpeg,image/png,image/webp,application/pdf',
                 'colSpan' => 1,
-                'helpText' => 'campo imagen obligatorio',
             ],
             [
                 'name' => 'estado',
@@ -608,6 +606,31 @@ class TicketsController extends Controller
                 'value' => $record->estado ?? 'Activo',
             ],
         ];
+    }
+
+    private function resolveUserDisplayName(string $authUser, ?string $fallback = null): string
+    {
+        $authUser = trim($authUser);
+        if ($authUser === '') {
+            $authUser = trim((string) ($fallback ?? ''));
+        }
+
+        $userRow = DB::table('usuario')
+            ->where('usuario', $authUser)
+            ->first();
+
+        if ($userRow && !empty($userRow->personal_dniPersonal)) {
+            $personalRow = DB::table('personal')
+                ->where('dniPersonal', $userRow->personal_dniPersonal)
+                ->first();
+
+            $displayName = trim((string) (($personalRow->nombre ?? '') . ' ' . ($personalRow->apellido ?? '')));
+            if ($displayName !== '') {
+                return substr($displayName, 0, 50);
+            }
+        }
+
+        return substr($authUser !== '' ? $authUser : 'anonimo', 0, 50);
     }
 
     private function normalizeDateTimeInput(?string $value): ?string
@@ -683,13 +706,9 @@ class TicketsController extends Controller
     public function show(Request $request, int $ticketId): View|RedirectResponse
     {
         $authData = $request->session()->get('erp_auth', []);
-        $currentUser = (string) ($authData['usuario'] ?? 'anonimo');
-        $allowedVistaIds = collect($authData['allowed_vistas'] ?? [])
-            ->map(fn ($id) => is_numeric($id) ? (int) $id : null)
-            ->filter(fn ($id) => $id !== null && $id > 0)
-            ->unique()
-            ->values()
-            ->all();
+        $ctx = $this->ticketsService->resolveAuthContext($authData);
+        $currentUser = $ctx['currentUser'];
+        $allowedVistaIds = $ctx['allowedVistaIds'];
 
         $ticket = DB::table('ticket')
             ->where('idticket', $ticketId)
@@ -815,7 +834,9 @@ class TicketsController extends Controller
             ->where('idtipoOperacion', $ticket->tipoOperacion_idtipoOperacion)
             ->first();
 
-        return view($viewName, [
+        $extraData = $this->ticketsService->buildShowExtraData($ticket, $vistaId, $ticketId);
+
+        return view($viewName, array_merge([
             'ticket' => $ticket,
             'historial' => $historial,
             'vista' => $vista,
@@ -828,13 +849,13 @@ class TicketsController extends Controller
             'advanceUrl' => route('modules.tickets.advance', ['ticketId' => $ticketId]),
             'lockResource' => 'ticket',
             'lockId' => (string) $ticketId,
-        ]);
+        ], $extraData));
     }
 
     public function cancel(Request $request, int $ticketId): RedirectResponse
     {
         $authData = $request->session()->get('erp_auth', []);
-        $currentUser = (string) ($authData['usuario'] ?? 'anonimo');
+        $currentUser = $this->ticketsService->resolveAuthContext($authData)['currentUser'];
 
         $ticket = DB::table('ticket')
             ->where('idticket', $ticketId)
@@ -878,13 +899,9 @@ class TicketsController extends Controller
     public function advance(Request $request, int $ticketId): RedirectResponse
     {
         $authData = $request->session()->get('erp_auth', []);
-        $currentUser = (string) ($authData['usuario'] ?? 'anonimo');
-        $allowedVistaIds = collect($authData['allowed_vistas'] ?? [])
-            ->map(fn ($id) => is_numeric($id) ? (int) $id : null)
-            ->filter(fn ($id) => $id !== null && $id > 0)
-            ->unique()
-            ->values()
-            ->all();
+        $ctx = $this->ticketsService->resolveAuthContext($authData);
+        $currentUser = $ctx['currentUser'];
+        $allowedVistaIds = $ctx['allowedVistaIds'];
 
         $ticket = DB::table('ticket')
             ->where('idticket', $ticketId)
@@ -896,11 +913,12 @@ class TicketsController extends Controller
                 ->with('error', 'Ticket no encontrado.');
         }
 
-        $lockInfo = ResourceLock::status('ticket', (string) $ticketId);
-        if (!$lockInfo || ($lockInfo['usuario'] ?? '') !== $currentUser) {
+        $lockResult = ResourceLock::acquire('ticket', (string) $ticketId, $currentUser);
+        if (!$lockResult['success']) {
+            $lockedBy = $lockResult['lock']['usuario'] ?? 'otro usuario';
             return redirect()
                 ->route('modules.tickets')
-                ->with('error', 'No puedes avanzar este ticket porque no lo estás atendiendo.');
+                ->with('error', 'No puedes avanzar este ticket porque está siendo atendido por ' . $lockedBy . '.');
         }
 
         $flujo = $this->resolveFlujoForTicket((int) $ticket->tipoOperacion_idtipoOperacion);
@@ -934,11 +952,87 @@ class TicketsController extends Controller
             ? 'finish'
             : ($canAdvance ? 'next' : 'save');
 
-        if ($action !== $expectedAction) {
+        if ($action !== $expectedAction && $action !== 'back_to_3' && $action !== 'back_to_previous') {
             return redirect()
                 ->route('modules.tickets')
                 ->with('error', 'Acción no válida para el estado actual del ticket.');
         }
+
+        // --- VALIDAR IMEIs PARA VISTA 1 ---
+        if ($vistaId === 1 && in_array($action, ['next', 'save', 'finish'])) {
+            $extraData = $this->ticketsService->buildShowExtraData($ticket, $vistaId, $ticketId);
+            $equipamiento = $extraData['equipamiento'] ?? [];
+            $submittedImeis = $request->input('imeis', []);
+            $invalidImeis = [];
+            $allImeis = [];
+            $duplicateImeis = [];
+
+            foreach ($equipamiento as $item) {
+                $itemImeis = $submittedImeis[$item->iddetalleCotizacion] ?? [];
+                $availableImeis = is_array($item->availableImeis) ? $item->availableImeis : [];
+                foreach ($itemImeis as $imei) {
+                    $imei = (string) trim($imei);
+                    if ($imei === '') {
+                        continue;
+                    }
+
+                    if (!in_array($imei, $availableImeis, true)) {
+                        $invalidImeis[] = $imei;
+                    }
+
+                    if (in_array($imei, $allImeis, true)) {
+                        $duplicateImeis[] = $imei;
+                    }
+                    $allImeis[] = $imei;
+                }
+            }
+
+            if (!empty($invalidImeis) || !empty($duplicateImeis)) {
+                $messageParts = [];
+                if (!empty($invalidImeis)) {
+                    $messageParts[] = 'Uno o más IMEIs ingresados no son válidos o no pertenecen al producto: ' . implode(', ', array_unique($invalidImeis));
+                }
+                if (!empty($duplicateImeis)) {
+                    $messageParts[] = 'Hay IMEIs duplicados: ' . implode(', ', array_unique($duplicateImeis));
+                }
+
+                return redirect()->back()
+                    ->withInput()
+                    ->with('error', implode(' ', $messageParts))
+                    ->with('invalidImeis', array_unique(array_merge($invalidImeis, $duplicateImeis)));
+            }
+        }
+
+        // --- VALIDAR IMEIs PARA VISTA 3 ---
+        if ($vistaId === 3 && in_array($action, ['next', 'save', 'finish'])) {
+            $extraData = $this->ticketsService->buildShowExtraData($ticket, $vistaId, $ticketId);
+            $equipamiento = $extraData['equipamiento'] ?? [];
+            $submittedImeis = $request->input('imeis_completados', []);
+            $invalidImeis = [];
+
+            foreach ($equipamiento as $item) {
+                $itemImeis = $submittedImeis[$item->iddetalleCotizacion] ?? [];
+                $availableImeis = is_array($item->availableImeis) ? $item->availableImeis : [];
+                foreach ($itemImeis as $imei) {
+                    $imei = (string) trim($imei);
+                    if ($imei !== '' && !in_array($imei, $availableImeis, true)) {
+                        $invalidImeis[] = $imei;
+                    }
+                }
+            }
+
+            if (!empty($invalidImeis)) {
+                return redirect()->back()
+                    ->withInput()
+                    ->with('error', 'Uno o más IMEIs ingresados no son válidos o no pertenecen al producto: ' . implode(', ', $invalidImeis))
+                    ->with('invalidImeis', $invalidImeis);
+            }
+        }
+
+        // --- Persistir datos temporales en BD (fuente de verdad) según la vista ---
+        $sessionKey = 'ticket_temp_' . $ticketId;
+        $tempData = $this->ticketsService->persistTempSession($request, $vistaId, $sessionKey, $ticketId, $currentUser);
+        // --- END CUSTOM LOGIC ---
 
         DB::table('historialflujo')->insert([
             'flujoregla_idflujoregla' => (int) $currentRule->idflujoregla,
@@ -951,10 +1045,24 @@ class TicketsController extends Controller
         ]);
 
         if ($action === 'finish') {
+            // Persistir toda la información temporal en BD (pedido, detalles, órdenes, servicios)
+            $this->ticketsService->persistFinish(
+                $ticket,
+                $ticketId,
+                $tempData,
+                $currentUser,
+                fn($resource, $id, $event, $payload) => $this->publishResourceEvent($resource, $id, $event, $payload)
+            );
+
+            // Notificar actualización de almacén (persistFinish descuenta stock)
+            $this->publishResourceEvent('almacen', '*', 'updated');
+
+            // Cerrar el ticket y limpiar sesión
             DB::table('ticket')->where('idticket', $ticketId)->update([
                 'estado' => 'Resuelto',
                 'fechaHoraCierre' => now()->format('Y-m-d H:i:s'),
             ]);
+            // No usamos sesión para datos temporales; la BD es la fuente de verdad.
 
             ResourceLock::release('ticket', (string) $ticketId, $currentUser);
             $this->publishLockEvent('ticket', (string) $ticketId, $currentUser, 'released', null);
@@ -962,10 +1070,61 @@ class TicketsController extends Controller
 
             return redirect()
                 ->route('modules.tickets')
-                ->with('success', 'Ticket finalizado correctamente.');
+                ->with('success', 'Ticket finalizado y datos guardados correctamente.');
         }
 
-        if ($nextRule) {
+        if ($action === 'back_to_previous') {
+            // Preferir el id de vista actual enviado desde el formulario (evita depender únicamente del historial)
+            $currentVistaIdFromRequest = (int) $request->input('current_vista_id', 0);
+            $ruleForCurrent = null;
+            if ($currentVistaIdFromRequest > 0) {
+                $ruleForCurrent = $reglas->firstWhere('vista_idvista', $currentVistaIdFromRequest);
+            }
+
+            if (!$ruleForCurrent) {
+                $ruleForCurrent = $currentRule;
+            }
+
+            $previousRule = $this->resolvePreviousRule($ruleForCurrent, $reglas);
+
+            if (!$previousRule) {
+                ResourceLock::release('ticket', (string) $ticketId, $currentUser);
+                $this->publishLockEvent('ticket', (string) $ticketId, $currentUser, 'released', null);
+                $this->publishResourceEvent('ticket', (string) $ticketId, 'updated', ['action' => 'back']);
+
+                return redirect()
+                    ->route('modules.tickets')
+                    ->with('info', 'No existe una vista anterior válida para regresar.');
+            }
+
+            $previousVistaId = (int) $previousRule->vista_idvista;
+
+            DB::table('historialflujo')->insert([
+                'flujoregla_idflujoregla' => (int) $previousRule->idflujoregla,
+                'ticket_idticket' => (int) $ticketId,
+                'usuario_usuario' => $currentUser,
+                'vista_idvista' => $previousVistaId,
+                'detalle' => 'Regreso al paso anterior',
+                'resultado' => self::HISTORIAL_RESULT_ATENDIENDO,
+                'fechaejecucion' => now()->format('Y-m-d H:i:s'),
+            ]);
+
+            DB::table('ticket')->where('idticket', $ticketId)->update([
+                'estado' => 'En proceso',
+            ]);
+
+            $this->publishResourceEvent('ticket', (string) $ticketId, 'updated', ['action' => 'back']);
+
+            // Si el usuario NO tiene permiso para ver la vista anterior, liberamos el lock y lo mandamos al listado
+            if (!in_array($previousVistaId, $allowedVistaIds, true)) {
+                ResourceLock::release('ticket', (string) $ticketId, $currentUser);
+                $this->publishLockEvent('ticket', (string) $ticketId, $currentUser, 'released', null);
+
+                return redirect()
+                    ->route('modules.tickets')
+                    ->with('info', 'No tienes permiso para volver a la vista anterior; se devolvió al listado de gestiones.');
+            }
+        } elseif ($nextRule && $action !== 'back_to_3') {
             DB::table('historialflujo')->insert([
                 'flujoregla_idflujoregla' => (int) $nextRule->idflujoregla,
                 'ticket_idticket' => (int) $ticketId,
@@ -975,19 +1134,45 @@ class TicketsController extends Controller
                 'resultado' => $action === 'next' ? self::HISTORIAL_RESULT_ATENDIENDO : self::HISTORIAL_RESULT_PENDIENTE,
                 'fechaejecucion' => now()->format('Y-m-d H:i:s'),
             ]);
+
+            // Notificar a la siguiente vista
+            $this->publishResourceEvent('vista', (string) $nextRule->vista_idvista, 'ticket.assigned', [
+                'message' => 'Tienes una nueva gestión para atender.',
+                'url' => route('modules.tickets')
+            ]);
+        } elseif ($action === 'back_to_3') {
+            // Encontrar la regla correspondiente a la vista 3
+            $rule3 = collect($reglas)->firstWhere('vista_idvista', 3);
+            if ($rule3) {
+                DB::table('historialflujo')->insert([
+                    'flujoregla_idflujoregla' => (int) $rule3->idflujoregla,
+                    'ticket_idticket' => (int) $ticketId,
+                    'usuario_usuario' => $currentUser,
+                    'vista_idvista' => 3,
+                    'detalle' => 'Orden ' . $rule3->orden . ' (Regreso por faltante de IMEI)',
+                    'resultado' => self::HISTORIAL_RESULT_ATENDIENDO,
+                    'fechaejecucion' => now()->format('Y-m-d H:i:s'),
+                ]);
+
+                // Notificar a la vista 3
+                $this->publishResourceEvent('vista', '3', 'ticket.assigned', [
+                    'message' => 'Tienes una nueva gestión para atender.',
+                    'url' => route('modules.tickets')
+                ]);
+            }
         }
 
         DB::table('ticket')->where('idticket', $ticketId)->update([
             'estado' => 'En proceso',
         ]);
 
-        if ($action === 'next') {
+        if ($action === 'next' || $action === 'back_to_3' || $action === 'back_to_previous') {
             $lockResult = ResourceLock::acquire('ticket', (string) $ticketId, $currentUser);
             if (!empty($lockResult['lock'])) {
                 $this->publishLockEvent('ticket', (string) $ticketId, $currentUser, 'locked', $lockResult['lock']['expires_at'] ?? null);
             }
 
-            $this->publishResourceEvent('ticket', (string) $ticketId, 'updated', ['action' => 'next']);
+            $this->publishResourceEvent('ticket', (string) $ticketId, 'updated', ['action' => $action]);
 
             return redirect()
                 ->route('modules.tickets.show', ['ticketId' => $ticketId]);
@@ -1004,31 +1189,7 @@ class TicketsController extends Controller
 
     private function createInitialHistorial(int $ticketId, int $tipoOperacionId, ?string $usuario = null): void
     {
-        $flujo = $this->resolveFlujoForTicket($tipoOperacionId);
-        if (!$flujo) {
-            return;
-        }
-
-        $reglas = $this->getFlujoReglas((int) $flujo->idflujo);
-        $firstRule = $reglas->first();
-        if (!$firstRule) {
-            return;
-        }
-
-        $usuario = trim((string) $usuario);
-        if ($usuario === '') {
-            $usuario = 'anonimo';
-        }
-
-        DB::table('historialflujo')->insert([
-            'flujoregla_idflujoregla' => (int) $firstRule->idflujoregla,
-            'ticket_idticket' => (int) $ticketId,
-            'usuario_usuario' => $usuario,
-            'vista_idvista' => (int) $firstRule->vista_idvista,
-            'detalle' => 'Orden ' . $firstRule->orden,
-            'resultado' => self::HISTORIAL_RESULT_PENDIENTE,
-            'fechaejecucion' => now()->format('Y-m-d H:i:s'),
-        ]);
+        $this->ticketsService->ensureInitialHistorialForTicket($ticketId, $tipoOperacionId, $usuario);
     }
 
     private function resolveFlujoForTicket(int $tipoOperacionId): ?object
@@ -1069,10 +1230,21 @@ class TicketsController extends Controller
         return $reglas->first();
     }
 
+    private function resolvePreviousRule(object $currentRule, Collection $reglas): ?object
+    {
+        $values = $reglas->values();
+        $index = $values->search(fn($rule) => (int) $rule->idflujoregla === (int) $currentRule->idflujoregla);
+        if ($index === false || $index <= 0) {
+            return null;
+        }
+
+        return $values->get($index - 1);
+    }
+
     private function resolveNextRule(object $currentRule, Collection $reglas): ?object
     {
         $values = $reglas->values();
-        $index = $values->search(fn ($rule) => (int) $rule->idflujoregla === (int) $currentRule->idflujoregla);
+        $index = $values->search(fn($rule) => (int) $rule->idflujoregla === (int) $currentRule->idflujoregla);
         if ($index === false) {
             return null;
         }
@@ -1095,53 +1267,81 @@ class TicketsController extends Controller
         return null;
     }
 
-    private function resolveTicketListDisplayInfo(object $row): array
+    public function storeVehiculo(Request $request)
     {
-        $lockUser = trim((string) ($row->lock_usuario ?? ''));
-        $historialUser = trim((string) ($row->historial_usuario ?? ''));
-        $originalReceptor = trim((string) ($row->usuarioReceptor ?? ''));
-        $receptor = $lockUser !== ''
-            ? $lockUser
-            : ($historialUser !== '' ? $historialUser : ($originalReceptor !== '' ? $originalReceptor : '-'));
+        $request->validate([
+            'ticket_id' => 'required|integer|exists:ticket,idticket',
+            'placa' => 'required|string|max:20',
+            'cliente_idcliente' => 'required|string|max:20',
+            'tipoUnidad_idtable1' => 'nullable|exists:tipovehiculo,idtipoVehiculo',
+            'anio' => 'nullable|integer|min:1900|max:2100',
+            'marca' => 'nullable|string|max:100',
+            'modelo' => 'nullable|string|max:100',
+            'color' => 'nullable|string|max:100',
+            'tracto' => 'nullable|in:Si,No',
+        ]);
 
-        $accionTexto = null;
-        if ($lockUser !== '') {
-            $accionTexto = 'Atendiendo: ' . $lockUser;
-        } elseif ($historialUser !== '') {
-            $accionTexto = 'Último en atender: ' . $historialUser;
+        $ticketId = (int) $request->input('ticket_id');
+        $placa = strtoupper(trim($request->input('placa')));
+        $clienteId = $request->input('cliente_idcliente');
+        $tipoUnidad = $request->input('tipoUnidad_idtable1');
+        $anio = $request->input('anio');
+        $marca = $request->input('marca');
+        $modelo = $request->input('modelo');
+        $color = $request->input('color');
+        $tracto = $request->input('tracto');
+
+        $ticket = DB::table('ticket')->where('idticket', $ticketId)->first();
+        if (!$ticket) {
+            return response()->json(['success' => false, 'message' => 'Ticket no encontrado.'], 404);
         }
 
-        $faseTexto = null;
-        $estadoActual = $this->normalizeEstadoValue((string) ($row->estado ?? ''));
-        if (mb_strtolower($estadoActual) !== 'activo') {
-            $tipoOperacionId = (int) ($row->tipo_operacion_id ?? 0);
-            if ($tipoOperacionId > 0) {
-                $flujo = $this->resolveFlujoForTicket($tipoOperacionId);
-                if ($flujo) {
-                    $reglas = $this->getFlujoReglas((int) $flujo->idflujo);
-                    if ($reglas->isNotEmpty()) {
-                        $historial = (object) [
-                            'flujoregla_idflujoregla' => $row->historial_flujoregla_id ?? null,
-                            'resultado' => $row->historial_resultado ?? null,
-                            'usuario_usuario' => $row->historial_usuario ?? null,
-                            'vista_idvista' => $row->vista_actual_id ?? null,
-                        ];
-                        $currentRule = $this->resolveCurrentRule($historial, $reglas);
-                        if ($currentRule) {
-                            $phaseIndex = $reglas->search(fn ($rule) => (int) $rule->idflujoregla === (int) $currentRule->idflujoregla);
-                            if ($phaseIndex !== false) {
-                                $faseTexto = 'Fase: ' . ($phaseIndex + 1) . ' de ' . $reglas->count();
-                            }
-                        }
-                    }
-                }
+        $existe = DB::table('vehiculo')
+            ->where('placa', $placa)
+            ->where('cliente_idcliente', $clienteId)
+            ->exists();
+
+        // Leer temp_data desde BD (no usar sesión)
+        $ticketTemp = $ticket->temp_data ?? null;
+        $tempData = [];
+        if (!empty($ticketTemp)) {
+            $decodedTempData = json_decode($ticketTemp, true);
+            if (is_array($decodedTempData)) {
+                $tempData = $decodedTempData;
             }
         }
 
-        return [
-            'receptor' => $receptor,
-            'fase_texto' => $faseTexto,
-            'accion_texto' => $accionTexto,
+        $tempData['vehiculos'] = $tempData['vehiculos'] ?? [];
+        $alreadyTemp = collect($tempData['vehiculos'])->contains(function ($vehiculo) use ($placa) {
+            return trim((string) ($vehiculo['placa'] ?? '')) === $placa;
+        });
+
+        if ($existe || $alreadyTemp) {
+            return response()->json(['success' => false, 'message' => 'Esta placa ya está registrada para este cliente.']);
+        }
+
+        $newVehiculo = [
+            'placa' => $placa,
+            'cliente_idcliente' => $clienteId,
+            'tipoUnidad_idtable1' => $tipoUnidad,
+            'anio' => $anio,
+            'marca' => $marca,
+            'modelo' => $modelo,
+            'color' => $color,
+            'tracto' => $tracto,
         ];
+
+
+        $tempData['vehiculos'][] = $newVehiculo;
+
+        // Persistir en BD
+        DB::table('ticket')
+            ->where('idticket', $ticketId)
+            ->update(['temp_data' => json_encode($tempData, JSON_UNESCAPED_UNICODE)]);
+
+        return response()->json([
+            'success' => true,
+            'vehiculo' => $newVehiculo,
+        ]);
     }
 }

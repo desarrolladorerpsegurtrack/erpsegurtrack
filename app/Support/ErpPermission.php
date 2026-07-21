@@ -14,6 +14,8 @@ class ErpPermission
         ],
         'ventas' => [
             'ventas.planes_servicios',
+            'ventas.cotizaciones',
+            'ventas.personal',
         ],
         'clientes' => [
             'clientes.cliente',
@@ -50,6 +52,7 @@ class ErpPermission
             'configuracion.certificadosunat',
             'configuracion.vigencia_oferta',
             'configuracion.detalle_lista_precio',
+            'configuracion.paquetes',
         ],
         'sistema' => [
             'sistema.vista',
@@ -73,6 +76,7 @@ class ErpPermission
         'usuarios' => 'usuarios',
         'vehiculo' => 'vehiculos',
         'vehiculos' => 'vehiculos',
+        'cuentasporcobrar' => 'cuentasporcobrar',
         'dispositivo-cliente' => 'dispositivo_cliente',
         'servicio-cliente' => 'servicio_cliente',
         'servicio_cliente' => 'servicio_cliente',
@@ -102,6 +106,8 @@ class ErpPermission
         'planes-servicios' => 'ventas.planes_servicios',
         'planes_servicios' => 'ventas.planes_servicios',
         'planes servicios' => 'ventas.planes_servicios',
+        'cotizaciones' => 'ventas.cotizaciones',
+        'cotizacion' => 'ventas.cotizaciones',
         '' => 'ventas.planes_servicios',
         'index' => 'ventas.planes_servicios',
     ];
@@ -220,6 +226,8 @@ class ErpPermission
         'certificadosunat' => 'configuracion.certificadosunat',
         'vigencias-oferta' => 'configuracion.vigencia_oferta',
         'vigencias_oferta' => 'configuracion.vigencia_oferta',
+            'paquetes' => 'configuracion.paquetes',
+            'paquete' => 'configuracion.paquetes',
         'vigencia-oferta' => 'configuracion.vigencia_oferta',
         'vigencia_oferta' => 'configuracion.vigencia_oferta',
 
@@ -252,6 +260,11 @@ class ErpPermission
         ['prefix' => 'servicio-cliente', 'permission' => 'servicio_cliente'],
         ['prefix' => 'servicio_cliente', 'permission' => 'servicio_cliente'],
         ['prefix' => 'serviciocliente', 'permission' => 'servicio_cliente'],
+        ['prefix' => 'cuentasporcobrar', 'permission' => 'cuentasporcobrar'],
+        ['prefix' => 'cuentas-por-cobrar', 'permission' => 'cuentasporcobrar'],
+        ['prefix' => 'cuenta-por-cobrar', 'permission' => 'cuentasporcobrar'],
+        ['prefix' => 'cuentas por cobrar', 'permission' => 'cuentasporcobrar'],
+        ['prefix' => 'cuenta por cobrar', 'permission' => 'cuentasporcobrar'],
         ['prefix' => 'configuracion.', 'containsAny' => ['tipo_gasto', 'tipogasto', 'gasto'], 'permission' => 'configuracion.tipo_gasto'],
         ['prefix' => 'configuracion.', 'containsAny' => ['tipo_cobro', 'tipocobro', 'cobro'], 'permission' => 'configuracion.tipo_cobro'],
         ['prefix' => 'configuracion.', 'containsAny' => ['tipo_pedido', 'tipopedido', 'pedido'], 'permission' => 'configuracion.tipo_pedido'],
@@ -287,6 +300,7 @@ class ErpPermission
         ['prefix' => 'configuracion.', 'containsAny' => ['elemento_almacen', 'elementoalmacen', 'elemento-almacen', 'elemento almacen'], 'permission' => 'almacen.elemento_almacen'],
         ['prefix' => 'configuracion.', 'containsAny' => ['proveedor'], 'permission' => 'configuracion.proveedor'],
         ['prefix' => 'configuracion.', 'containsAny' => ['certificado', 'sunat'], 'permission' => 'configuracion.certificadosunat'],
+        ['prefix' => 'configuracion.', 'containsAny' => ['paquete', 'paquetes'], 'permission' => 'configuracion.paquetes'],
         ['prefix' => 'configuracion.', 'containsAny' => ['vigencia_oferta', 'vigenciaoferta', 'vigencia'], 'permission' => 'configuracion.vigencia_oferta'],
         ['prefix' => 'configuracion.', 'containsAny' => ['audit'], 'permission' => 'configuracion.auditoria'],
         ['prefix' => 'configuracion.', 'containsAny' => ['moneda'], 'permission' => 'configuracion.moneda'],
@@ -297,7 +311,7 @@ class ErpPermission
 
     public static function allPermissionKeys(): array
     {
-        $permissionKeys = ['inicio', 'personal', 'roles', 'usuarios', 'vehiculos', 'almacen', 'dispositivo_cliente', 'servicio_cliente', 'tickets'];
+        $permissionKeys = ['inicio', 'personal', 'roles', 'usuarios', 'vehiculos', 'almacen', 'dispositivo_cliente', 'servicio_cliente', 'tickets', 'cuentasporcobrar'];
 
         foreach (self::MODULE_CHILDREN as $children) {
             $permissionKeys = array_merge($permissionKeys, $children);
@@ -404,8 +418,11 @@ class ErpPermission
             'almacen' => 'almacen',
             'almacen.almacen' => 'almacen.almacen',
             'ventas' => 'ventas',
+            'cuentasporcobrar', 'cuentas-por-cobrar', 'cuenta-por-cobrar', 'cuentas por cobrar', 'cuenta por cobrar' => 'cuentasporcobrar',
             'almacen.planes_servicios', 'almacen.planes-servicios', 'almacen.planes servicios' => 'ventas.planes_servicios',
             'ventas.planes_servicios', 'ventas.planes-servicios', 'ventas.planes servicios' => 'ventas.planes_servicios',
+            'ventas.cotizaciones', 'ventas.cotizacion', 'cotizaciones', 'cotizacion' => 'ventas.cotizaciones',
+            'ventas.personal', 'ventas.dni_personal', 'ventas.dnipersonal', 'ventas.dni-personal' => 'ventas.personal',
             'almacen.nota_ingreso', 'almacen.nota-ingreso', 'almacen.nota ingreso' => 'almacen.nota_ingreso',
             'almacen.nota_salida', 'almacen.nota-salida', 'almacen.nota salida' => 'almacen.nota_salida',
             'servicio-cliente', 'servicio_cliente', 'serviciocliente' => 'servicio_cliente',
@@ -529,6 +546,8 @@ class ErpPermission
             'crear', 'create', 'store', 'new' => 'crear',
             'editar', 'edit', 'update', 'actualizar' => 'editar',
             'eliminar', 'delete', 'destroy', 'remove' => 'eliminar',
+            'aprobar', 'approve' => 'aprobar',
+            'anular', 'cancel', 'canceled', 'cancelar' => 'anular',
             'exportar', 'export', 'download', 'descargar', 'xlsx', 'pdf' => 'exportar',
             default => null,
         };
@@ -558,6 +577,14 @@ class ErpPermission
         $segments = explode('.', $routeName);
         $last = mb_strtolower((string) end($segments));
 
+        if (str_starts_with($routeNameLower, 'modules.tickets.vehiculos.')) {
+            return 'ver';
+        }
+
+        if (str_starts_with($routeNameLower, 'modules.tickets.vehiculos.')) {
+            return 'ver';
+        }
+
         if (str_starts_with($routeNameLower, 'modules.tickets.') && in_array($last, ['advance', 'cancel'], true)) {
             return 'ver';
         }
@@ -576,6 +603,14 @@ class ErpPermission
 
         if (in_array($last, ['destroy', 'eliminar-rapido'], true)) {
             return 'eliminar';
+        }
+
+        if (in_array($last, ['approve'], true)) {
+            return 'aprobar';
+        }
+
+        if (in_array($last, ['anular', 'cancel'], true)) {
+            return 'anular';
         }
 
         if (in_array($last, ['index', 'export', 'opciones', 'lock-status'], true)) {
@@ -615,6 +650,7 @@ class ErpPermission
             'almacen.almacen' => 'modules.almacen',
             'configuracion.estado' => 'modules.configuracion.estados.index',
             'sistema.vista' => 'modules.sistema.vistas.index',
+            'cuentasporcobrar' => 'modules.cuentasporcobrar',
         ];
         foreach ($moduleRouteMap as $permissionKey => $routeName) {
             $parentModule = self::permissionKeyToModule($permissionKey);

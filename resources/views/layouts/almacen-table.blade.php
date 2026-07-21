@@ -113,7 +113,7 @@
 				</div>
 				<!-- ESTADÍSTICAS -->
 				@if(!empty($stats))
-					<div class="almacen-stats-white flex flex-col p-3">
+					<div class="box box--stacked almacen-stats-white flex flex-col p-3">
 						<div class="grid grid-cols-4 gap-5">
 							@foreach($stats as $stat)
 								<div class="box col-span-4 rounded-none border border-dashed border-slate-300/80 bg-white p-5 shadow-none md:col-span-2 xl:col-span-1">
@@ -125,7 +125,7 @@
 					</div>
 				@endif
 				<!-- TABLA -->
-				<div id="list-table-wrapper" class="almacen-table-white flex w-full flex-col">
+				<div id="list-table-wrapper" class="box box--stacked almacen-table-white flex w-full flex-col">
 					<div class="p-5">
 						<form id="list-filter-form" method="GET" action="{{ url()->current() }}" class="almacen-filters-bar">
 							<div class="almacen-filters-row almacen-filters-row--top pl-1">
@@ -229,15 +229,30 @@
 																$cellValue = is_string($rawCellValue) ? preg_replace('/^\s*\d+\s*-\s*/', '', $rawCellValue) : $rawCellValue;
 																$cellValue = $cellValue ?? '-';
 															}
+															$isEmpresaCol = (($column['key'] ?? '') === 'empresa_label');
 														@endphp
-														@if($canLinkToEdit)
-															<a href="{{ route($editRoute, [data_get($row, $identifierKey ?? 'id')]) }}" class="font-medium text-slate-700 hover:text-slate-900 hover:underline @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif">
-																{{ $cellValue }}
-															</a>
+
+														@if($isEmpresaCol)
+															<div class="flex items-center gap-3">
+																@if(!empty(data_get($row, 'imagen')))
+																	<img src="{{ asset('storage/' . data_get($row, 'imagen')) }}" alt="Imagen" class="h-16 w-16 rounded-md object-cover">
+																@else
+																	<div class="flex flex-col items-center justify-center h-16 w-16 rounded-md bg-slate-100 text-slate-400 text-xs">
+																		<i data-lucide="x-square" class="h-5 w-5"></i>
+																		<span class="mt-1 text-[10px]">No Foto</span>
+																	</div>
+																@endif
+
+																<span class="font-medium @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif">{{ $cellValue }}</span>
+															</div>
 														@else
-															<span class="font-medium @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif">
-																{{ $cellValue }}
-															</span>
+															@if($canLinkToEdit)
+																<a href="{{ route($editRoute, [data_get($row, $identifierKey ?? 'id')]) }}" class="font-medium text-slate-700 hover:text-slate-900 hover:underline @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif">
+																	{{ $cellValue }}
+																</a>
+															@else
+																<span class="font-medium @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif">{{ $cellValue }}</span>
+															@endif
 														@endif
 												@endswitch
 											</td>
@@ -356,6 +371,7 @@
 			let activeDeleteForm = null;
 			let activeDeleteMode = '';
 			let relationSummaryCache = new Map();
+			let autoRefreshTimer = null;
 
 			const getWrapper = () => document.getElementById(listWrapperId);
 			const getForm = () => document.getElementById(formId);
@@ -959,6 +975,35 @@
 				fetchList(buildUrl());
 			};
 
+			window.ERPListRefresh = () => {
+				if (!form || !wrapper) {
+					init();
+				}
+				if (!form || !wrapper) {
+					return;
+				}
+				fetchList(buildUrl());
+			};
+
+			const startAutoRefresh = () => {
+				if (autoRefreshTimer) {
+					return;
+				}
+				autoRefreshTimer = setInterval(() => {
+					if (document.visibilityState === 'visible' && document.hasFocus()) {
+						window.ERPListRefresh();
+					}
+				}, 5000);
+			};
+
+			const stopAutoRefresh = () => {
+				if (!autoRefreshTimer) {
+					return;
+				}
+				clearInterval(autoRefreshTimer);
+				autoRefreshTimer = null;
+			};
+
 			const buildRelationSummaryUrl = (resource, id) => {
 				if (!relationSummaryTemplate || !resource || !id) {
 					return null;
@@ -1257,7 +1302,15 @@
 				updateSearchClearVisibility();
 				attachPaginationLinks();
 				initDeleteConfirmation();
+				startAutoRefresh();
 			};
+
+			window.addEventListener('beforeunload', stopAutoRefresh);
+			document.addEventListener('visibilitychange', () => {
+				if (document.visibilityState === 'visible') {
+					window.ERPListRefresh();
+				}
+			});
 
 			init();
 		})();
@@ -1279,9 +1332,8 @@
 		.almacen-stats-white,
 		.almacen-table-white {
 			background: #ffffff !important;
-			border-radius: 0 !important;
+			border-radius: .6rem !important;
 			box-shadow: none !important;
-			width: 100%;
 		}
 
 		.almacen-stats-white {

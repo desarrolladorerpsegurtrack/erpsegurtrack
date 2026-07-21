@@ -4,31 +4,53 @@
     <meta charset="utf-8">
     <title>Exportación Clientes</title>
     <style>
-        body { font-family: DejaVu Sans, Arial, Helvetica, sans-serif; font-size: 12px; }
-        .client-block { margin-bottom: 24px; }
-        table { border-collapse: collapse; width: 100%; margin-bottom: 8px; }
-        th, td { border: 1px solid #333; padding: 6px; text-align: left; vertical-align: top; }
-        th { background: #f4f4f4; }
-        .section-title { font-weight: bold; margin: 8px 0; }
+        body { 
+            font-family: DejaVu Sans, Arial, Helvetica, sans-serif; 
+            font-size: 12px; 
+        }
+        .client-block { 
+            margin-top: 16px;
+            margin-bottom: 30px; 
+        }
+        table { 
+            border-collapse: collapse; 
+            width: 100%; 
+            margin-bottom: 8px; 
+        }
+        th, td { 
+            border: 1px solid #333; 
+            padding: 6px; text-align: left; 
+            vertical-align: top; 
+        }
+        th { 
+            background: #f4f4f4; 
+        }
+        .section-title { 
+            font-weight: bold; margin: 8px 0; 
+        }
         .pdf-header {
             position: relative;
             padding: 12px 0 15px;
-            text-align: center;
         }
         .pdf-logo {
-            position: absolute;
+            position: relative;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 20px;
+            width: auto;
             top: 0;
             left: 0;
-            width: 100px;
-            height: auto;
+            height: 50px;
         }
-        h2 {
-            font-size: 28px;
+        h1 {
+            font-size: 24px;
             margin: 0;
             line-height: 1.2;
-            font-weight: 800;
+            font-weight: 700;
             white-space: normal;
             word-break: break-word;
+            display: inline-block;
+            vertical-align: middle;
         }
     </style>
 </head>
@@ -48,7 +70,7 @@
                 class="pdf-logo"
             >
         @endif
-        <h2>Listado de Clientes (Selección)</h2>
+        <h1>Listado de Clientes (Selección)</h1>
     </div>
 
     @foreach($groups as $group)

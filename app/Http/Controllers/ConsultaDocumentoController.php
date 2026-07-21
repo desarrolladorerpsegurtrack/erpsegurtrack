@@ -9,7 +9,7 @@ class ConsultaDocumentoController extends Controller
 {
     public function consultar(Request $request)
     {
-        // 1. Validar los datos de entrada que vienen del frontend
+        // Validar los datos de entrada que vienen del frontend
         $request->validate([
             'tipo' => 'required|in:ruc,dni',
             'valor' => 'required|string',
@@ -18,7 +18,7 @@ class ConsultaDocumentoController extends Controller
         $tipo = $request->input('tipo');
         $valor = $request->input('valor');
         
-        // 2. Obtener la API_KEY de forma segura desde el archivo .env
+        // Obtener la API_KEY de forma segura desde el archivo .env
         $apiKey = env('SEGURTRACK_API_KEY');
 
         if (empty($apiKey)) {
@@ -28,7 +28,7 @@ class ConsultaDocumentoController extends Controller
             ], 500);
         }
 
-        // 3. Preparar y realizar la petición GET a la API externa
+        // Preparar y realizar la petición GET a la API externa
         $url = "https://tools.segurtrack.com/STKsearch/apiJTI.php";
 
         try {

@@ -63,7 +63,7 @@ class LockController extends Controller
 
     protected function publishLockEvent(string $resource, string $id, string $usuario, string $action, ?string $expiresAt): void
     {
-        $wsUrl = rtrim(config('locks.ws_server_url', env('WS_SERVER_URL', 'http://127.0.0.1:6001')), '/');
+        $wsUrl = rtrim(config('locks.ws_server_url', env('WS_SERVER_URL')), '/');
 
         try {
             Http::timeout(2)->post($wsUrl . '/publish', [

@@ -71,7 +71,8 @@ class ElementoAlmacenController extends Controller
         }
 
         $items = $baseQuery
-            ->orderBy('e.imei')
+            ->orderByRaw("CASE WHEN e.estado = '1' THEN 0 ELSE 1 END")
+            ->orderByDesc('e.fechaIngreso')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
 
@@ -396,7 +397,8 @@ class ElementoAlmacenController extends Controller
         }
 
         $rows = $baseQuery
-            ->orderBy('e.imei')
+            ->orderByRaw("CASE WHEN e.estado = '1' THEN 0 ELSE 1 END")
+            ->orderByDesc('e.fechaIngreso')
             ->get();
 
         $columns = [

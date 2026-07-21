@@ -12,6 +12,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use App\Services\CorrelativoService;
 
 class AlmacenNotaSalidaController extends Controller
 {
@@ -36,7 +37,7 @@ class AlmacenNotaSalidaController extends Controller
         $items->through(function ($row) {
             $row->fecha_label = $this->formatDateTime($row->fechaRealizacion ?? null);
             $row->cantidadTotal = (int) ($row->cantidadTotal ?? 0);
-            $row->download_link = '<a href="' . route('modules.almacen.nota-salida.pdf', ['id' => $row->idcompras]) . '" class="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 hover:bg-slate-50" title="Descargar PDF"><i data-lucide="download" class="mr-1 h-4 w-4 stroke-[1.3]"></i>Descargar</a>';
+            $row->download_link = '<a href="' . route('modules.almacen.nota-salida.pdf', ['id' => $row->idcompras]) . '" class="inline-flex items-center justify-center rounded-md transition duration-200 border border-slate-300 cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none bg-white px-2 py-1 text-sm text-slate-700 hover:bg-slate-50" title="Descargar PDF"><i data-lucide="download" class="mr-1 h-4 w-4 stroke-[1.3]"></i>Descargar</a>';
             // Cargar dispositivos e IMEIs asociados para mostrar en el panel expandible
             try {
                 $deviceRows = DB::table('detallemovalmacen as dm')
@@ -79,7 +80,7 @@ class AlmacenNotaSalidaController extends Controller
             return $row;
         });
 
-        return view('almacen.nota-salida.index', [
+        return view('almacen.nota-salida.notasalida', [
             'title' => 'Nota de salida',
             'singularTitle' => 'Nota de salida',
             'items' => $items,
@@ -217,6 +218,15 @@ class AlmacenNotaSalidaController extends Controller
 
          if (!empty($selectedIds) && is_array($selectedIds)) {
             $rows = $this->baseQuery($request)->whereIn('c.idcompras', array_values($selectedIds))->orderBy('c.idcompras')->get();
+            // Formatear fecha con hora para exportación (ej. "17 jun., 2026, 15:07")
+            $rows = $rows->map(function ($r) {
+                try {
+                    $r->fechaRealizacion = $r->fechaRealizacion ? Carbon::parse($r->fechaRealizacion)->locale('es')->isoFormat('D MMM YYYY, HH:mm') : '';
+                } catch (\Exception $e) {
+                    $r->fechaRealizacion = $r->fechaRealizacion ?? '';
+                }
+                return $r;
+            });
 
             if ($format === 'xlsx') {
                 return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -227,6 +237,16 @@ class AlmacenNotaSalidaController extends Controller
 
         $rows = $this->baseQuery($request)->orderByDesc('c.fechaRealizacion')->get();
 
+        // Formatear fecha con hora para exportación (ej. "17 jun., 2026, 15:07")
+        $rows = $rows->map(function ($r) {
+            try {
+                $r->fechaRealizacion = $r->fechaRealizacion ? Carbon::parse($r->fechaRealizacion)->locale('es')->isoFormat('D MMM YYYY, HH:mm') : '';
+            } catch (\Exception $e) {
+                $r->fechaRealizacion = $r->fechaRealizacion ?? '';
+            }
+            return $r;
+        });
+
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
         }
@@ -234,18 +254,88 @@ class AlmacenNotaSalidaController extends Controller
         return $this->exportPdfResponse($rows, $columns, 'Listado de notas de salida', $filename);
     }
 
+    /**
+     * Devuelve IMEIs aleatorios (preview) disponibles para un dispositivo dado.
+     * Query params: device_id, qty
+     */
+    public function imeisPreview(Request $request)
+    {
+        $deviceId = (int) ($request->query('device_id') ?? 0);
+        $qty = (int) ($request->query('qty') ?? 1);
+        if ($deviceId <= 0 || $qty <= 0) {
+            return response()->json(['imeis' => []]);
+        }
+
+        $imeis = DB::table('elementoalmacen')
+            ->where('dispositivo_iddispositivo', $deviceId)
+            ->where('estado', 1)
+            ->inRandomOrder()
+            ->limit(min($qty, 200))
+            ->pluck('imei')
+            ->values();
+
+        return response()->json(['imeis' => $imeis]);
+    }
+
     public function create(): View
     {
-        return view('almacen.nota-salida.form', [
+        // Determinar el tipo de documento correspondiente a "Nota de salida"
+        $tipoDefault = DB::table('tipodocumento')
+            ->whereRaw("LOWER(TRIM(COALESCE(detalle, ''))) LIKE 'nota de salida%'")
+            ->orderBy('idtipoDocumento')
+            ->first();
+
+        $fields = $this->buildFields();
+
+        // Calcular preview de ID (correlativo siguiente) si hay un tipo de documento por defecto
+        $previewId = null;
+        if ($tipoDefault) {
+            $next = ((int) ($tipoDefault->correlativo ?? 0)) + 1;
+            $serie = trim((string) ($tipoDefault->serie ?? 'NS'));
+            $previewId = $serie . sprintf('%05d', $next);
+        }
+
+        // Insertar campo readonly de previsualización de ID al inicio del formulario
+        array_unshift($fields, [
+            'name' => 'idcompras_preview',
+            'type' => 'text',
+            'label' => 'ID',
+            'readonly' => true,
+            'value' => $previewId,
+        ]);
+
+        if ($tipoDefault) {
+            foreach ($fields as $idx => $f) {
+                if (($f['name'] ?? '') === 'tipoDocumento_idtipoDocumento') {
+                    $fields[$idx] = [
+                        'name' => 'tipoDocumento_idtipoDocumento',
+                        'type' => 'hidden',
+                        'value' => (int) $tipoDefault->idtipoDocumento,
+                    ];
+
+                    array_splice($fields, $idx + 1, 0, [[
+                        'name' => 'tipoDocumento_nombre',
+                        'type' => 'text',
+                        'label' => 'Tipo documento',
+                        'required' => true,
+                        'readonly' => true,
+                        'value' => trim((string) ($tipoDefault->detalle ?? 'Nota de salida')),
+                    ]]);
+
+                    break;
+                }
+            }
+        }
+
+        return view('almacen.nota-salida.notasalida-form', [
             'title' => 'Nueva nota de salida',
             'moduleTitle' => 'Nota de salida',
             'mode' => 'create',
             'formAction' => route('modules.almacen.nota-salida.store'),
             'backRoute' => route('modules.almacen.nota-salida.index'),
             'record' => null,
-            'fields' => $this->buildFields(),
+            'fields' => $fields,
             'readOnly' => false,
-            'tipoDocumentoOptions' => $this->tipoDocumentoOptions('nota de ingreso'),
             'almacenOptions' => $this->almacenOptions(),
         ]);
     }
@@ -364,13 +454,9 @@ class AlmacenNotaSalidaController extends Controller
             try {
                 DB::transaction(function () use ($validated, $imeisPerDevice, &$newId, $currentUser, $totalCount): void {
                     $tipoId = (int) ($validated['tipoDocumento_idtipoDocumento'] ?? 0);
-                    $td = DB::table('tipodocumento')->where('idtipoDocumento', $tipoId)->lockForUpdate()->first();
-                    $next = ((int) ($td->correlativo ?? 0)) + 1;
-                    $serie = trim((string) ($td->serie ?? 'NS'));
-                    $newId = $serie . sprintf('%05d', $next);
-                    if ($td) {
-                        DB::table('tipodocumento')->where('idtipoDocumento', $tipoId)->update(['correlativo' => $next]);
-                    }
+                    $alloc = CorrelativoService::allocateNext($tipoId);
+                    $next = (int) $alloc['next'];
+                    $newId = $alloc['formatted'];
                     DB::table('compras')->insert([
                         'idcompras' => $newId,
                         'usuario_usuario' => $currentUser,
@@ -478,13 +564,9 @@ class AlmacenNotaSalidaController extends Controller
         try {
             DB::transaction(function () use ($validated, $selectedImeis, &$newId, $currentUser): void {
                 $tipoId = (int) ($validated['tipoDocumento_idtipoDocumento'] ?? 0);
-                $td = DB::table('tipodocumento')->where('idtipoDocumento', $tipoId)->lockForUpdate()->first();
-                $next = ((int) ($td->correlativo ?? 0)) + 1;
-                $serie = trim((string) ($td->serie ?? 'NS'));
-                $newId = $serie . sprintf('%05d', $next);
-                if ($td) {
-                    DB::table('tipodocumento')->where('idtipoDocumento', $tipoId)->update(['correlativo' => $next]);
-                }
+                $alloc = CorrelativoService::allocateNext($tipoId);
+                $next = (int) $alloc['next'];
+                $newId = $alloc['formatted'];
                 DB::table('compras')->insert([
                     'idcompras' => $newId,
                     'usuario_usuario' => $currentUser,
@@ -525,6 +607,7 @@ class AlmacenNotaSalidaController extends Controller
                         'tipoMovimiento' => 'S',
                     ]);
                 }
+                
             });
 
             return redirect()
@@ -561,7 +644,7 @@ class AlmacenNotaSalidaController extends Controller
                 ->with('error', 'No se encontro la nota de salida solicitada.');
         }
 
-        return view('almacen.nota-salida.form', [
+        return view('almacen.nota-salida.notasalida-form', [
             'title' => 'Editar nota de salida',
             'moduleTitle' => 'Nota de salida',
             'mode' => 'edit',
@@ -712,7 +795,7 @@ class AlmacenNotaSalidaController extends Controller
 
     private function buildFields(?object $record = null): array
     {
-        // Cargar dispositivos existentes cuando es modo edición (solo lectura)
+        // Preparar datos iniciales para el partial de devices cuando haya un registro (editar)
         $devicesData = [];
         if ($record && isset($record->idcompras)) {
             $rows = DB::table('detallemovalmacen as dm')
@@ -728,16 +811,34 @@ class AlmacenNotaSalidaController extends Controller
                     $imeis = $group->pluck('imei')->all();
                     $devicesData[] = [
                         'dispositivo_iddispositivo' => (int) $deviceId,
-                        'cantidad'                 => count($imeis),
-                        'manual'                   => true,
-                        'imeis'                    => $imeis,
+                        'cantidad' => count($imeis),
+                        'manual' => true,
+                        'imeis' => $imeis,
                     ];
                 }
             }
         }
 
-        return [
-            [
+        // Si estamos en modo edición y el registro ya tiene un tipo de documento que
+        // comienza por 'Nota de salida', convertir el select en hidden + campo readonly
+        if ($record && isset($record->tipoDocumento_nombre) && str_starts_with(mb_strtolower(trim((string) $record->tipoDocumento_nombre)), 'nota de salida')) {
+            $tipoField = [
+                [
+                    'name' => 'tipoDocumento_idtipoDocumento',
+                    'type' => 'hidden',
+                    'value' => (int) ($record->tipoDocumento_idtipoDocumento ?? 0),
+                ],
+                [
+                    'name' => 'tipoDocumento_nombre',
+                    'type' => 'text',
+                    'label' => 'Tipo documento',
+                    'required' => true,
+                    'readonly' => true,
+                    'value' => trim((string) ($record->tipoDocumento_nombre ?? 'Nota de salida')),
+                ],
+            ];
+        } else {
+            $tipoField = [[
                 'name' => 'tipoDocumento_idtipoDocumento',
                 'type' => 'select',
                 'label' => 'Tipo documento',
@@ -747,7 +848,22 @@ class AlmacenNotaSalidaController extends Controller
                 'optionKey' => 'value',
                 'optionLabel' => 'label',
                 'placeholder' => 'Selecciona tipo de documento',
-            ],
+            ]];
+        }
+
+        // Si estamos en edición, mostrar el ID como campo readonly al inicio
+        $baseFields = [];
+        if ($record && isset($record->idcompras)) {
+            $baseFields[] = [
+                'name' => 'idcompras_preview',
+                'type' => 'text',
+                'label' => 'ID',
+                'readonly' => true,
+                'value' => trim((string) ($record->idcompras ?? '')),
+            ];
+        }
+
+        return array_merge($baseFields, $tipoField, [
             [
                 'name' => 'fechaRealizacion',
                 'type' => 'date',
@@ -774,14 +890,10 @@ class AlmacenNotaSalidaController extends Controller
                 'name' => 'devices_partial',
                 'type' => 'partial',
                 'partial' => 'almacen.partials.devices-form-salida',
-                'data' => array_merge(
-                    ['almacenOptions' => $this->almacenOptions()],
-                    ['devices' => $devicesData]
-                ),
+                'data' => array_merge(['almacenOptions' => $this->almacenOptions()], ['devices' => $devicesData]),
                 'colSpan' => 2,
             ],
-
-        ];
+        ]);
     }
 
     private function validateCompra(Request $request): array

@@ -13,23 +13,27 @@
         }
         .pdf-header {
             position: relative;
-            padding: 12px 100px 18px 0;
-            text-align: right;
+            padding: 12px 0 15px;
         }
         .pdf-logo {
-            position: absolute;
+            position: relative;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 20px;
+            width: auto;
             top: 0;
             left: 0;
-            width: 100px;
-            height: auto;
+            height: 50px;
         }
         h1 {
-            font-size: 28px;
+            font-size: 24px;
             margin: 0;
             line-height: 1.2;
-            font-weight: 800;
+            font-weight: 700;
             white-space: normal;
             word-break: break-word;
+            display: inline-block;
+            vertical-align: middle;
         }
         .pdf-table {
             margin-top: 16px;

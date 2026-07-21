@@ -11,6 +11,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Support\Carbon;
 use Illuminate\View\View;
 
 class ServicioClienteController extends Controller
@@ -44,7 +45,78 @@ class ServicioClienteController extends Controller
             });
         }
 
-        $items = $query->orderByDesc('sc.idservicioCliente')->paginate($this->resolvePerPage($request))->withQueryString();
+        // Filtros: cliente (texto), almacén (texto, excluye planes/servicios en opciones), vehículo (texto), estado (select), rango fechas
+        $clienteText = trim((string) $request->input('cliente_idcliente', ''));
+        if ($clienteText !== '') {
+            $term = '%' . $clienteText . '%';
+            $query->where(function ($b) use ($term) {
+                $b->where('sc.cliente_idcliente', 'like', $term)
+                  ->orWhere('c.nombreComercial', 'like', $term)
+                  ->orWhere('c.razonSocial', 'like', $term);
+            });
+        }
+
+        $almacenText = trim((string) $request->input('almacen_idalmacen', ''));
+        if ($almacenText !== '') {
+            $term = '%' . $almacenText . '%';
+            $query->where('a.detalle', 'like', $term);
+        }
+
+        $vehiculoText = trim((string) $request->input('vehiculo', ''));
+        if ($vehiculoText !== '') {
+            $term = '%' . $vehiculoText . '%';
+            $query->where(function ($b) use ($term) {
+                $b->where('sc.vehiculo_placa', 'like', $term)
+                  ->orWhere('v.marca', 'like', $term)
+                  ->orWhere('v.modelo', 'like', $term);
+            });
+        }
+
+        $estadoFilter = trim((string) $request->input('estado', ''));
+        if ($estadoFilter !== '') {
+            $query->where('sc.estado', $estadoFilter);
+        }
+
+        $fechaFrom = $request->input('fechaInicio_from');
+        if ($fechaFrom) {
+            $query->whereDate('sc.fechaInicio', '>=', $fechaFrom);
+        }
+
+        $fechaTo = $request->input('fechaInicio_to');
+        if ($fechaTo) {
+            $query->whereDate('sc.fechaInicio', '<=', $fechaTo);
+        }
+
+        $items = $query->orderByDesc('sc.idservicioCliente')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
+
+        // Formatear las fechas para el listado: mostrar solo fecha "25 abr, 2026"
+        $items->setCollection(
+            $items->getCollection()->map(function ($row) {
+                try {
+                    $row->fechaInicio = $row->fechaInicio
+                        ? Carbon::parse($row->fechaInicio)->locale('es')->isoFormat('D MMM, YYYY')
+                        : '-';
+                } catch (\Exception $e) {
+                    $row->fechaInicio = $row->fechaInicio ?? '-';
+                }
+
+                try {
+                    $row->fecheVencimiento = $row->fecheVencimiento
+                        ? Carbon::parse($row->fecheVencimiento)->locale('es')->isoFormat('D MMM, YYYY')
+                        : '-';
+                } catch (\Exception $e) {
+                    $row->fecheVencimiento = $row->fecheVencimiento ?? '-';
+                }
+
+                // Normalizar estado para la columna tipo 'status': 1 => activo, 0 => inactivo
+                $estadoRaw = strtolower(trim((string)($row->estado ?? '')));
+                $row->estado = $estadoRaw === 'activo' || $estadoRaw === '1' || $estadoRaw === 'true' ? 1 : 0;
+
+                return $row;
+            })
+        );
 
         return view('serviciocliente.servicio-cliente', [
             'title' => 'Módulo Servicio Cliente',
@@ -55,16 +127,57 @@ class ServicioClienteController extends Controller
                 ['key' => 'cliente_nombre', 'label' => 'Cliente', 'type' => 'text'],
                 ['key' => 'vehiculo_placa', 'label' => 'Vehículo', 'type' => 'text'],
                 ['key' => 'almacen_detalle', 'label' => 'Almacén', 'type' => 'text'],
-                ['key' => 'fechaInicio', 'label' => 'Inicio', 'type' => 'text'],
-                ['key' => 'fecheVencimiento', 'label' => 'Vencimiento', 'type' => 'text'],
+                ['key' => 'fechaInicio', 'label' => 'Fecha Inicio', 'type' => 'text'],
+                ['key' => 'fechaVencimiento', 'label' => 'Fecha Vencimiento', 'type' => 'text'],
                 ['key' => 'monto', 'label' => 'Monto', 'type' => 'text'],
-                ['key' => 'estado', 'label' => 'Estado', 'type' => 'text'],
+                ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
                 ['key' => 'docReferencia', 'label' => 'Documento', 'type' => 'text'],
             ],
             'stats' => [
                 ['label' => 'Total de servicios', 'value' => (clone $query)->count()],
             ],
-            'filters' => [],
+            'filters' => [
+                [
+                    'name' => 'cliente_idcliente',
+                    'type' => 'text',
+                    'label' => 'Cliente',
+                    'placeholder' => 'Escribe cliente',
+                ],
+                [
+                    'name' => 'almacen_idalmacen',
+                    'type' => 'text',
+                    'label' => 'Almacén',
+                    'placeholder' => 'Escribe almacén',
+                ],
+                [
+                    'name' => 'vehiculo',
+                    'type' => 'text',
+                    'label' => 'Vehículo',
+                    'placeholder' => 'Escribe placa, marca o modelo',
+                ],
+                [
+                    'name' => 'estado',
+                    'type' => 'select',
+                    'label' => 'Estado',
+                    'options' => [
+                        ['value' => 'activo', 'label' => 'Activo'],
+                        ['value' => 'inactivo', 'label' => 'Inactivo'],
+                    ],
+                    'placeholder' => 'Todos',
+                ],
+                [
+                    'name' => 'fechaInicio_from',
+                    'type' => 'date',
+                    'label' => 'Fecha inicio desde',
+                    'placeholder' => 'YYYY-MM-DD',
+                ],
+                [
+                    'name' => 'fechaInicio_to',
+                    'type' => 'date',
+                    'label' => 'Fecha inicio hasta',
+                    'placeholder' => 'YYYY-MM-DD',
+                ],
+            ],
             'createRoute' => route('modules.servicio-cliente.create'),
             'editRoute' => 'modules.servicio-cliente.edit',
             'showRoute' => 'modules.servicio-cliente.edit',
@@ -103,16 +216,50 @@ class ServicioClienteController extends Controller
         $filename = 'servicio_cliente_export_' . now()->format('Ymd_His') . '.' . $format;
 
         if (!empty($selectedIds) && is_array($selectedIds)) {
-            $rows = $this->baseQuery()->whereIn('idgrupoCliente', array_values($selectedIds))->orderBy('idgrupoCliente')->get();
+            $rows = $this->baseQuery()->whereIn('sc.idservicioCliente', array_values($selectedIds))->orderBy('sc.idservicioCliente')->get();
+
+            // Formatear fechas para exportación
+            $rows = $rows->map(function ($r) {
+                try {
+                    $r->fechaInicio = $r->fechaInicio ? Carbon::parse($r->fechaInicio)->locale('es')->isoFormat('D MMM, YYYY') : '';
+                } catch (\Exception $e) {
+                    $r->fechaInicio = $r->fechaInicio ?? '';
+                }
+
+                try {
+                    $r->fecheVencimiento = $r->fecheVencimiento ? Carbon::parse($r->fecheVencimiento)->locale('es')->isoFormat('D MMM, YYYY') : '';
+                } catch (\Exception $e) {
+                    $r->fecheVencimiento = $r->fecheVencimiento ?? '';
+                }
+
+                return $r;
+            });
 
             if ($format === 'xlsx') {
                 return $this->exportXlsxResponse($rows, $columns, $filename);
             }
 
-            return $this->exportPdfResponse($rows, $columns, 'Listado de Grupos de Cliente', $filename);
+            return $this->exportPdfResponse($rows, $columns, 'Listado de Servicio Cliente', $filename);
         }
 
         $rows = $this->baseQuery()->orderByDesc('sc.idservicioCliente')->get();
+
+        // Formatear fechas para exportación en el conjunto completo
+        $rows = $rows->map(function ($r) {
+            try {
+                $r->fechaInicio = $r->fechaInicio ? Carbon::parse($r->fechaInicio)->locale('es')->isoFormat('D MMM, YYYY') : '';
+            } catch (\Exception $e) {
+                $r->fechaInicio = $r->fechaInicio ?? '';
+            }
+
+            try {
+                $r->fecheVencimiento = $r->fecheVencimiento ? Carbon::parse($r->fecheVencimiento)->locale('es')->isoFormat('D MMM, YYYY') : '';
+            } catch (\Exception $e) {
+                $r->fecheVencimiento = $r->fecheVencimiento ?? '';
+            }
+
+            return $r;
+        });
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -187,18 +334,24 @@ class ServicioClienteController extends Controller
                     'required' => false,
                     'min' => 0,
                     'step' => '0.01',
+                    'helpText' => 'Ingresa un monto.',
                 ],
                 [
                     'name' => 'estado',
-                    'type' => 'text',
+                    'type' => 'select',
                     'label' => 'Estado',
-                    'maxlength' => 45,
+                    'required' => true,
+                    'optionsData' => $this->estadoOptions(),
+                    'optionKey' => 'value',
+                    'optionLabel' => 'label',
+                    'placeholder' => 'Selecciona estado',
                 ],
                 [
                     'name' => 'docReferencia',
                     'type' => 'text',
                     'label' => 'Documento referencia',
                     'maxlength' => 15,
+                    'helpText' => 'Ingresa el número del documento de referencia.',
                 ],
             ],
         ]);
@@ -206,21 +359,39 @@ class ServicioClienteController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        $validated = $request->validate([
-            'numero' => ['required', 'string', 'max:20', 'unique:serviciocliente,numero'],
+        $rules = [
             'cliente_idcliente' => ['required', 'exists:cliente,idcliente'],
             'vehiculo_placa' => ['required', 'exists:vehiculo,placa'],
             'almacen_idalmacen' => ['required', 'exists:almacen,idalmacen'],
             'fechaInicio' => ['required', 'date_format:Y-m-d'],
             'fecheVencimiento' => ['nullable', 'date_format:Y-m-d'],
             'monto' => ['nullable', 'numeric', 'min:0'],
-            'estado' => ['nullable', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
-            'detalle' => ['required', 'string', 'max:100', 'unique:serviciocliente,detalle'],
+            'estado' => ['required', 'in:activo,inactivo'],
             'docReferencia' => ['nullable', 'string', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX],
-        ], [
-            'detalle.unique' => 'El detalle ya está registrado en servicios de cliente.',
-            'numero.unique' => 'El número ya está registrado en servicios de cliente.',
-        ]);
+        ];
+
+        $messages = [
+            'required' => 'El campo :attribute es obligatorio.',
+            'exists' => 'El valor seleccionado para :attribute no es válido.',
+            'date_format' => 'El campo :attribute debe tener el formato YYYY-MM-DD.',
+            'numeric' => 'El campo :attribute debe ser numérico.',
+            'min' => 'El campo :attribute debe ser como mínimo :min.',
+            'max' => 'El campo :attribute no debe exceder :max caracteres.',
+            'regex' => 'El campo :attribute contiene caracteres inválidos.',
+        ];
+
+        $attributes = [
+            'cliente_idcliente' => 'cliente',
+            'vehiculo_placa' => 'vehículo',
+            'almacen_idalmacen' => 'almacén',
+            'fechaInicio' => 'fecha inicio',
+            'fecheVencimiento' => 'fecha vencimiento',
+            'monto' => 'monto',
+            'estado' => 'estado',
+            'docReferencia' => 'documento referencia',
+        ];
+
+        $validated = $request->validate($rules, $messages, $attributes);
 
         $validated['vehiculo_placa'] = Str::upper(trim($validated['vehiculo_placa']));
 
@@ -304,9 +475,12 @@ class ServicioClienteController extends Controller
                 ],
                 [
                     'name' => 'estado',
-                    'type' => 'text',
+                    'type' => 'select',
                     'label' => 'Estado',
-                    'maxlength' => 45,
+                    'optionsData' => $this->estadoOptions(),
+                    'optionKey' => 'value',
+                    'optionLabel' => 'label',
+                    'placeholder' => 'Selecciona estado',
                 ],
                 [
                     'name' => 'docReferencia',
@@ -329,16 +503,39 @@ class ServicioClienteController extends Controller
             return $redirect;
         }
 
-        $validated = $request->validate([
+        $rules = [
             'cliente_idcliente' => ['required', 'exists:cliente,idcliente'],
             'vehiculo_placa' => ['required', 'exists:vehiculo,placa'],
             'almacen_idalmacen' => ['required', 'exists:almacen,idalmacen'],
-            'fechaInicio' => ['nullable', 'date_format:Y-m-d H:i:s'],
-            'fecheVencimiento' => ['nullable', 'date_format:Y-m-d H:i:s'],
+            'fechaInicio' => ['nullable', 'date_format:Y-m-d'],
+            'fecheVencimiento' => ['nullable', 'date_format:Y-m-d'],
             'monto' => ['nullable', 'numeric', 'min:0'],
-            'estado' => ['nullable', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+            'estado' => ['required', 'in:activo,inactivo'],
             'docReferencia' => ['nullable', 'string', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX],
-        ]);
+        ];
+
+        $messages = [
+            'required' => 'El campo :attribute es obligatorio.',
+            'exists' => 'El valor seleccionado para :attribute no es válido.',
+            'date_format' => 'El campo :attribute debe tener el formato YYYY-MM-DD.',
+            'numeric' => 'El campo :attribute debe ser numérico.',
+            'min' => 'El campo :attribute debe ser como mínimo :min.',
+            'max' => 'El campo :attribute no debe exceder :max caracteres.',
+            'regex' => 'El campo :attribute contiene caracteres inválidos.',
+        ];
+
+        $attributes = [
+            'cliente_idcliente' => 'cliente',
+            'vehiculo_placa' => 'vehículo',
+            'almacen_idalmacen' => 'almacén',
+            'fechaInicio' => 'fecha inicio',
+            'fecheVencimiento' => 'fecha vencimiento',
+            'monto' => 'monto',
+            'estado' => 'estado',
+            'docReferencia' => 'documento referencia',
+        ];
+
+        $validated = $request->validate($rules, $messages, $attributes);
 
         $validated['vehiculo_placa'] = Str::upper(trim($validated['vehiculo_placa']));
 
@@ -467,7 +664,17 @@ class ServicioClienteController extends Controller
     {
         return DB::table('almacen')
             ->select(['idalmacen', 'detalle'])
+            ->where('detalle', 'not like', '%equipo%')
+            ->where('detalle', 'not like', '%equipos%')
             ->orderBy('detalle')
             ->get();
+    }
+
+    private function estadoOptions()
+    {
+        return collect([
+            (object) ['value' => 'activo', 'label' => 'Activo'],
+            (object) ['value' => 'inactivo', 'label' => 'Inactivo'],
+        ]);
     }
 }

@@ -99,7 +99,7 @@
                 <div id="list-table-wrapper" class="flex w-full flex-col gap-8">
                     <!-- ESTADÍSTICAS -->
                     @if($stats)
-                        <div class="ticket-stats-white  flex flex-col p-3">
+                        <div class="box box--stacked ticket-stats-white  flex flex-col p-3">
                             <div class="grid grid-cols-4 gap-5">
                                 @foreach($stats as $stat)
                                     <div class="box col-span-4 rounded-none border border-dashed border-slate-300/80 bg-white p-5 shadow-none md:col-span-2 xl:col-span-1">
@@ -112,7 +112,7 @@
                     @endif
 
                     <!-- TABLA -->
-                    <div class="ticket-table-white flex w-full flex-col">
+                    <div class="box box--stacked ticket-table-white flex w-full flex-col">
                     @php
                         $filters = $filters ?? [];
                         $showGroupClientsColumn = $showGroupClientsColumn ?? false;
@@ -438,9 +438,8 @@
         .ticket-stats-white,
         .ticket-table-white {
             background: #ffffff !important;
-            border-radius: 0 !important;
             box-shadow: none !important;
-            width: 100%;
+            border-radius: .6rem !important;
         }
 
         .ticket-stats-white {

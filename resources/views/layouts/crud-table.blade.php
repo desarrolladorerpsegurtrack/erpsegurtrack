@@ -61,6 +61,8 @@
                             $canCreate = $isAdmin || $currentPermissions->contains('crear');
                             $canEdit = $isAdmin || $currentPermissions->contains('editar');
                             $canDelete = $isAdmin || $currentPermissions->contains('eliminar');
+                            $canApproveAction = $isAdmin || $currentPermissions->contains('aprobar');
+                            $canAnularAction = $isAdmin || $currentPermissions->contains('anular');
                             $canExport = $isAdmin || $currentPermissions->contains('exportar');
                             $canBulkDeactivate = $isAdmin || collect($authData['permissions']['lineas_chips.bajar_numeros'] ?? [])
                                 ->map(fn ($value) => App\Support\ErpPermission::normalizeAction((string) $value))
@@ -72,7 +74,21 @@
                                 ->filter()
                                 ->unique()
                                 ->contains('ver');
-                            $canPerformActions = $canEdit || $canDelete;
+                            $canPerformActions = $canEdit || $canDelete || $canApproveAction || $canAnularAction;
+                            $hasDownloadColumn = collect($columns ?? [])->contains(fn ($col) => ($col['key'] ?? '') === 'download_link');
+                            $canShowActionHeader = ($showActionsColumn ?? true) && $canPerformActions;
+                            if (!$canShowActionHeader && isset($items)) {
+                                $itemRows = $items;
+                                if (is_object($items) && method_exists($items, 'items')) {
+                                    $itemRows = $items->items();
+                                }
+                                $canShowActionHeader = collect($itemRows)->contains(function ($row) use ($hasDownloadColumn, $canApproveAction, $canAnularAction) {
+                                    return ($canApproveAction && isset($row->canApprove) && $row->canApprove && !empty($row->approveRoute))
+                                        || ($canAnularAction && isset($row->canAnular) && $row->canAnular && !empty($row->anularRoute))
+                                        || (!empty($row->copyRoute))
+                                        || (!$hasDownloadColumn && !empty($row->download_link));
+                                });
+                            }
                             $createButtonLabel = $createButtonLabel ?? null;
 
                             $listResource = null;
@@ -127,6 +143,29 @@
                         </div>
                     </div>
 
+                    <div id="approve-confirmation-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;" role="dialog" aria-modal="true" aria-labelledby="approve-confirmation-title" aria-describedby="approve-confirmation-message">
+                        <div style="width:720px;max-width:92%;margin:0 auto;position:relative;border-radius:10px;background:#ffffff;box-shadow:0 20px 40px rgba(2,6,23,0.12);overflow:hidden;">
+                            <button type="button" data-approve-modal-close style="position:absolute;right:16px;top:16px;height:44px;width:44px;border-radius:9999px;border:1px solid #e6e9ee;background:#fff;color:#6b7280;display:inline-flex;align-items:center;justify-content:center;" aria-label="Cerrar">
+                                <i data-lucide="x" style="width:16px;height:16px"></i>
+                            </button>
+                            <div style="padding:40px 48px;text-align:left;">
+                                <div style="margin:0 auto 24px;display:flex;height:64px;width:64px;align-items:center;justify-content:center;border-radius:9999px;border:1px solid #19bb13;background:#EAFBEA;color:#19bb13;">
+                                    <i data-lucide="check-circle" style="width:22px;height:22px"></i>
+                                </div>
+                                <h2 id="approve-confirmation-title" style="font-size:22px;font-weight:600;margin:0;color:#111827;">Confirmar aprobación</h2>
+                                <p id="approve-confirmation-message" style="margin-top:12px;color:#6b7280;font-size:14px;line-height:1.6;">Vas a aprobar esta cotización. Esta acción cambiará su estado a Aprobada.</p>
+                                <div id="approve-confirmation-details" class="mt-5 hidden rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900" style="white-space: normal; overflow-wrap: anywhere; word-break: break-word; box-sizing: border-box;"></div>
+                                <div id="approve-confirmation-relations" class="mt-5 hidden rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" style="background-color: #ffe7e7; white-space: normal; overflow-wrap: anywhere; word-break: break-word; box-sizing: border-box;"></div>
+                                <div id="approve-confirmation-hint" class="mt-3 hidden text-sm text-slate-600"></div>
+                                <div style="margin-top:26px;display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;align-items:center;">
+                                    <div id="approve-confirmation-actions" class="hidden flex flex-wrap gap-3 mr-auto"></div>
+                                    <button type="button" data-approve-modal-close style="min-width:120px;padding:10px 18px;border-radius:10px;border:1px solid #000000;background:#ffffff;color:#374151;font-weight:600;">Cancelar</button>
+                                    <button type="button" id="approve-confirmation-submit" style="min-width:120px;padding:10px 18px;border-radius:10px;background:#c71010;color:#ffffff;font-weight:600;border:none;">Aprobar</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     @if(!empty($listResource))
                         <input type="hidden" id="erp-list-resource" value="{{ $listResource }}">
                         <input type="hidden" id="erp-relation-summary-template" value="{{ route('modules.relations.summary', ['resource' => '__RESOURCE__', 'id' => '__ID__']) }}">
@@ -134,29 +173,45 @@
 
                     <div class="mt-3.5 flex flex-col gap-8">
                         {{-- ALERTAS DE SESIÓN --}}
-                         @if(session('success'))
-                            <div class="mb-4 rounded-lg border px-4 py-3 text-base font-semibold relative" style="border-color:#16a34a;background-color:#dcfce7;color:#14532d;">
+                        @if(session('success'))
+                            <div class="rounded-lg border px-4 py-3 text-base font-semibold relative" style="border-color:#16a34a;background-color:#dcfce7;color:#14532d;">
                                 ✓ {{ session('success') }}
                                 <button type="button" class="absolute top-0 right-0 mt-2 mr-2 text-lg font-bold text-gray-600 hover:text-gray-800" onclick="this.parentElement.style.display='none';">&times;</button>
                             </div>
                         @endif
-                        @if(session('download_pdf_url'))
+                        @php
+                            $downloadPdfUrls = session('download_pdf_urls', []);
+                            if (is_string(session('download_pdf_url')) && empty($downloadPdfUrls)) {
+                                $downloadPdfUrls = [session('download_pdf_url')];
+                            }
+                        @endphp
+                        @if(!empty($downloadPdfUrls))
                             <script>
                                 document.addEventListener('DOMContentLoaded', function () {
-                                    var url = {!! json_encode(session('download_pdf_url')) !!};
-                                    if (!url) return;
-                                    var a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = '';
-                                    a.style.display = 'none';
-                                    document.body.appendChild(a);
-                                    a.click();
-                                    document.body.removeChild(a);
+                                    var urls = {!! json_encode($downloadPdfUrls) !!};
+                                    if (!Array.isArray(urls) || urls.length === 0) {
+                                        return;
+                                    }
+
+                                    urls.forEach(function (url, index) {
+                                        setTimeout(function () {
+                                            if (!url) {
+                                                return;
+                                            }
+                                            var a = document.createElement('a');
+                                            a.href = url;
+                                            a.download = '';
+                                            a.style.display = 'none';
+                                            document.body.appendChild(a);
+                                            a.click();
+                                            document.body.removeChild(a);
+                                        }, index * 1200);
+                                    });
                                 });
                             </script>
                         @endif
                         @if(session('error'))
-                            <div class="mb-4 rounded-lg border px-4 py-3 text-lg font-semibold relative" style="border-color:#a31616;background-color:#fcdcdc;color:#531414;">
+                            <div class="rounded-lg border px-4 py-3 text-lg font-semibold relative" style="border-color:#a31616;background-color:#fcdcdc;color:#531414;">
                                 ✕ {{ session('error') }}
                                 <button type="button" class="absolute top-0 right-0 mt-2 mr-2 text-lg font-bold text-gray-600 hover:text-gray-800" onclick="this.parentElement.style.display='none';">&times;</button>
                             </div>
@@ -341,7 +396,7 @@
                                                     </div>
                                                 </td>
                                             @endif
-                                            @if(($showActionsColumn ?? true) && $canPerformActions)
+                                            @if($canShowActionHeader)
                                                 <td data-tw-merge="" class="px-5 text-center align-middle border-b dark:border-darkmode-300 border-t border-slate-200/60 bg-slate-50 py-4 font-medium text-slate-500">
                                                     Acciones
                                                 </td>
@@ -350,7 +405,7 @@
                                     </thead>
                                     <tbody>
                                         @php
-                                            $historyRowColspan = count($columns) + 2 + ($showGroupClientsColumn ? 1 : 0) + (($showActionsColumn ?? true) && $canPerformActions ? 1 : 0);
+                                            $historyRowColspan = count($columns) + 2 + ($showGroupClientsColumn ? 1 : 0) + ($canShowActionHeader ? 1 : 0);
                                             $historyTitle = $historyTitle ?? 'Historial de relaciones';
                                             $historyColumns = $historyColumns ?? [
                                                 ['key' => 'simCard_idsimCard', 'label' => 'SimCard', 'type' => 'text'],
@@ -544,12 +599,14 @@
                                                         @endif
                                                     </td>
                                                 @endif
-                                                @if(($showActionsColumn ?? true) && $canPerformActions)
+                                                @if(($showActionsColumn ?? true) && ($canPerformActions || (isset($row->canAnular) && $row->canAnular && !empty($row->anularRoute)) || (isset($row->copyRoute) && !empty($row->copyRoute)) || (!$hasDownloadColumn && isset($row->download_link) && !empty($row->download_link))))
                                                     <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 relative border-dashed py-4 dark:bg-darkmode-600">
                                                         <div class="flex items-center justify-center h-full">
                                                             @php
                                                                 $canEditRoute = $canEdit && !empty($editRoute);
                                                                 $canDeleteRoute = $canDelete && !empty($destroyRoute);
+                                                                $canApproveRoute = $canApproveAction && isset($row->canApprove) && $row->canApprove && !empty($row->approveRoute);
+                                                                $canAnularRoute = $canAnularAction && isset($row->canAnular) && $row->canAnular && !empty($row->anularRoute);
                                                                 $rowLockBlocked = false;
                                                                 $rowLockOwner = null;
 
@@ -565,36 +622,63 @@
                                                                 }
                                                             }
                                                         @endphp
-                                                        @if(($showActionsColumn ?? true) && ($canEditRoute || $canDeleteRoute))
+                                                        @if(($showActionsColumn ?? true) && ($canEditRoute || $canDeleteRoute || $canApproveRoute || $canAnularRoute || (isset($row->copyRoute) && !empty($row->copyRoute)) || (!$hasDownloadColumn && isset($row->download_link) && !empty($row->download_link))))
                                                             <div data-tw-merge="" data-tw-placement="bottom-end" class="dropdown dropdown--action relative h-5">
                                                                 <button type="button" data-local-dropdown-toggle="true" aria-expanded="false" class="cursor-pointer h-5 w-5 text-slate-500">
                                                                     <i data-tw-merge="" data-lucide="more-vertical" class="stroke-[1] w-5 h-5 fill-slate-400/70 stroke-slate-400/70"></i>
                                                                 </button>
                                                                 <div class="dropdown-menu absolute right-0 top-full z-[9999] mt-2 origin-top-right invisible opacity-0 pointer-events-none hidden">
                                                                     <div data-tw-merge="" class="dropdown-content rounded-md border border-slate-200/80 bg-white p-2 shadow-xl shadow-slate-200/70 dark:border-transparent dark:bg-darkmode-600">
-                                                                        @if($canEditRoute)
-                                                                            @if($rowLockBlocked)
-                                                                                <button type="button" disabled class="cursor-not-allowed flex items-center p-2 transition duration-300 ease-in-out rounded-md text-slate-400 dark:text-slate-500 dropdown-item opacity-50" title="Bloqueado por {{ $rowLockOwner ?? 'otro usuario' }}">
-                                                                                    <i data-tw-merge="" data-lucide="check-square" class="stroke-[1] mr-2 h-4 w-4"></i>
-                                                                                    Editar
-                                                                                </button>
-                                                                            @else
-                                                                                <a href="{{ route($editRoute, data_get($row, $identifierKey)) }}" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item">
-                                                                                    <i data-tw-merge="" data-lucide="check-square" class="stroke-[1] mr-2 h-4 w-4"></i>
-                                                                                    Editar
+                                                                                        @if($canEditRoute)
+                                                                                @if($rowLockBlocked)
+                                                                                    <button type="button" disabled class="cursor-not-allowed flex items-center p-2 transition duration-300 ease-in-out rounded-md text-slate-400 dark:text-slate-500 dropdown-item opacity-50" title="Bloqueado por {{ $rowLockOwner ?? 'otro usuario' }}">
+                                                                                        <i data-tw-merge="" data-lucide="check-square" class="stroke-[1] mr-2 h-4 w-4"></i>
+                                                                                        Editar
+                                                                                    </button>
+                                                                                @else
+                                                                                    <a href="{{ route($editRoute, data_get($row, $identifierKey)) }}" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item">
+                                                                                        <i data-tw-merge="" data-lucide="check-square" class="stroke-[1] mr-2 h-4 w-4"></i>
+                                                                                        Editar
+                                                                                    </a>
+                                                                                @endif
+                                                                            @endif
+                                                                            @if($canDeleteRoute)
+                                                                                <form method="POST" action="{{ route($destroyRoute, data_get($row, $identifierKey)) }}" class="inline delete-confirmation-form" data-relation-resource="{{ $listResource ?? '' }}" data-relation-record-id="{{ data_get($row, $identifierKey) }}">
+                                                                                    @csrf
+                                                                                    @method('DELETE')
+                                                                                    <button type="button" data-delete-open="true" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item text-danger w-full text-left @if($rowLockBlocked) opacity-50 cursor-not-allowed pointer-events-none @endif" @if($rowLockBlocked) disabled title="Bloqueado por {{ $rowLockOwner ?? 'otro usuario' }}" @endif>
+                                                                                        <i data-tw-merge="" data-lucide="trash2" class="stroke-[1] mr-2 h-4 w-4"></i>
+                                                                                        Eliminar
+                                                                                    </button>
+                                                                                </form>
+                                                                            @endif
+                                                                            @if($canApproveRoute)
+                                                                                <form method="POST" action="{{ $row->approveRoute }}" class="inline delete-confirmation-form mt-1" data-delete-mode="aprobar" data-relation-resource="{{ $listResource ?? '' }}" data-relation-record-id="{{ data_get($row, $identifierKey) }}" data-batch-id="{{ $row->batch_id ?? '' }}">
+                                                                                    @csrf
+                                                                                    <button type="button" data-delete-open="true" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 text-slate-600 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item w-full text-left @if($rowLockBlocked) opacity-50 cursor-not-allowed pointer-events-none @endif" @if($rowLockBlocked) disabled title="Bloqueado por {{ $rowLockOwner ?? 'otro usuario' }}" @endif>
+                                                                                        <i data-tw-merge="" data-lucide="check-circle" class="stroke-[1] mr-2 h-4 w-4"></i>
+                                                                                        Aprobar
+                                                                                    </button>
+                                                                                </form>
+                                                                            @endif
+                                                                            @if(isset($row->copyRoute) && !empty($row->copyRoute))
+                                                                                <a href="{{ $row->copyRoute }}" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item text-slate-600 w-full text-left">
+                                                                                    <i data-tw-merge="" data-lucide="copy" class="stroke-[1] mr-2 h-4 w-4"></i>
+                                                                                    Copiar
                                                                                 </a>
                                                                             @endif
-                                                                        @endif
-                                                                        @if($canDeleteRoute)
-                                                                            <form method="POST" action="{{ route($destroyRoute, data_get($row, $identifierKey)) }}" class="inline delete-confirmation-form" data-relation-resource="{{ $listResource ?? '' }}" data-relation-record-id="{{ data_get($row, $identifierKey) }}">
-                                                                                @csrf
-                                                                                @method('DELETE')
-                                                                                <button type="button" data-delete-open="true" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item text-danger w-full text-left @if($rowLockBlocked) opacity-50 cursor-not-allowed pointer-events-none @endif" @if($rowLockBlocked) disabled title="Bloqueado por {{ $rowLockOwner ?? 'otro usuario' }}" @endif>
-                                                                                    <i data-tw-merge="" data-lucide="trash2" class="stroke-[1] mr-2 h-4 w-4"></i>
-                                                                                    Eliminar
-                                                                                </button>
-                                                                            </form>
-                                                                        @endif
+                                                                            @if($canAnularRoute)
+                                                                                <form method="POST" action="{{ $row->anularRoute }}" class="inline delete-confirmation-form mt-1" data-delete-mode="anular" data-relation-resource="{{ $listResource ?? '' }}" data-relation-record-id="{{ data_get($row, $identifierKey) }}">
+                                                                                    @csrf
+                                                                                    <button type="button" data-delete-open="true" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 text-danger dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item w-full text-left @if($rowLockBlocked) opacity-50 cursor-not-allowed pointer-events-none @endif" @if($rowLockBlocked) disabled title="Bloqueado por {{ $rowLockOwner ?? 'otro usuario' }}" @endif>
+                                                                                        <i data-tw-merge="" data-lucide="x-circle"  class="stroke-[1] mr-2 h-4 w-4"></i>
+                                                                                        Anular
+                                                                                    </button>
+                                                                                </form>
+                                                                            @endif
+                                                                            @if(!$hasDownloadColumn && isset($row->download_link) && !empty($row->download_link))
+                                                                                {!! $row->download_link !!}
+                                                                            @endif
                                                                     </div>
                                                                 </div>
                                                             </div>
@@ -839,60 +923,8 @@
                         </div>
                     </div>
                 </div>
-                        </div>
-                        <script>
-                        (function () {
-                            let currentDeleteForm = null;
-
-                            document.addEventListener('click', function (ev) {
-                                const opener = ev.target.closest('[data-delete-open="true"], button[data-delete-open="true"], a[data-delete-open="true"]');
-                                if (!opener) return;
-                                const form = opener.closest('form.delete-confirmation-form') || opener.closest('form');
-                                if (form && form.classList.contains('delete-confirmation-form')) {
-                                    currentDeleteForm = form;
-                                } else if (form && form.querySelector('input[name="_method"][value="DELETE"]')) {
-                                    currentDeleteForm = form;
-                                } else {
-                                    currentDeleteForm = null;
-                                }
-                            });
-
-                            const submitBtn = document.getElementById('delete-confirmation-submit');
-                            if (!submitBtn) return;
-
-                            submitBtn.addEventListener('click', function () {
-                                if (this.disabled) return;
-                                this.disabled = true;
-                                const original = this.innerHTML;
-                                this.dataset._orig = original;
-                                this.textContent = 'Eliminando...';
-                                this.classList.add('opacity-70', 'cursor-not-allowed');
-
-                                if (currentDeleteForm) {
-                                    const innerSub = currentDeleteForm.querySelector('button[type="submit"], input[type="submit"]');
-                                    if (innerSub) innerSub.disabled = true;
-                                    currentDeleteForm.submit();
-                                    return;
-                                }
-
-                                const fallback = document.querySelector('form.delete-confirmation-form');
-                                if (fallback) {
-                                    const innerSub = fallback.querySelector('button[type="submit"], input[type="submit"]');
-                                    if (innerSub) innerSub.disabled = true;
-                                    fallback.submit();
-                                    return;
-                                }
-
-                                console.warn('No se encontró el formulario de eliminación para enviar.');
-                                setTimeout(function () {
-                                    submitBtn.disabled = false;
-                                    submitBtn.textContent = submitBtn.dataset._orig || 'Eliminar';
-                                    submitBtn.classList.remove('opacity-70', 'cursor-not-allowed');
-                                }, 3000);
-                            });
-                        })();
-                        </script>
-                        @if(!empty($bulkDestroyRoute) && $canDelete)
+            </div>
+            @if(!empty($bulkDestroyRoute) && $canDelete)
                 <form id="bulk-delete-form" method="POST" action="{{ $bulkDestroyRoute }}" class="hidden">
                     @csrf
                     <input type="hidden" name="_method" value="{{ $bulkDestroyMethod ?? 'DELETE' }}">
@@ -1078,7 +1110,7 @@
                                 <div class="rounded-[1rem] border border-slate-200 bg-slate-50 p-4 shadow-sm">
                                     <div class="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
                                         <div>
-                                            <label class="mb-2 block text-sm font-medium text-slate-700">Archivo (.xlsx) con las columnas: Numero, SimCard</label>
+                                            <label class="mb-2 block text-sm font-medium text-slate-700">Archivo (.xlsx) con las columnas: Numero, SimCard, Operador</label>
                                             <input type="file" name="importFile" accept=".xlsx" required class="disabled:bg-slate-100 disabled:cursor-not-allowed transition duration-200 ease-in-out w-full text-sm border-slate-200 shadow-sm rounded-md placeholder:text-slate-400/90 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 [&[type='file']]:border file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:border-r-[1px] file:border-slate-100/10 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-500/70 hover:file:bg-slate-200">
                                         </div>
                                         <button type="submit" class="inline-flex h-12 items-center justify-center rounded-xl bg-danger px-6 py-2 text-sm font-semibold text-white transition hover:bg-danger/90">
@@ -1129,11 +1161,7 @@
                                     <div class="mt-4 flex items-center justify-start" data-preview-export-wrapper="import">
                                         <input type="hidden" data-preview-payload="import" value="{{ rawurlencode(json_encode($detallesimcardImportPreview ?? [])) }}">
                                         <button type="button" data-preview-download="import" data-preview-download-url="{{ route('modules.lineas-chips.detallesimcard.preview.export', ['type' => 'import']) }}" class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50" aria-label="Descargar en xlsx">
-                                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                                <polyline points="7 10 12 15 17 10"></polyline>
-                                                <line x1="12" y1="15" x2="12" y2="3"></line>
-                                            </svg>
+                                            <i data-lucide="download" class="mr-1 h-4 w-4 stroke-[1.3]"></i>
                                             <span>Descargar en xlsx</span>
                                         </button>
                                     </div>
@@ -1290,6 +1318,9 @@
             let bulkDeleteButton = null;
             let bulkDeleteForm = null;
             let bulkDeleteInputs = null;
+            let cotizacionDownloadModal = null;
+            let cotizacionCurrentHref = null;
+            let hasBoundCotizacionDownloadClick = false;
             const hasBulkDestroyRoute = {{ (!empty($bulkDestroyRoute) && $canDelete) ? 'true' : 'false' }};
 
             const getWrapper = () => document.getElementById(listWrapperId);
@@ -1408,6 +1439,99 @@
                 }
 
                 updateBulkActionState();
+            };
+
+            const createCotizacionDownloadModal = () => {
+                if (cotizacionDownloadModal) {
+                    return;
+                }
+
+                cotizacionDownloadModal = document.createElement('div');
+                cotizacionDownloadModal.id = 'cotizacion-download-modal';
+                cotizacionDownloadModal.style.cssText = 'display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;';
+                cotizacionDownloadModal.innerHTML = `
+                    <div style="max-width:520px;width:100%;background:#fff;border-radius:1rem;overflow:hidden;box-shadow:0 24px 80px rgba(15,23,42,0.16);">
+                        <div style="padding:1.25rem;border-bottom:1px solid #e2e8f0;">
+                            <h2 style="margin:0;font-size:1.125rem;font-weight:700;color:#111827;">Descargar cotización</h2>
+                            <p style="margin:0.75rem 0 0;color:#475569;line-height:1.5;">Elige si deseas descargar el PDF con la imagen del producto o sin ella.</p>
+                        </div>
+                        <div style="padding:1.25rem;display:grid;gap:0.75rem;">
+                            <button type="button" data-download-without-image style="width:100%;padding:0.85rem 1rem;border:1px solid #cbd5e1;border-radius:0.75rem;background:#ffffff;color:#111827;font-weight:700;cursor:pointer;">Descargar sin imagen</button>
+                            <button type="button" data-download-with-image style="width:100%;padding:0.85rem 1rem;border:0;border-radius:0.75rem;background:#c71010;color:#fff;font-weight:700;cursor:pointer;">Descargar con imagen</button>
+                            <button type="button" data-download-cancel style="width:100%;padding:0.85rem 1rem;border:1px solid #cbd5e1;border-radius:0.75rem;background:#f8fafc;color:#111827;cursor:pointer;">Cancelar</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(cotizacionDownloadModal);
+
+                const btnWithImage = cotizacionDownloadModal.querySelector('[data-download-with-image]');
+                const btnWithoutImage = cotizacionDownloadModal.querySelector('[data-download-without-image]');
+                const btnCancel = cotizacionDownloadModal.querySelector('[data-download-cancel]');
+
+                const closeModal = () => {
+                    if (!cotizacionDownloadModal) {
+                        return;
+                    }
+                    cotizacionDownloadModal.style.display = 'none';
+                    document.body.style.overflow = '';
+                    cotizacionCurrentHref = null;
+                };
+
+                const navigate = (includeImage) => {
+                    if (!cotizacionCurrentHref) {
+                        return;
+                    }
+                    const targetHref = cotizacionCurrentHref;
+                    closeModal();
+                    const separator = targetHref.includes('?') ? '&' : '?';
+                    window.location.href = targetHref + separator + 'include_image=' + (includeImage ? '1' : '0');
+                };
+
+                if (btnWithImage) {
+                    btnWithImage.addEventListener('click', () => navigate(true));
+                }
+                if (btnWithoutImage) {
+                    btnWithoutImage.addEventListener('click', () => navigate(false));
+                }
+                if (btnCancel) {
+                    btnCancel.addEventListener('click', closeModal);
+                }
+
+                document.addEventListener('keydown', (event) => {
+                    if (!cotizacionDownloadModal || cotizacionDownloadModal.style.display !== 'flex') {
+                        return;
+                    }
+                    if (event.key === 'Escape') {
+                        event.preventDefault();
+                        closeModal();
+                    }
+                });
+            };
+
+            const handleCotizacionDownloadClick = (event) => {
+                const link = event.target.closest('a[data-download-cotizacion]');
+                if (!link) {
+                    return;
+                }
+                if (link.target === '_blank' || event.ctrlKey || event.metaKey) {
+                    return;
+                }
+                event.preventDefault();
+                if (!cotizacionDownloadModal) {
+                    createCotizacionDownloadModal();
+                }
+                cotizacionCurrentHref = link.href;
+                cotizacionDownloadModal.style.display = 'flex';
+                document.body.style.overflow = 'hidden';
+            };
+
+            const initCotizacionDownloadModal = () => {
+                if (hasBoundCotizacionDownloadClick) {
+                    return;
+                }
+                createCotizacionDownloadModal();
+                document.addEventListener('click', handleCotizacionDownloadClick);
+                hasBoundCotizacionDownloadClick = true;
             };
 
             const getRequestParams = () => {
@@ -2461,11 +2585,7 @@
                     <div class="mt-4 flex items-center justify-start" data-preview-export-wrapper="import">
                         <input type="hidden" data-preview-payload="import" value="${encodeURIComponent(JSON.stringify(preview))}">
                         <button type="button" data-preview-download="import" data-preview-download-url="{{ route('modules.lineas-chips.detallesimcard.preview.export', ['type' => 'import']) }}" class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50" aria-label="Descargar en xlsx">
-                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                <polyline points="7 10 12 15 17 10"></polyline>
-                                <line x1="12" y1="15" x2="12" y2="3"></line>
-                            </svg>
+                            <i data-lucide="download" class="mr-1 h-4 w-4 stroke-[1.3]"></i>
                             <span>Descargar en xlsx</span>
                         </button>
                     </div>
@@ -3130,10 +3250,18 @@
                 const deleteActions = Array.isArray(summary?.deleteActions) ? summary.deleteActions : [];
                 const isEdit = actionMode === 'edit';
 
-                deleteConfirmationTitle.textContent = isEdit ? 'Confirmar edición' : '¿Estás seguro?';
+                const isAnular = actionMode === 'anular';
+                const isApprove = actionMode === 'approve';
+                deleteConfirmationTitle.textContent = isEdit
+                    ? 'Confirmar edición'
+                    : isAnular
+                        ? '¿Estás seguro de anular?'
+                        : '¿Estás seguro?';
                 deleteConfirmationMessage.textContent = isEdit
                     ? `Vas a actualizar "${recordLabel}". Si continúas, revisa las relaciones afectadas antes de guardar.`
-                    : `Vas a eliminar "${recordLabel}". Si continúas, el sistema validará la integridad antes de borrar.`;
+                    : isAnular
+                        ? `Vas a anular "${recordLabel}". Si continuas, el registro quedará marcado como anulado.`
+                        : `Vas a eliminar "${recordLabel}". Si continúas, el sistema validará la integridad antes de borrar.`;
 
                 deleteConfirmationDetails.innerHTML = '';
 
@@ -3184,7 +3312,9 @@
 
                 deleteConfirmationHint.textContent = isEdit
                     ? 'Solo guarda cambios si ya verificaste que esta actualización no rompe relaciones.'
-                    : 'No se puede eliminar este registro mientras tenga relaciones activas.';
+                    : isAnular
+                        ? 'Si confirmas, el registro quedará anulado.'
+                        : 'No se puede eliminar este registro mientras tenga relaciones activas.';
                 deleteConfirmationHint.classList.remove('hidden');
 
                 deleteConfirmationActions.innerHTML = '';
@@ -3195,8 +3325,8 @@
                     deleteActions.forEach((action) => {
                         const button = document.createElement('button');
                         button.type = 'button';
-                        button.className = 'rounded-md border px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-50';
-                        button.style.background = 'linear-gradient(90deg, #ef4444, #dc2626)';
+                        button.className = 'rounded-xl border px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-50';
+                        button.style.background = 'linear-gradient(90deg, #ef4444, #c71010)';
                         button.textContent = action.label || 'Eliminar con relación';
                         button.onclick = () => {
                             activeDeleteMode = action.mode || '';
@@ -3220,8 +3350,20 @@
                     deleteConfirmationActions.classList.remove('hidden');
                 }
 
-                deleteConfirmationSubmit.textContent = isEdit ? 'Guardar cambios' : 'Eliminar';
-                deleteConfirmationSubmit.style.background = isEdit ? '#dc2626' : '#c71010';
+                deleteConfirmationSubmit.textContent = isEdit
+                    ? 'Guardar cambios'
+                    : isAnular
+                        ? 'Anular'
+                        : isApprove
+                            ? 'Aprobar'
+                            : 'Eliminar';
+                deleteConfirmationSubmit.style.background = isEdit
+                    ? '#dc2626'
+                    : isAnular
+                        ? '#dc2626'
+                        : isApprove
+                            ? '#d97706'
+                            : '#c71010';
             };
 
             const openDeleteConfirmation = (form, summary = null, actionMode = 'delete') => {
@@ -3230,7 +3372,7 @@
                 }
                 activeDeleteForm = form;
                 activeDeleteSummary = summary;
-                activeDeleteMode = '';
+                activeDeleteMode = actionMode;
                 renderDeleteConfirmation(summary, actionMode);
                 // Force inline styles to prevent global theme tinting
                 deleteConfirmationModal.style.display = 'flex';
@@ -3343,7 +3485,12 @@
                 const resource = form.getAttribute('data-relation-resource') || document.getElementById('erp-list-resource')?.value || '';
                 const recordId = form.getAttribute('data-relation-record-id') || '';
                 const summary = resource && recordId ? await loadRelationSummary(resource, recordId) : { resource, recordId, recordLabel: null, relations: [] };
-                openDeleteConfirmation(form, summary, 'delete');
+                const actionMode = form.getAttribute('data-delete-mode') || 'delete';
+                if (actionMode === 'aprobar') {
+                    openApproveConfirmation(form, summary, actionMode);
+                } else {
+                    openDeleteConfirmation(form, summary, actionMode);
+                }
             };
 
             const initDeleteConfirmation = () => {
@@ -3367,12 +3514,23 @@
                     deleteConfirmationSubmit.removeEventListener('click', closeDeleteConfirmation);
                     deleteConfirmationSubmit.addEventListener('click', () => {
                         if (activeDeleteForm) {
+                            const loadingText = activeDeleteMode === 'anular'
+                                ? 'Anulando...'
+                                : activeDeleteMode === 'edit'
+                                    ? 'Guardando cambios...'
+                                    : activeDeleteMode === 'aprobar'
+                                        ? 'Aprobando...'
+                                        : 'Eliminando...';
+                            deleteConfirmationSubmit.disabled = true;
+                            deleteConfirmationSubmit.classList.add('opacity-70', 'cursor-not-allowed');
+                            deleteConfirmationSubmit.textContent = loadingText;
+
                             const deleteModeInput = activeDeleteForm.querySelector('input[name="deleteMode"]');
                             if (deleteModeInput instanceof HTMLInputElement && activeDeleteMode === '') {
                                 deleteModeInput.remove();
                             }
                             updateBulkActionState();
-                            activeDeleteForm.submit();
+                            setTimeout(() => activeDeleteForm.submit(), 50);
                         }
                     });
                 }
@@ -3388,9 +3546,133 @@
                     wrapper.removeEventListener('click', handleDeleteButtonClick);
                     wrapper.addEventListener('click', handleDeleteButtonClick);
                 }
-
-                resetDeleteConfirmationContent();
             };
+
+            // APPROVE modal handling (separate from delete)
+            let approveConfirmationModal = null;
+            let approveConfirmationTitle = null;
+            let approveConfirmationMessage = null;
+            let approveConfirmationSubmit = null;
+            let approveConfirmationRelations = null;
+            let approveConfirmationHint = null;
+            let approveConfirmationStatus = null;
+            let activeApproveForm = null;
+            let activeApproveMode = '';
+
+            const closeApproveConfirmation = () => {
+                if (!approveConfirmationModal) return;
+                approveConfirmationModal.style.display = 'none';
+                document.body.style.overflow = '';
+                activeApproveForm = null;
+                activeApproveMode = '';
+                if (approveConfirmationStatus) approveConfirmationStatus.classList.add('hidden');
+            };
+
+            const openApproveConfirmation = (form, summary = null, actionMode = 'approve') => {
+                if (!approveConfirmationModal || !approveConfirmationMessage) return;
+                activeApproveForm = form;
+                activeApproveMode = actionMode;
+                renderApproveConfirmation(summary, actionMode);
+                approveConfirmationModal.style.display = 'flex';
+                approveConfirmationModal.style.justifyContent = 'center';
+                approveConfirmationModal.style.alignItems = 'center';
+                approveConfirmationModal.style.background = 'rgba(0,0,0,0.8)';
+                approveConfirmationModal.style.zIndex = '9999';
+                document.body.style.overflow = 'hidden';
+            };
+
+            const renderApproveConfirmation = (summary, actionMode) => {
+                if (!approveConfirmationTitle || !approveConfirmationMessage || !approveConfirmationRelations || !approveConfirmationHint || !approveConfirmationSubmit) {
+                    return;
+                }
+
+                const recordLabel = summary?.recordLabel || summary?.recordId || 'esta cotización';
+                const relations = Array.isArray(summary?.relations) ? summary.relations : [];
+
+                approveConfirmationTitle.textContent = 'Confirmar aprobación';
+                approveConfirmationMessage.textContent = `Vas a aprobar "${recordLabel}". Esta acción cambiará su estado a Aprobada.`;
+
+                approveConfirmationRelations.innerHTML = '';
+                if (relations.length > 0) {
+                    const relationList = document.createElement('div');
+                    relationList.style.display = 'flex';
+                    relationList.style.flexDirection = 'column';
+                    relationList.style.gap = '12px';
+
+                    relations.forEach((relation) => {
+                        const block = document.createElement('div');
+                        block.className = 'rounded-md border border-amber-800 bg-white px-4 py-3';
+                        const heading = document.createElement('div');
+                        heading.className = 'font-semibold text-amber-900';
+                        heading.textContent = `Relacionado con ${relation.label} (${relation.count})`;
+                        const body = document.createElement('p');
+                        body.className = 'mt-1 text-sm text-amber-800 leading-6';
+                        body.textContent = relation.records && Array.isArray(relation.records) && relation.records.length > 0 ? relation.records.join(', ') : 'sin detalle adicional';
+                        block.appendChild(heading);
+                        block.appendChild(body);
+                        relationList.appendChild(block);
+                    });
+
+                    approveConfirmationRelations.appendChild(relationList);
+                    approveConfirmationRelations.classList.remove('hidden');
+                } else {
+                    approveConfirmationRelations.classList.add('hidden');
+                }
+
+                approveConfirmationHint.textContent = 'Si confirmas, la cotización quedará en estado Aprobada.';
+                approveConfirmationHint.classList.remove('hidden');
+            };
+
+            const initApproveConfirmation = () => {
+                approveConfirmationModal = document.getElementById('approve-confirmation-modal');
+                approveConfirmationTitle = approveConfirmationModal ? approveConfirmationModal.querySelector('#approve-confirmation-title') : null;
+                approveConfirmationMessage = approveConfirmationModal ? approveConfirmationModal.querySelector('#approve-confirmation-message') : null;
+                approveConfirmationSubmit = approveConfirmationModal ? approveConfirmationModal.querySelector('#approve-confirmation-submit') : null;
+                approveConfirmationRelations = approveConfirmationModal ? approveConfirmationModal.querySelector('#approve-confirmation-relations') : null;
+                approveConfirmationHint = approveConfirmationModal ? approveConfirmationModal.querySelector('#approve-confirmation-hint') : null;
+                approveConfirmationStatus = approveConfirmationModal ? approveConfirmationModal.querySelector('#approve-confirmation-status') : null;
+
+                if (approveConfirmationModal && approveConfirmationModal.parentElement !== document.body) {
+                    document.body.appendChild(approveConfirmationModal);
+                }
+
+                if (approveConfirmationModal) {
+                    approveConfirmationModal.querySelectorAll('[data-approve-modal-close]').forEach((button) => {
+                        button.removeEventListener('click', closeApproveConfirmation);
+                        button.addEventListener('click', closeApproveConfirmation);
+                    });
+                }
+
+                if (approveConfirmationSubmit) {
+                    approveConfirmationSubmit.removeEventListener('click', () => {});
+                    approveConfirmationSubmit.addEventListener('click', () => {
+                        if (activeApproveForm) {
+                            approveConfirmationSubmit.disabled = true;
+                            approveConfirmationSubmit.classList.add('opacity-70', 'cursor-not-allowed');
+                            approveConfirmationSubmit.textContent = 'Aprobando...';
+                            if (approveConfirmationStatus) approveConfirmationStatus.classList.remove('hidden');
+
+                            const batchId = activeApproveForm.getAttribute('data-batch-id') || '';
+                            if (batchId) {
+                                // submit all approve forms that share the same batch id
+                                const selector = `form.delete-confirmation-form[data-delete-mode="aprobar"][data-batch-id="${batchId}"]`;
+                                const forms = Array.from(document.querySelectorAll(selector));
+                                // ensure unique and submit sequentially
+                                const uniqueForms = Array.from(new Set(forms));
+                                uniqueForms.forEach((f, i) => {
+                                    setTimeout(() => {
+                                        try { f.submit(); } catch (e) { console.error('Error submitting approve form', e); }
+                                    }, i * 120);
+                                });
+                            } else {
+                                // default single submit
+                                setTimeout(() => activeApproveForm.submit(), 50);
+                            }
+                        }
+                    });
+                }
+            };
+
 
             const init = () => {
                 form = getForm();
@@ -3440,7 +3722,9 @@
 
                 attachPaginationLinks();
                 initDeleteConfirmation();
+                initApproveConfirmation();
                 initBulkSelection();
+                initCotizacionDownloadModal();
                 initDetallesimcardQuickActions();
                 initHistoryToggle();
                 initAuditActionDetailModal();

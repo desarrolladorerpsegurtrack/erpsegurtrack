@@ -58,6 +58,11 @@ class VehiculosController extends Controller
             $query->where('v.marca', 'like', '%' . $marcaFilter . '%');
         }
 
+        $tractoFilter = trim((string) $request->input('tracto', ''));
+        if ($tractoFilter !== '') {
+            $query->where('v.tracto', 'like', '%' . $tractoFilter . '%');
+        }
+
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
             $term = '%' . $search . '%';
@@ -75,7 +80,7 @@ class VehiculosController extends Controller
             });
         }
 
-        $items = $query->orderBy('v.placa')->paginate($this->resolvePerPage($request))->withQueryString();
+        $items = $query->orderBy('v.cliente_idcliente')->paginate($this->resolvePerPage($request))->withQueryString();
 
         // Adjuntar relation_groups por cada fila para que el listado pueda
         // desplegar las relaciones (dispositivos) usando el partial cliente.relation-panel
@@ -161,6 +166,7 @@ class VehiculosController extends Controller
                 ['key' => 'tipo_vehiculo', 'label' => 'Tipo', 'type' => 'text'],
                 ['key' => 'anio', 'label' => 'Año', 'type' => 'text'],
                 ['key' => 'marca', 'label' => 'Marca', 'type' => 'text'],
+                ['key' => 'tracto', 'label' => 'Tracto', 'type' => 'text'],
             ],
             'stats' => [
                 ['label' => 'Total de vehículos', 'value' => (clone $query)->count()],
@@ -195,6 +201,12 @@ class VehiculosController extends Controller
                     'label' => 'Marca',
                     'type' => 'text',
                     'placeholder' => 'Filtrar por marca',
+                ],
+                [
+                    'name' => 'tracto',
+                    'label' => 'Tracto',
+                    'type' => 'text',
+                    'placeholder' => 'Filtrar por tracto',
                 ],
             ],
             'createRoute' => route('modules.vehiculos.create'),

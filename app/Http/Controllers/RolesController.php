@@ -56,7 +56,7 @@ class RolesController extends Controller
             'submodules' => [
                 'ventas.planes_servicios' => 'Planes y servicios',
                 'ventas.cotizaciones' => 'Cotizaciones',
-                'ventas.personal' => 'DNI Personal',
+                'ventas.personal' => 'Personal Cotizadora',
             ],
         ],
         'configuracion' => [

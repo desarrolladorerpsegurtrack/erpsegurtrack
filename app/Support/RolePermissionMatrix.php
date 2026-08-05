@@ -14,7 +14,7 @@ class RolePermissionMatrix
             'submodules' => [
                 'ventas.planes_servicios' => 'Planes y servicios',
                 'ventas.cotizaciones' => 'Cotizaciones',
-                'ventas.personal' => 'DNI Personal',
+                'ventas.personal' => 'Personal Cotizadora',
             ],
         ],
         'cuentasporcobrar' => 'Cuentas por Cobrar',
@@ -370,7 +370,7 @@ class RolePermissionMatrix
 
 
             if (!$hasCotVer || !$hasCotCreateOrEdit) {
-                $errors[] = 'Para asignar permisos de DNI Personal debes dar primero permisos de Cotizaciones: Ver y Crear o Editar.';
+                $errors[] = 'Para asignar permisos de Personal Cotizadora debes dar primero permisos de Cotizaciones: Ver y Crear o Editar.';
             }
         }
 

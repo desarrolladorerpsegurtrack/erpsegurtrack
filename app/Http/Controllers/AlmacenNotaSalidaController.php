@@ -932,16 +932,9 @@ class AlmacenNotaSalidaController extends Controller
             ->get()
             ->map(fn($row): array => [
                 'value' => (string) $row->idalmacen,
-                'label' => trim(
-                    (string) (
-                        trim((string) ($row->razonSocial ?? '')) !== ''
-                        ? trim((string) $row->razonSocial)
-                        : 'Sin empresa'
-                    ) . ' - ' . trim((string) ($row->detalle ?? 'Sin detalle'))
-                ),
+                'label' => trim((string) ($row->detalle ?? 'Sin detalle')),
                 'idalmacen' => (int) $row->idalmacen,
                 'detalle' => trim((string) ($row->detalle ?? 'Sin detalle')),
-                'razonSocial' => trim((string) ($row->razonSocial ?? '')),
                 'stock' => (int) ($stockByDevice[$row->idalmacen] ?? 0),
             ]);
     }

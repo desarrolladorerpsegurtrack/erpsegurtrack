@@ -29,7 +29,7 @@ class AlmacenController extends Controller
         $statsQuery = clone $baseQuery;
 
         $items = $baseQuery
-            ->orderByDesc('a.idalmacen')
+            ->orderBy('a.idalmacen')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
 
@@ -60,11 +60,10 @@ class AlmacenController extends Controller
             'lockResource' => self::LOCK_RESOURCE,
             'showActionsColumn' => true,
             'columns' => [
-                ['key' => 'idalmacen', 'label' => 'ID', 'type' => 'text'],
                 ['key' => 'empresa_label', 'label' => 'Empresa', 'type' => 'text', 'wrap' => true],
+                ['key' => 'detalle', 'label' => 'Dispositivo', 'type' => 'text', 'wrap' => true],
                 ['key' => 'modelo_label', 'label' => 'Modelo', 'type' => 'text', 'wrap' => true],
                 ['key' => 'marca_label', 'label' => 'Marca', 'type' => 'text', 'wrap' => true],
-                ['key' => 'tipo_elemento_label', 'label' => 'Tipo elemento', 'type' => 'text', 'wrap' => true],
                 ['key' => 'tecnologia_label', 'label' => 'Tecnología', 'type' => 'text', 'wrap' => true],
                 ['key' => 'unidad_medida_label', 'label' => 'Unidad medida', 'type' => 'text', 'wrap' => true],
                 ['key' => 'cantidad', 'label' => 'Cantidad', 'type' => 'text'],
@@ -84,7 +83,7 @@ class AlmacenController extends Controller
                 [
                     'name' => 'modelo_idmodelo',
                     'label' => 'Modelo',
-                    'options' => $this->modeloOptions(),
+                    'options' => $this->modeloOption(),
                     'placeholder' => 'Todos los modelos',
                 ],
                 [
@@ -141,11 +140,10 @@ class AlmacenController extends Controller
         $selectedIds = $request->input('selectedIds', []);
 
         $columns = [
-            ['key' => 'idalmacen', 'label' => 'ID'],
             ['key' => 'empresa_label', 'label' => 'Empresa'],
+            ['key' => 'detalle', 'label' => 'Dispositivo'],
             ['key' => 'modelo_label', 'label' => 'Modelo'],
             ['key' => 'marca_label', 'label' => 'Marca'],
-            ['key' => 'tipo_elemento_label', 'label' => 'Tipo elemento'],
             ['key' => 'tecnologia_label', 'label' => 'Tecnología'],
             ['key' => 'unidad_medida_label', 'label' => 'Unidad medida'],
             ['key' => 'cantidad', 'label' => 'Cantidad'],
@@ -154,7 +152,7 @@ class AlmacenController extends Controller
 
         $filename = 'almacen_export_' . now()->format('Ymd_His') . '.' . $format;
 
-         if (!empty($selectedIds) && is_array($selectedIds)) {
+        if (!empty($selectedIds) && is_array($selectedIds)) {
             $rows = $this->baseQuery($request)->whereIn('a.idalmacen', array_values($selectedIds))->orderBy('a.idalmacen')->get();
 
             if ($format === 'xlsx') {
@@ -333,7 +331,7 @@ class AlmacenController extends Controller
                 DB::raw("COALESCE(ep.razonSocial, 'Sin razón social') as empresa_label"),
                 DB::raw("COALESCE(m.nombreModelo, 'Sin modelo') as modelo_label"),
                 DB::raw("COALESCE(ma.nombreMarca, 'Sin marca') as marca_label"),
-                DB::raw("CONCAT(COALESCE(te.nombre, 'Sin tipo'), IF(COALESCE(te.detalle, '') != '', CONCAT(' - ', te.detalle), ''), IF(COALESCE(p.nombrePlataforma, '') != '', CONCAT(' - ', p.nombrePlataforma), '')) as tipo_elemento_label"),
+                DB::raw("CONCAT(COALESCE(te.nombre, 'Sin tipo'), IF(COALESCE(te.detalle, '') != '', CONCAT(' - ', te.detalle), '')) as tipo_elemento_label"),
                 DB::raw("COALESCE(tg.nombreTecnologia, 'Sin tecnología') as tecnologia_label"),
                 DB::raw("COALESCE(um.nomenclatura, 'Sin unidad') as unidad_medida_label"),
                 DB::raw('COALESCE(eac.cantidad, 0) as cantidad')
@@ -518,7 +516,7 @@ class AlmacenController extends Controller
                         'ListaPrecio_idListaPrecio' => (string) data_get($row, 'ListaPrecio_idListaPrecio', ''),
                         'listaprecio_nombre' => (string) data_get($row, 'listaprecio_nombre', ''),
                         'precio' => (string) data_get($row, 'precio', ''),
-                        'label' => trim((string) data_get($row, 'listaprecio_nombre', '') . ' - S/ ' . number_format((float) data_get($row, 'precio', 0), 2, ',', '.')),
+                        'label' => trim((string) data_get($row, 'listaprecio_nombre', '') . ' - $ ' . number_format((float) data_get($row, 'precio', 0), 2, ',', '.')),
                     ];
                 })->all(),
             ],
@@ -528,7 +526,7 @@ class AlmacenController extends Controller
                 'label' => 'Detalle',
                 'required' => true,
                 'maxlength' => 200,
-                'placeholder' => 'Información adicional sobre el elemento en el almacén', 
+                'placeholder' => 'Información adicional sobre el elemento en el almacén',
             ],
             [
                 'name' => 'imagen',
@@ -593,17 +591,43 @@ class AlmacenController extends Controller
             });
     }
 
+    private function modeloOption(): Collection
+{
+    return DB::table('modelo as m')
+        ->orderBy('m.nombreModelo')
+        ->orderBy('m.idmodelo')
+        ->get()
+        ->map(function ($row): array {
+            $nombreModelo = trim((string) ($row->nombreModelo ?? ''));
+
+            return [
+                'value' => (string) $row->idmodelo,
+                'label' => $nombreModelo !== '' ? $nombreModelo : 'Sin nombre',
+            ];
+        });
+}
     private function modeloOptions(): Collection
     {
         return DB::table('modelo as m')
+            ->leftJoin('marca as ma', 'm.marca_idmarca', '=', 'ma.idmarca')
             ->orderBy('m.nombreModelo')
             ->orderBy('m.idmodelo')
             ->get()
             ->map(function ($row): array {
-                $nombre = trim((string) ($row->nombreModelo ?? ''));
+                $nombreModelo = trim((string) ($row->nombreModelo ?? ''));
+                $nombreMarca = trim((string) ($row->nombreMarca ?? ''));
+                $labelParts = [];
+
+                if ($nombreModelo !== '') {
+                    $labelParts[] = $nombreModelo;
+                }
+                if ($nombreMarca !== '') {
+                    $labelParts[] = $nombreMarca;
+                }
+
                 return [
                     'value' => (string) $row->idmodelo,
-                    'label' => trim((string) ($nombre !== '' ? $nombre : 'Sin nombre')),
+                    'label' => trim((string) (count($labelParts) > 0 ? implode(' - ', $labelParts) : 'Sin nombre')),
                 ];
             });
     }
@@ -639,8 +663,8 @@ class AlmacenController extends Controller
                 $plataforma = trim((string) ($row->nombrePlataforma ?? ''));
 
                 $labelBody = trim(
-                    $nombre . 
-                    ($detalle !== '' ? ' - ' . $detalle : '') . 
+                    $nombre .
+                    ($detalle !== '' ? ' - ' . $detalle : '') .
                     ($plataforma !== '' ? ' - ' . $plataforma . '' : '')
                 );
 
@@ -694,7 +718,7 @@ class AlmacenController extends Controller
 
                 return [
                     'value' => (string) $row->idListaPrecio,
-                    'label' => trim((string)($nombre !== '' ? $nombre : 'Sin nombre')),
+                    'label' => trim((string) ($nombre !== '' ? $nombre : 'Sin nombre')),
                 ];
             });
     }
@@ -725,7 +749,7 @@ class AlmacenController extends Controller
         }
 
         $normalized = collect($payload)
-            ->filter(fn ($item) => is_array($item))
+            ->filter(fn($item) => is_array($item))
             ->map(function (array $item): array {
                 return [
                     'ListaPrecio_idListaPrecio' => (int) data_get($item, 'ListaPrecio_idListaPrecio', data_get($item, 'listaprecio_id', 0)),
@@ -784,7 +808,7 @@ class AlmacenController extends Controller
             return '-';
         }
 
-        return 'S/ ' . number_format((float) $value, 2, ',', '.');
+        return '$ ' . number_format((float) $value, 2, ',', '.');
     }
 
     private function formatYesNo(mixed $value): string

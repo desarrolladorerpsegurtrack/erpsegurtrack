@@ -235,7 +235,7 @@ class CotizacionService
             [
                 'name' => 'personal_dniPersonal',
                 'type' => 'text',
-                'label' => 'DNI Personal',
+                'label' => 'Personal Cotizadora',
                 'helpText' => 'DNI del personal que emite la cotización.',
             ],
             [
@@ -417,7 +417,7 @@ class CotizacionService
                     [
                         'name' => 'personal_dniPersonal_label',
                         'type' => 'text',
-                        'label' => 'DNI Personal',
+                        'label' => 'Personal Cotizadora',
                         'readonly' => true,
                         'value' => $labelValue,
                     ],
@@ -532,6 +532,7 @@ class CotizacionService
                 'a.precio',
                 'a.precio as precioUnitario',
                 'a.detalle',
+                'a.periodo',
                 'ep.razonSocial',
                 'te.nombre as tipo_nombre',
                 'te.detalle as tipo_detalle',
@@ -541,9 +542,16 @@ class CotizacionService
             ->orderBy('a.detalle')
             ->get()
             ->map(function ($row) {
-                $tipo = trim((string) ($row->tipo_nombre ?? '')) . ' - ' . trim((string) ($row->tipo_detalle ?? '')) . '-' . trim((string) ($row->nombrePlataforma ?? ''));
-                $empresa = trim((string) ($row->razonSocial ?? ''));
-                $label = trim(($tipo !== '' ? $tipo : 'Sin tipo') . ' - ' . ($empresa !== '' ? $empresa : (trim((string) ($row->detalle ?? '')) ?: 'Sin empresa')));
+                $almacenDetalle = trim((string) ($row->detalle ?? ''));
+                $label = trim((($almacenDetalle !== '' ? $almacenDetalle : 'Sin dispositivo')));
+                
+                $tipoNombre = mb_strtolower(trim((string) ($row->tipo_nombre ?? '')));
+                $isPlanServicio = str_contains($tipoNombre, 'plan') || str_contains($tipoNombre, 'servicio');
+                
+                if ($isPlanServicio && !empty($row->periodo)) {
+                    $label .= ' - ' . trim((string) $row->periodo);
+                }
+
                 return (object) [
                     'idalmacen' => $row->idalmacen,
                     'label' => $label,

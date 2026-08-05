@@ -164,9 +164,9 @@ class LineasChipsController extends Controller
                     'type' => 'text',
                     'label' => 'Número telefónico',
                     'required' => true,
-                    'maxlength' => 9,
+                    'maxlength' => 30,
                     'minlength' => 9,
-                    'helpText' => 'Ingrese 9 digitos.',
+                    'helpText' => 'Ingrese mínimo 9 digitos, sin guiones ni espacios.',
                 ],
                 [
                     'name' => 'estado',
@@ -193,9 +193,9 @@ class LineasChipsController extends Controller
                     'label' => 'ID SimCard',
                     'required' => true,
                     'maxlength' => 50,
-                    'minlength' => 2,
+                    'minlength' => 10,
                     'quickCreateSimcard' => true,
-                    'helpText' => 'Se muestra solo si desea crear la SimCard junto al número.',
+                    'helpText' => 'Ingrese mínimo 10 digitos, sin guiones ni espacios.',
                 ],
                 [
                     'name' => 'operador_idoperador_simcard',
@@ -229,13 +229,13 @@ class LineasChipsController extends Controller
         $wantsSimCard = $request->boolean('desea_relacionar_simcard');
 
         $validated = $request->validate([
-            'numeroTelefonico' => ['required', 'string', 'min:9', 'max:9', 'regex:' . self::SAFE_TEXT_REGEX, 'unique:numerotelefonico,numeroTelefonico'],
+            'numeroTelefonico' => ['required', 'string', 'min:9', 'max:30', 'regex:' . self::SAFE_TEXT_REGEX, 'unique:numerotelefonico,numeroTelefonico'],
             'estado' => ['required', 'string', $wantsSimCard ? Rule::in(['1']) : Rule::in(['0', '1'])],
             'idsimCard' => [
                 Rule::requiredIf($wantsSimCard),
                 'nullable',
                 'string',
-                'min:2',
+                'min:10',
                 'max:50',
                 'regex:' . self::SAFE_TEXT_REGEX,
                 Rule::unique('simcard', 'idsimCard'),
@@ -323,10 +323,10 @@ class LineasChipsController extends Controller
                     'type' => 'text',
                     'label' => 'Número telefónico',
                     'required' => true,
-                    'maxlength' => 9,
+                    'maxlength' => 30,
                     'minlength' => 9,
                     'readonly' => false,
-                    'helpText' => 'Ingrese 9 digitos.',
+                    'helpText' => 'Ingrese mínimo 9 digitos, sin guiones ni espacios.',
                 ],
                 [
                     'name' => 'estado',
@@ -378,7 +378,7 @@ class LineasChipsController extends Controller
                 'required',
                 'string',
                 'min:9',
-                'max:9',
+                'max:30',
                 'regex:' . self::SAFE_TEXT_REGEX,
                 Rule::unique('numerotelefonico', 'numeroTelefonico')->ignore($id, 'numeroTelefonico'),
             ],
@@ -845,7 +845,7 @@ class LineasChipsController extends Controller
                     'label' => 'ID SimCard',
                     'required' => true,
                     'maxlength' => 50,
-                    'minlength' => 2,
+                    'minlength' => 10,
                     'helpText' => 'Ingrese un identificador para la SimCard.',
                 ],
                 [
@@ -879,10 +879,10 @@ class LineasChipsController extends Controller
                     'type' => 'text',
                     'label' => 'Número telefónico',
                     'required' => true,
-                    'maxlength' => 9,
+                    'maxlength' => 30,
                     'minlength' => 9,
                     'quickCreateNumero' => true,
-                    'helpText' => 'Se muestra solo si desea crear el número junto con la SimCard.',
+                    'helpText' => 'Ingrese mínimo 9 digitos, sin guiones ni espacios.',
                 ],
                 [
                     'name' => 'estado_numero',
@@ -907,7 +907,7 @@ class LineasChipsController extends Controller
         $wantsNumero = $request->boolean('desea_relacionar_numero');
 
         $validated = $request->validate([
-            'idsimCard' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX, 'unique:simcard,idsimCard'],
+            'idsimCard' => ['required', 'string', 'min:10', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX, 'unique:simcard,idsimCard'],
             'operador_idoperador' => ['required', 'integer', 'exists:operador,idoperador'],
             'estado' => ['required', 'string', $wantsNumero ? Rule::in(['1']) : Rule::in(['0', '1'])],
             'numeroTelefonico' => [
@@ -915,7 +915,7 @@ class LineasChipsController extends Controller
                 'nullable',
                 'string',
                 'min:9',
-                'max:9',
+                'max:30',
                 'regex:' . self::SAFE_TEXT_REGEX,
                 Rule::unique('numerotelefonico', 'numeroTelefonico'),
             ],
@@ -1003,7 +1003,7 @@ class LineasChipsController extends Controller
                     'label' => 'ID SimCard',
                     'required' => true,
                     'maxlength' => 50,
-                    'minlength' => 2,
+                    'minlength' => 10,
                     'disabled' => true,
                 ],
                 [

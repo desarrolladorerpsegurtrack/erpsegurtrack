@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::redirect('/', '/home');
 Route::get('/api/consultar-documento', [\App\Http\Controllers\ConsultaDocumentoController::class, 'consultar'])->name('api.consultar.documento');
+Route::get('/api/consultar-placa', [\App\Http\Controllers\VehiculosController::class, 'consultarPlaca'])->name('api.consultar.placa');
 
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
 Route::post('/login', [AuthController::class, 'login'])->name('login.attempt');

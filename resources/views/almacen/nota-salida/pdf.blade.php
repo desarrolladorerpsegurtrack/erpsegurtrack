@@ -5,26 +5,94 @@
     <meta charset="utf-8">
     <title>Nota de Salida</title>
     <style>
-        body { font-family: DejaVu Sans, sans-serif; color: #111; font-size: 12px; margin: 0; padding: 0; }
-        .page { padding: 24px; }
-        .header-table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
-        .header-table td { vertical-align: middle; border: none; padding: 0; }
-        .logo { width: 30%; }
-        .logo img { max-height: 60px; display: block; }
-        .title-block { width: 70%; text-align: right; }
-        .title-block h1 { margin: 0; font-size: 20px; letter-spacing: .05em; }
-        .section { margin-bottom: 16px; }
-        .section-header { font-size: 14px; font-weight: 700; border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 10px; }
-        .details, .summary { width: 100%; border-collapse: collapse; }
-        .details td, .details th, .summary td, .summary th { padding: 6px 8px; border: 1px solid #ccc; vertical-align: top; }
-        .details th { background: #f6f6f6; font-weight: 700; text-align: left; }
-        .details td { font-size: 11px; }
-        .items-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        .items-table th, .items-table td { padding: 8px 10px; border: 1px solid #ccc; }
-        .items-table th { background: #f6f6f6; font-size: 11px; text-align: left; }
-        .items-table td { font-size: 11px; }
-        .items-table .imeis { white-space: pre-wrap; word-break: break-all; }
-        .footer { margin-top: 18px; font-size: 11px; }
+        body { 
+            font-family: DejaVu Sans, sans-serif; 
+            color: #111; 
+            font-size: 12px; 
+            margin: 0; 
+            padding: 0; 
+        }
+        .page { 
+            padding: 24px; 
+        }
+        .header-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-bottom: 18px; 
+        }
+        .header-table td { 
+            vertical-align: middle; 
+            border: none; 
+            padding: 0; 
+        }
+        .logo { 
+            width: 30%; 
+        }
+        .logo img { 
+            max-height: 70px; 
+            display: block; 
+        }
+        .title-block { 
+            width: 70%; 
+            text-align: right; 
+        }
+        .title-block h1 { 
+            margin: 0; 
+            font-size: 20px; 
+            letter-spacing: .05em; 
+        }
+        .section { 
+            margin-bottom: 16px; 
+        }
+        .section-header { 
+            font-size: 14px; 
+            font-weight: 700; 
+            border-bottom: 2px solid #000; 
+            padding-bottom: 4px; 
+            margin-bottom: 10px; 
+        }
+        .details, .summary { 
+            width: 100%; 
+            border-collapse: collapse; 
+        }
+        .details td, .details th, .summary td, .summary th { 
+            padding: 6px 8px; 
+            border: 1px solid #ccc; 
+            vertical-align: top; 
+        }
+        .details th { 
+            background: #f6f6f6; 
+            font-weight: 700; 
+            text-align: left; 
+        }
+        .details td { 
+            font-size: 11px; 
+        }
+        .items-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 10px; 
+        }
+        .items-table th, .items-table td { 
+            padding: 8px 10px; 
+            border: 1px solid #ccc; 
+        }
+        .items-table th { 
+            background: #f6f6f6; 
+            font-size: 11px; 
+            text-align: left; 
+        }
+        .items-table td { 
+            font-size: 11px; 
+        }
+        .items-table .imeis { 
+            white-space: pre-wrap; 
+            word-break: break-all; 
+        }
+        .footer { 
+            margin-top: 18px; 
+            font-size: 11px; 
+        }
     </style>
 </head>
 <body>

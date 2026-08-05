@@ -35,7 +35,7 @@
         }
 
         .logo img {
-            max-height: 60px;
+            max-height: 70px;
             display: block;
         }
 

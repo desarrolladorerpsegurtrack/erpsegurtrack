@@ -236,7 +236,7 @@ class AuthController extends Controller
         ?string $personalDni = null
     ): void {
         try {
-            DB::table('auditoria')->insert([
+            DB::connection('audit')->table('auditoria')->insert([
                 'usuario' => $usuario,
                 'personal_dni' => $personalDni,
                 'modulo' => 'auth',

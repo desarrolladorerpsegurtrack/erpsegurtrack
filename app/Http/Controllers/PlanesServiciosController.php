@@ -28,7 +28,7 @@ class PlanesServiciosController extends Controller
         $statsQuery = clone $baseQuery;
 
         $items = $baseQuery
-            ->orderByDesc('a.idalmacen')
+            ->orderBy('a.idalmacen')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
 
@@ -58,12 +58,12 @@ class PlanesServiciosController extends Controller
             'lockResource' => self::LOCK_RESOURCE,
             'showActionsColumn' => true,
             'columns' => [
-                ['key' => 'idalmacen', 'label' => 'ID', 'type' => 'text'],
                 ['key' => 'empresa_label', 'label' => 'Empresa', 'type' => 'text', 'wrap' => true],
+                ['key' => 'detalle', 'label' => 'Detalle', 'type' => 'text', 'wrap' => true],
                 ['key' => 'tipo_elemento_label', 'label' => 'Tipo elemento', 'type' => 'text', 'wrap' => true],
                 ['key' => 'precio_label', 'label' => 'Precio', 'type' => 'text'],
+                ['key' => 'periodo', 'label' => 'Periodo', 'type' => 'text', 'wrap' => true],
                 ['key' => 'renovacion_label', 'label' => 'Renovación', 'type' => 'text', 'wrap' => true],
-                ['key' => 'detalle', 'label' => 'Detalle', 'type' => 'text', 'wrap' => true],
             ],
             'stats' => [
                 ['label' => 'Total registros', 'value' => $stats['total']],
@@ -90,6 +90,18 @@ class PlanesServiciosController extends Controller
                     'placeholder' => 'Ej: 50.00',
                 ],
                 [
+                    'name' => 'detalle_search',
+                    'label' => 'Detalle',
+                    'type' => 'text',
+                    'placeholder' => 'Buscar por detalle',
+                ],
+                [
+                    'name' => 'periodo_search',
+                    'label' => 'Periodo',
+                    'type' => 'text',
+                    'placeholder' => 'Ej: Mensual, 3 Meses, 6 Meses',
+                ],
+                [
                     'name' => 'renovacion',
                     'label' => 'Renovación',
                     'type' => 'select',
@@ -104,6 +116,7 @@ class PlanesServiciosController extends Controller
                 'pdf' => route('modules.ventas.planes-servicios.export', ['format' => 'pdf']),
                 'xlsx' => route('modules.ventas.planes-servicios.export', ['format' => 'xlsx']),
             ],
+            'tableWrapperClass' => 'planes-servicios-table',
         ]);
     }
 
@@ -127,10 +140,11 @@ class PlanesServiciosController extends Controller
         $columns = [
             ['key' => 'idalmacen', 'label' => 'ID'],
             ['key' => 'empresa_label', 'label' => 'Empresa'],
+            ['key' => 'detalle', 'label' => 'Detalle'],
             ['key' => 'tipo_elemento_label', 'label' => 'Tipo elemento'],
             ['key' => 'precio', 'label' => 'Precio'],
             ['key' => 'renovacion', 'label' => 'Renovación'],
-            ['key' => 'detalle', 'label' => 'Detalle'],
+            ['key' => 'periodo', 'label' => 'Periodo'],
         ];
 
         $filename = 'planes_servicios_export_' . now()->format('Ymd_His') . '.' . $format;
@@ -282,10 +296,11 @@ class PlanesServiciosController extends Controller
                 'a.detalle',
                 'a.precio',
                 'a.renovacion',
-                DB::raw("CONCAT(COALESCE(a.empresaPropietaria_RUC, ''), ' - ', COALESCE(ep.razonSocial, 'Sin razón social')) as empresa_label"),
+                'a.periodo',
+                DB::raw("CONCAT(COALESCE(ep.razonSocial, 'Sin razón social')) as empresa_label"),
                 DB::raw("COALESCE(m.nombreModelo, 'Sin modelo') as modelo_label"),
                 DB::raw("COALESCE(ma.nombreMarca, 'Sin marca') as marca_label"),
-                DB::raw("COALESCE(te.nombre, 'Sin tipo') as tipo_elemento_label"),
+                DB::raw("COALESCE(NULLIF(CONCAT_WS('-', te.nombre, te.detalle, p.nombrePlataforma), ''), 'Sin tipo') as tipo_elemento_label"),
                 DB::raw("COALESCE(tg.nombreTecnologia, 'Sin tecnología') as tecnologia_label"),
                 DB::raw("COALESCE(um.nomenclatura, 'Sin unidad') as unidad_medida_label")
             );
@@ -305,7 +320,8 @@ class PlanesServiciosController extends Controller
                     ->orWhere('p.nombrePlataforma', 'like', $term)
                     ->orWhere('tg.nombreTecnologia', 'like', $term)
                     ->orWhere('um.detalle', 'like', $term)
-                    ->orWhere('um.nomenclatura', 'like', $term);
+                    ->orWhere('um.nomenclatura', 'like', $term)
+                    ->orWhere('a.periodo', 'like', $term);
             });
         }
 
@@ -326,6 +342,16 @@ class PlanesServiciosController extends Controller
                         ->orWhere('te.detalle', 'like', $term)
                         ->orWhere('p.nombrePlataforma', 'like', $term);
             });
+        }
+
+        $detalleSearch = trim((string) $request->input('detalle_search', ''));
+        if ($detalleSearch !== '') {
+            $query->where('a.detalle', 'like', '%' . $detalleSearch . '%');
+        }
+
+        $periodoSearch = trim((string) $request->input('periodo_search', ''));
+        if ($periodoSearch !== '') {
+            $query->where('a.periodo', 'like', '%' . $periodoSearch . '%');
         }
 
         $precioSearch = trim((string) $request->input('precio_search', ''));
@@ -404,12 +430,21 @@ class PlanesServiciosController extends Controller
                 'placeholder' => 'Selecciona estado',
             ],
             [
+                'name' => 'periodo',
+                'type' => 'text',
+                'label' => 'Periodo',
+                'required' => false,
+                'maxlength' => 50,
+                'placeholder' => 'Ej: Mensual, 3 Meses, 6 Meses',
+                'datalistOptions' => ['No','Mensual', '3 Meses', '6 Meses', '12 Meses', '24 Meses', '36 Meses', '48 Meses'],
+            ],
+            [
                 'name' => 'detalle',
                 'type' => 'textarea',
                 'label' => 'Detalle',
                 'required' => true,
                 'maxlength' => 200,
-                'placeholder' => 'Información adicional sobre el plan o servicio',
+                'placeholder' => 'Información sobre el plan o servicio',
             ],
         ];
     }
@@ -425,6 +460,7 @@ class PlanesServiciosController extends Controller
             'empresaPropietaria_RUC' => ['required', 'integer', Rule::exists('empresapropietaria', 'RUC')],
             'tipoElemento_idtipoElemento' => ['required', 'integer', Rule::in($allowedTipoElementoIds)],
             'detalle' => ['nullable', 'string', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
+            'periodo' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
             'precio' => ['nullable', 'numeric', 'min:0'],
             'renovacion' => ['nullable', 'integer', Rule::in([0, 1])],
         ]);
@@ -443,6 +479,7 @@ class PlanesServiciosController extends Controller
             'usaRedMovil' => null,
             'cantidadDisponible' => null,
             'detalle' => $this->nullableString($validated['detalle'] ?? null),
+            'periodo' => $this->nullableString($validated['periodo'] ?? null),
             'precio' => $this->nullableNumber($validated['precio'] ?? null),
             'renovacion' => array_key_exists('renovacion', $validated) && $validated['renovacion'] !== null
                 ? (int) $validated['renovacion']

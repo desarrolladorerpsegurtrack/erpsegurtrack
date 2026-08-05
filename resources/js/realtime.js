@@ -1,7 +1,13 @@
-const wsHost = import.meta.env.VITE_WS_SERVER_HOST || window.location.hostname;
-const wsPort = import.meta.env.VITE_WS_SERVER_PORT || 6001;
 const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-const wsUrl = `${wsScheme}://${wsHost}:${wsPort}`;
+const isHttpsPage = window.location.protocol === 'https:';
+const wsHost = isHttpsPage
+    ? (import.meta.env.VITE_WS_SERVER_HOST || window.location.hostname)
+    : window.location.hostname;
+const wsPort = isHttpsPage
+    ? import.meta.env.VITE_WS_SERVER_PORT
+    : (import.meta.env.VITE_WS_LOCAL_PORT || 6001);
+const wsPortSegment = wsPort ? `:${wsPort}` : '';
+const wsUrl = `${wsScheme}://${wsHost}${wsPortSegment}`;
 const previousRealtimeState = window.ERPRealtime || {};
 
 window.ERPRealtime = {

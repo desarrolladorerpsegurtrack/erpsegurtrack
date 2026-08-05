@@ -13,14 +13,12 @@
 
     .device-row-container {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 120px 110px minmax(0, 1fr) 44px;
+        grid-template-columns: minmax(320px, 1.8fr) 120px 110px minmax(280px, 1.6fr) 44px;
         gap: 16px;
         align-items: center;
-        padding: 8px 20px;
+        padding: 5px 8px;
         margin: 4px 0;
-        border: 1px solid #e2e8f0;
-        border-radius: 5px;
-        background: #fff;
+        width: 100%;
         box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
     }
 
@@ -57,6 +55,18 @@
         display: none;
     }
 
+    .tom-select.tom-select--compact.ts-wrapper .ts-control .item {
+        padding: 0 .0rem !important;
+    }
+    .tom-select.tom-select--compact.ts-wrapper, 
+    .tom-select.tom-select--compact.ts-wrapper .ts-control, 
+    .tom-select.tom-select--compact.plugin-dropdown_input.focus.dropdown-active .ts-control {
+        min-height: 2.2rem !important;
+        height: 2.2rem !important;
+        padding: 0.2rem 0.0rem 0.1rem 0.10rem !important;
+        line-height: 1.2rem !important;
+    }
+
     @media (max-width: 767px) {
         .imeis-salida-col {
             display: flex;
@@ -75,17 +85,26 @@
         }
 
         .device-table-inner {
-            min-width: 720px;
+            min-width: 920px;
+            width: max-content;
         }
 
         .device-row-container {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 120px 110px minmax(0, 1fr) 44px;
+            grid-template-columns: minmax(320px, 2fr) 120px 110px minmax(280px, 1.6fr) 44px !important;
             gap: 12px;
             align-items: center;
-            padding: 8px 16px;
+            padding: 5px 8px;
             margin: 4px 0;
             border-radius: 8px;
+            min-width: 920px;
+            width: max-content;
+        }
+
+        .device-table-header > div {
+            grid-template-columns: minmax(320px, 2fr) 120px 110px minmax(280px, 1.6fr) 44px !important;
+            min-width: 920px;
+            width: max-content;
         }
 
         .device-row-col {
@@ -173,7 +192,7 @@
         <div class="device-row-col device-row-col-start">
             <label class="device-mobile-label device-mobile-label-mb">Dispositivo</label>
             <select
-                class="tom-select tom-select--compact w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-primary focus:ring-1 focus:ring-primary {{ ($readOnly ?? false) ? 'bg-slate-50 cursor-not-allowed' : '' }}"
+                class="tom-select tom-select--compact w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-primary focus:ring-1 focus:ring-primary {{ ($readOnly ?? false) ? 'bg-slate-50 cursor-not-allowed' : '' }}"
                 data-device-salida-select style="width:100%;" {{ ($readOnly ?? false) ? 'disabled' : '' }}>
                 <option value="">Selecciona un dispositivo</option>
                 @foreach(($almacenOptions ?? []) as $option)

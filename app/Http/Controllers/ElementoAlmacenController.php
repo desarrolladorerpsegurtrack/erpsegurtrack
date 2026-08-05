@@ -26,7 +26,7 @@ class ElementoAlmacenController extends Controller
                 'e.estado',
                 'e.idAuxiliar',
                 DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
-                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(ep.razonSocial), ""), "Sin empresa"), " - ", COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
+                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
                 DB::raw('CASE WHEN e.estado = 1 THEN "Activo" ELSE "Inactivo" END as estado_label'),
             ]);
 
@@ -140,6 +140,7 @@ class ElementoAlmacenController extends Controller
             'bulkDestroyRoute' => route('modules.almacen.elemento-almacen.bulk-destroy'),
             'identifierKey' => 'imei',
             'lockResource' => 'almacen.elemento_almacen',
+            'tableWrapperClass' => 'planes-servicios-table',
         ]);
     }
 
@@ -359,7 +360,7 @@ class ElementoAlmacenController extends Controller
                 'e.idAuxiliar',
                 DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
                 DB::raw('CASE WHEN e.estado = 1 THEN "Activo" ELSE "Inactivo" END as estado_label'),
-                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(ep.razonSocial), ""), "Sin empresa"), " - ", COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
+                DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
             ]);
 
         if (!empty($selectedIds)) {
@@ -435,16 +436,9 @@ class ElementoAlmacenController extends Controller
             ->get()
             ->map(fn ($row): array => [
                 'value' => (string) $row->idalmacen,
-                'label' => trim(
-                    (string) (
-                        trim((string) ($row->razonSocial ?? '')) !== ''
-                            ? trim((string) $row->razonSocial)
-                            : 'Sin empresa'
-                    ) . ' - ' . trim((string) ($row->detalle ?? 'Sin detalle'))
-                ),
+                'label' => trim((string) ($row->detalle ?? 'Sin detalle')),
                 'idalmacen' => (int) $row->idalmacen,
                 'detalle' => trim((string) ($row->detalle ?? 'Sin detalle')),
-                'razonSocial' => trim((string) ($row->razonSocial ?? '')),
             ]);
     }
 }

@@ -1804,7 +1804,7 @@
                             } else if (submodule === 'lineas_chips.cargar_numeros' || submodule === 'lineas_chips.bajar_numeros') {
                                 canUse = hasLineasDetalleVer;
                             } else if (submodule === 'ventas.personal') {
-                                // DNI Personal only enabled when Cotizaciones has Crear + (Editar or Eliminar)
+                                // Personal Cotizadora only enabled when Cotizaciones has Crear + (Editar or Eliminar)
                                 canUse = hasCotVer && hasCotCreateOrEdit;
                             }
 
@@ -2292,6 +2292,37 @@
                                                 </label>
                                                 @if($fieldHelpText)
                                                     <p id="{{ $field['name'] }}-help" class="text-xs text-slate-500 sm:text-right">{{ $fieldHelpText }}</p>
+                                                @endif
+                                                @if(!empty($field['consultButton']))
+                                                    <button
+                                                        type="button"
+                                                        data-consult-button
+                                                        data-consult-field-name="{{ $field['name'] }}"
+                                                        data-consult-url="{{ $field['consultButtonUrl'] }}"
+                                                        data-consult-target-fields='@json($field['consultTargetFields'] ?? [])'
+                                                        class="ml-1 inline-flex items-center gap-1 rounded border border-red-600 px-2 py-1 text-xs transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-opacity-50 disabled:cursor-not-allowed disabled:opacity-70"
+                                                        style="display: inline-flex; background-color: rgb(220, 38, 38) !important; color: rgb(255, 255, 255) !important;"
+                                                        {{ ($field['disabled'] ?? false) || ($readOnly ?? false) ? 'disabled' : '' }}
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35"/><circle cx="11" cy="11" r="6" /></svg>
+                                                        <span class="consult-text">{{ $field['consultButtonLabel'] ?? 'Consultar' }}</span>
+                                                        <span class="ml-2 h-4 w-4 consult-spinner hidden" role="status" aria-live="polite">
+                                                            <svg class="h-full w-full" width="25" viewBox="0 0 120 30" xmlns="http://www.w3.org/2000/svg" fill="#ffffff">
+                                                                <circle cx="15" cy="15" r="15">
+                                                                    <animate values="15;9;15" attributeName="r" from="15" to="15" begin="0s" dur="0.8s" calcMode="linear" repeatCount="indefinite"></animate>
+                                                                    <animate values="1;.5;1" attributeName="fill-opacity" from="1" to="1" begin="0s" dur="0.8s" calcMode="linear" repeatCount="indefinite"></animate>
+                                                                </circle>
+                                                                <circle cx="60" cy="15" r="9" fill-opacity="0.3">
+                                                                    <animate values="9;15;9" attributeName="r" from="9" to="9" begin="0s" dur="0.8s" calcMode="linear" repeatCount="indefinite"></animate>
+                                                                    <animate values=".5;1;.5" attributeName="fill-opacity" from="0.5" to="0.5" begin="0s" dur="0.8s" calcMode="linear" repeatCount="indefinite"></animate>
+                                                                </circle>
+                                                                <circle cx="105" cy="15" r="15">
+                                                                    <animate values="15;9;15" attributeName="r" from="15" to="15" begin="0s" dur="0.8s" calcMode="linear" repeatCount="indefinite"></animate>
+                                                                    <animate values="1;.5;1" attributeName="fill-opacity" from="1" to="1" begin="0s" dur="0.8s" calcMode="linear" repeatCount="indefinite"></animate>
+                                                                </circle>
+                                                            </svg>
+                                                        </span>
+                                                    </button>
                                                 @endif
                                             </div>
                                             <div class="relative">
@@ -3651,7 +3682,7 @@
                         <div class="mb-3">
                             <input type="text" id="quick-direccion-search" placeholder="Buscar direccion..." class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm focus:border-red-600 focus:ring-2 focus:ring-red-500/20 transition duration-200">
                         </div>
-                        <div id="quick-direccion-list" class="space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700" style="max-height: 400px; overflow-y: auto;"></div>
+                        <div id="quick-direccion-list" class="space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700" style="max-height: 400px; overflow-y: auto;"><p class="text-xs text-slate-500">No hay direcciones registradas.</p></div>
                     </div>
 
                     <div>
@@ -3678,7 +3709,8 @@
                             </div>
                             <div class="mb-4">
                                 <label class="mb-3 block text-sm font-medium text-slate-700">Ubigeo <span class="text-red-600">*</span></label>
-                                <select id="quick-ubigeo" required class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 ease-in-out focus:border-red-600 focus:ring-2 focus:ring-red-500/20" data-placeholder="Selecciona ubigeo"></select>
+                                <select id="quick-ubigeo" class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 ease-in-out focus:border-red-600 focus:ring-2 focus:ring-red-500/20" data-placeholder="Selecciona ubigeo"></select>
+                                <p id="quick-ubigeo-error" class="text-xs mt-2 hidden text-danger"></p>
                             </div>
                             <div class="mb-4">
                                 <label class="mb-3 block text-sm font-medium text-slate-700">Link ubicacion <span class="text-xs font-normal text-slate-500">opcional, formato URL</span></label>
@@ -3706,6 +3738,7 @@
                 const tipoInput = document.getElementById('quick-tipo');
                 const direccionInput = document.getElementById('quick-direccion');
                 const ubigeoSelect = document.getElementById('quick-ubigeo');
+                const ubigeoError = document.getElementById('quick-ubigeo-error');
                 const linkInput = document.getElementById('quick-link');
                 const searchInput = document.getElementById('quick-direccion-search');
                 const countBadge = document.getElementById('quick-direccion-count');
@@ -3829,6 +3862,19 @@
                             ubigeoSelect.appendChild(option);
                         });
                         initUbigeoTomSelect();
+                    }
+                };
+
+                const setUbigeoError = (message) => {
+                    if (!ubigeoError) {
+                        return;
+                    }
+                    if (message) {
+                        ubigeoError.textContent = message;
+                        ubigeoError.classList.remove('hidden');
+                    } else {
+                        ubigeoError.textContent = '';
+                        ubigeoError.classList.add('hidden');
                     }
                 };
 
@@ -3969,6 +4015,7 @@
                     }
                     feedback.textContent = '';
                     feedback.className = 'text-xs';
+                    setUbigeoError('');
                 };
 
                 const updateExportButtons = () => {
@@ -3988,6 +4035,91 @@
                             exportXlsxBtn.classList.add('hidden');
                         }
                     }
+                };
+
+                const updateCount = (count) => {
+                    if (countBadge) {
+                        countBadge.textContent = String(count);
+                    }
+                };
+
+                const renderList = (items) => {
+                    if (!Array.isArray(items) || items.length === 0) {
+                        updateCount(0);
+                        listContainer.innerHTML = '<p class="text-xs text-slate-500">No hay direcciones registradas.</p>';
+                        return;
+                    }
+
+                    updateCount(items.length);
+                    listContainer.innerHTML = '';
+
+                    items.forEach((item) => {
+                        const id = String(item.id);
+                        const isSelected = String(selectedDireccionId) === id;
+
+                        const row = document.createElement('div');
+                        row.className = 'flex items-center justify-between mb-2 gap-3 rounded-md border p-2 transition ' +
+                            (isSelected ? 'border-primary bg-red-50/50' : 'border-slate-200 bg-white hover:border-slate-300');
+
+                        const text = document.createElement('div');
+                        text.className = 'quick-item-text pr-2 text-xs text-slate-700 leading-5';
+                        text.textContent = String(item.label || '');
+
+                        const actions = document.createElement('div');
+                        actions.className = 'quick-actions-grid';
+
+                        const editBtn = document.createElement('button');
+                        editBtn.type = 'button';
+                        editBtn.className = 'rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50';
+                        editBtn.textContent = 'Editar';
+                        editBtn.addEventListener('click', () => beginEditDireccion(item));
+
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.type = 'button';
+                        deleteBtn.className = 'rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-100';
+                        deleteBtn.textContent = 'Eliminar';
+                        deleteBtn.addEventListener('click', async () => {
+                            const ok = await confirmDireccion({
+                                title: 'Confirmar eliminación',
+                                message: '¿Está seguro de eliminar la dirección seleccionada?',
+                                submitText: 'Eliminar',
+                                cancelText: 'Cancelar'
+                            });
+                            if (!ok) return;
+
+                            feedback.textContent = 'Eliminando dirección...';
+                            feedback.className = 'mt-3 text-xs text-danger';
+
+                            try {
+                                await deleteDireccion(item);
+                                feedback.textContent = 'Dirección eliminada correctamente.';
+                                feedback.className = 'mt-3 text-xs text-danger';
+                            } catch (error) {
+                                feedback.textContent = error?.message || 'No se pudo eliminar la dirección.';
+                                feedback.className = 'mt-3 text-xs text-danger';
+                            }
+                        });
+
+                        const pickBtn = document.createElement('button');
+                        pickBtn.type = 'button';
+                        pickBtn.className = 'rounded border px-2.5 py-1.5 text-[11px] font-medium shadow-sm quick-pick-btn ' +
+                            (isSelected
+                                ? 'border-primary bg-primary text-white'
+                                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50');
+                        pickBtn.textContent = isSelected ? 'Seleccionada' : 'Seleccionar';
+                        pickBtn.addEventListener('click', () => {
+                            applySelectOption(item);
+                            closeModal();
+                        });
+
+                        actions.appendChild(editBtn);
+                        actions.appendChild(deleteBtn);
+                        actions.appendChild(pickBtn);
+
+                        row.appendChild(text);
+                        row.appendChild(actions);
+                        listContainer.appendChild(row);
+                    });
                 };
 
                 const applySelectOption = (item) => {
@@ -4075,7 +4207,7 @@
                         submitBtn.textContent = 'Actualizar direccion';
                     }
                     feedback.textContent = 'Editando direccion #' + String(item.id);
-                    feedback.className = 'text-xs text-slate-600';
+                    feedback.className = 'mt-3 text-xs text-danger';
                 };
 
                 const deleteDireccionLocal = (item) => {
@@ -4083,10 +4215,22 @@
                     const nextItems = localItems.filter((entry) => String(entry.tempId || entry.id) !== String(item.id));
                     writeLocalDirecciones(nextItems);
 
+                    listItems = nextItems.map((entry, index) => ({
+                        id: String(entry.tempId || entry.id || ('tmp-' + index)),
+                        label: buildLocalDireccionLabel(entry),
+                        tipo: String(entry.tipo || ''),
+                        direccion: String(entry.direccion || ''),
+                        ubigeo_idubigeo: Number(entry.ubigeo_idubigeo || 0),
+                        ubigeo_text: String(entry.ubigeo_text || ''),
+                        linkUbicacion: String(entry.linkUbicacion || ''),
+                    }));
+                    renderList(listItems);
+
                     const target = document.getElementById(currentSelectId);
                     if (target) {
                         const value = String(item.id);
                         const inst = target.tomselect || target.tomSelect || target._tomselect || null;
+
                         try {
                             if (inst && typeof inst.removeItem === 'function') {
                                 inst.removeItem(value);
@@ -4133,6 +4277,7 @@
                     if (target) {
                         const value = String(item.id);
                         const inst = target.tomselect || target.tomSelect || target._tomselect || null;
+
                         try {
                             if (inst && typeof inst.removeItem === 'function') inst.removeItem(value);
                             if (inst && typeof inst.removeOption === 'function') inst.removeOption(value);
@@ -4152,6 +4297,9 @@
                         }
                     }
 
+                    listItems = listItems.filter((entry) => String(entry.id) !== String(item.id));
+                    renderList(listItems);
+
                     if (editingDireccionId === String(item.id)) {
                         editingDireccionId = null;
                         form.reset();
@@ -4160,86 +4308,6 @@
                             submitBtn.textContent = 'Guardar direccion';
                         }
                     }
-
-                    await loadDirecciones();
-                };
-
-                const updateCount = (count) => {
-                    if (!countBadge) {
-                        return;
-                    }
-                    countBadge.textContent = String(count);
-                };
-
-                const renderList = (items) => {
-                    if (!Array.isArray(items) || items.length === 0) {
-                        updateCount(0);
-                        listContainer.innerHTML = '<p class="text-xs text-slate-500">No hay direcciones registradas.</p>';
-                        return;
-                    }
-
-                    updateCount(items.length);
-
-                    listContainer.innerHTML = '';
-                    items.forEach((item) => {
-                        const row = document.createElement('div');
-                        const isSelected = String(selectedDireccionId) === String(item.id);
-                        row.className = 'flex items-center justify-between mb-2 gap-3 rounded-md border p-2 transition ' +
-                            (isSelected ? 'border-primary bg-red-50/50 ring-1 ring-inset ring-red-200' : 'border-slate-200 bg-white hover:border-slate-300');
-
-                        const text = document.createElement('div');
-                        text.className = 'quick-item-text pr-2 text-xs text-slate-700 leading-5';
-                        text.textContent = String(item.label ?? '');
-
-                        const actions = document.createElement('div');
-                        actions.className = 'quick-actions-grid';
-
-                        const editBtn = document.createElement('button');
-                        editBtn.type = 'button';
-                        editBtn.className = 'rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50';
-                        editBtn.textContent = 'Editar';
-                        editBtn.addEventListener('click', () => beginEditDireccion(item));
-
-                        const deleteBtn = document.createElement('button');
-                        deleteBtn.type = 'button';
-                        deleteBtn.className = 'rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-100';
-                        deleteBtn.textContent = 'Eliminar';
-                        deleteBtn.addEventListener('click', async () => {
-                            const ok = await confirmDireccion({ title: 'Confirmar eliminación', message: '¿Está seguro de eliminar la dirección seleccionada?', submitText: 'Eliminar', cancelText: 'Cancelar' });
-                            if (!ok) return;
-
-                            feedback.textContent = 'Eliminando direccion...';
-                            feedback.className = 'text-xs text-slate-600';
-                            try {
-                                await deleteDireccion(item);
-                                feedback.textContent = 'Direccion eliminada correctamente.';
-                                feedback.className = 'text-xs text-emerald-700';
-                            } catch (error) {
-                                feedback.textContent = error.message || 'No se pudo eliminar la direccion.';
-                                feedback.className = 'text-xs text-red-600';
-                            }
-                        });
-
-                        const pickBtn = document.createElement('button');
-                        pickBtn.type = 'button';
-                        pickBtn.className = 'rounded border px-2.5 py-1.5 text-[11px] font-medium shadow-sm quick-pick-btn ' +
-                            (isSelected
-                                ? 'border-primary bg-primary text-white'
-                                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50');
-                        pickBtn.textContent = isSelected ? 'Seleccionada' : 'Seleccionar';
-                        pickBtn.addEventListener('click', () => {
-                            applySelectOption(item);
-                            closeModal();
-                        });
-
-                        actions.appendChild(editBtn);
-                        actions.appendChild(deleteBtn);
-                        actions.appendChild(pickBtn);
-
-                        row.appendChild(text);
-                        row.appendChild(actions);
-                        listContainer.appendChild(row);
-                    });
                 };
 
                 const loadDirecciones = async () => {
@@ -4302,6 +4370,7 @@
                     }
                     feedback.textContent = '';
                     feedback.className = 'text-xs';
+                    setUbigeoError('');
                     if (submitBtn) {
                         submitBtn.textContent = 'Guardar direccion';
                     }
@@ -4353,12 +4422,30 @@
 
                 form.addEventListener('submit', async (event) => {
                     event.preventDefault();
+                    setUbigeoError('');
+                    feedback.textContent = '';
+                    feedback.className = 'text-xs';
+
                     if (!form.checkValidity()) {
+                        if (!ubigeoSelect.value) {
+                            setUbigeoError('Selecciona el ubigeo.');
+                        }
                         form.reportValidity();
-                        throw new Error('Corrige los campos obligatorios de la dirección.');
+                        return;
                     }
+
+                    if (!ubigeoSelect.value) {
+                        setUbigeoError('Selecciona el ubigeo.');
+                        if (ubigeoTomSelect && typeof ubigeoTomSelect.focus === 'function') {
+                            ubigeoTomSelect.focus();
+                        } else {
+                            ubigeoSelect.focus();
+                        }
+                        return;
+                    }
+
                     feedback.textContent = editingDireccionId ? 'Actualizando direccion...' : 'Guardando direccion...';
-                    feedback.className = 'text-xs text-slate-600';
+                    feedback.className = 'mt-3 text-xs text-danger';
                     if (submitBtn) {
                         submitBtn.disabled = true;
                         submitBtn.classList.add('opacity-70', 'cursor-not-allowed');
@@ -4960,7 +5047,7 @@
                         submitBtn.textContent = 'Actualizar contacto';
                     }
                     feedback.textContent = 'Editando contacto #' + String(item.id);
-                    feedback.className = 'text-xs text-slate-600';
+                    feedback.className = 'mt-3 text-xs text-danger';
                 };
 
                 const deleteContactoLocal = (id) => {
@@ -5094,7 +5181,7 @@
                             if (!ok) return;
 
                             feedback.textContent = 'Eliminando contacto...';
-                            feedback.className = 'text-xs text-slate-600';
+                            feedback.className = 'mt-3 text-xs text-danger';
 
                             try {
                                 if (currentMode === 'create') {
@@ -5114,10 +5201,10 @@
 
                                 await loadContacts();
                                 feedback.textContent = 'Contacto eliminado correctamente.';
-                                feedback.className = 'text-xs text-emerald-700';
+                                feedback.className = 'mt-3 text-xs text-danger';
                             } catch (error) {
                                 feedback.textContent = error.message || 'No se pudo eliminar el contacto.';
-                                feedback.className = 'text-xs text-red-600';
+                                feedback.className = 'mt-3 text-xs text-danger';
                             }
                         });
 
@@ -5285,7 +5372,7 @@
                     }
 
                     feedback.textContent = editingContactoId ? 'Actualizando contacto...' : 'Guardando contacto...';
-                    feedback.className = 'text-xs text-slate-600';
+                    feedback.className = 'mt-3 text-xs text-danger';
 
                     if (submitBtn) {
                         submitBtn.disabled = true;
@@ -5460,7 +5547,7 @@
                             <div class="mb-4">
                                 <label class="mb-4 block text-sm font-medium text-slate-700">Estado de recepción</label>
                                 <label class="custom-checkbox-wrapper">
-                                    <input type="checkbox" id="quick-credencial-estadoRecepcion" class="h-4 w-4 rounded border-slate-300 text-red-600 focus:ring-red-500">
+                                    <input type="checkbox" id="quick-credencial-estadoRecepcion" class="transition-all duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&[type='radio']]:checked:bg-primary [&[type='radio']]:checked:border-primary [&[type='radio']]:checked:border-opacity-10 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:not(:checked)]:dark:bg-darkmode-800/50 [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed [&:disabled:checked]:dark:bg-darkmode-800/50">
                                     <span class="text-sm text-slate-700">Estado de recepción</span>
                                 </label>
                             </div>
@@ -5469,7 +5556,7 @@
                                 <button type="button" id="quick-credencial-cancel" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-100" style=" border-color: #000000; color: #000000;">Cancelar</button>
                                 <button type="submit" id="quick-credencial-submit" class="rounded-md border-0 px-4 py-2 text-xs font-semibold text-white shadow-sm transition duration-200" style="background-color: #c1121f; color: #ffffff;">Guardar credencial</button>
                             </div>
-                            <p id="quick-credencial-feedback" class="text-xs"></p>
+                            <p id="quick-credencial-feedback" class="mt-3 text-xs"></p>
                         </form>
                     </div>
                 </div>
@@ -5632,7 +5719,7 @@
                         submitBtn.textContent = 'Guardar credencial';
                     }
                     feedback.textContent = '';
-                    feedback.className = 'text-xs';
+                    feedback.className = 'mt-3 text-xs';
                 };
 
                 const replaceIdToken = (template, id) => String(template || '').replace('__ID__', encodeURIComponent(String(id)));
@@ -5863,7 +5950,7 @@
                         submitBtn.textContent = 'Actualizar credencial';
                     }
                     feedback.textContent = 'Editando credencial #' + String(item.id);
-                    feedback.className = 'text-xs text-slate-600';
+                    feedback.className = 'mt-3 text-xs text-danger';
                 };
 
                 const deleteCredencialLocal = (id) => {
@@ -6000,7 +6087,7 @@
                                     if (!ok) return;
 
                                     feedback.textContent = 'Eliminando credencial...';
-                                    feedback.className = 'text-xs text-slate-600';
+                                    feedback.className = 'mt-3 text-xs text-danger';
 
                                     try {
                                         if (currentMode === 'create') {
@@ -6019,10 +6106,10 @@
 
                                         await loadCredenciales();
                                         feedback.textContent = 'Credencial eliminada correctamente.';
-                                        feedback.className = 'text-xs text-emerald-700';
+                                        feedback.className = 'mt-3 text-xs text-danger';
                                     } catch (error) {
                                         feedback.textContent = error.message || 'No se pudo eliminar la credencial.';
-                                        feedback.className = 'text-xs text-red-600';
+                                        feedback.className = 'mt-3 text-xs text-danger';
                                     }
                             });
                         }
@@ -6230,7 +6317,7 @@
                     }
 
                     feedback.textContent = editingCredencialId ? 'Actualizando credencial...' : 'Guardando credencial...';
-                    feedback.className = 'text-xs text-slate-600';
+                    feedback.className = 'mt-3 text-xs text-danger';
 
                     if (submitBtn) {
                         submitBtn.disabled = true;
@@ -7238,6 +7325,83 @@
                     setTimeout(() => dropdown.classList.add('hidden'), 150);
                 });
             });
+        })();
+
+        (function () {
+            const consultButtons = Array.from(document.querySelectorAll('button[data-consult-button]'));
+            if (consultButtons.length) {
+                consultButtons.forEach((button) => {
+                    const fieldName = button.dataset.consultFieldName;
+                    const consultUrl = button.dataset.consultUrl;
+                    const targetFields = (() => {
+                        try {
+                            return JSON.parse(button.dataset.consultTargetFields || '[]');
+                        } catch (e) {
+                            return [];
+                        }
+                    })();
+
+                    if (!fieldName || !consultUrl) {
+                        return;
+                    }
+
+                    const fieldInput = document.querySelector(`input[name="${fieldName}"]`);
+                    if (!fieldInput) {
+                        return;
+                    }
+
+                    button.addEventListener('click', async () => {
+                        const placa = String(fieldInput.value || '').trim();
+
+                        const consultText = button.querySelector('.consult-text');
+                        const consultSpinner = button.querySelector('.consult-spinner');
+                        button.disabled = true;
+                        if (consultText) {
+                            consultText.textContent = 'Consultando...';
+                        }
+                        if (consultSpinner) {
+                            consultSpinner.classList.remove('hidden');
+                        }
+
+                        try {
+                            const response = await fetch(`${consultUrl}?placa=${encodeURIComponent(placa)}`, {
+                                headers: {
+                                    'Accept': 'application/json',
+                                },
+                            });
+                            const data = await response.json();
+
+                            if (response.ok && data?.status === 'success' && data?.data) {
+                                const result = data.data;
+                                targetFields.forEach((targetName) => {
+                                    const targetInput = document.querySelector(`[name="${targetName}"]`);
+                                    if (!targetInput) {
+                                        return;
+                                    }
+
+                                    const newValue = result[targetName] ?? result[targetName.toLowerCase()] ?? '';
+                                    targetInput.value = newValue;
+                                    targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                    targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                });
+                            } else {
+                                const message = data?.message || 'No se pudo obtener información de la placa.';
+                                console.error(message);
+                            }
+                        } catch (error) {
+                            console.error('Error al consultar placa:', error);
+                        } finally {
+                            button.disabled = false;
+                            if (consultText) {
+                                consultText.textContent = button.dataset.consultButtonLabel || 'Consultar';
+                            }
+                            if (consultSpinner) {
+                                consultSpinner.classList.add('hidden');
+                            }
+                        }
+                    });
+                });
+            }
         })();
 
         (function () {

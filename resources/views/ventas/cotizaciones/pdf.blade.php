@@ -374,8 +374,8 @@
                         EMPRESA: SEGURTRAK S.A.C.<br>
                         RUC: 20603959061<br>
                         CORREO: ventas@segurtrack.com<br>
-                        DIRECCIÓN: MZ A LOTE 41 URB. EL ASESOR II SANTA<br>
-                        ANITA - LIMA - LIMA
+                        DIRECCIÓN: MZ A LOTE 41 URB. EL ASESOR II<br>
+                        SANTA ANITA - LIMA - LIMA
                     </div>
                 </td>
                 <td class="document-details" style="width: 45%;">

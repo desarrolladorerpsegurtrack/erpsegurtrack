@@ -133,11 +133,9 @@
                                 </button>
                             @endif
                             @if(!empty($createRoute) && $canCreate)
-                                <a href="{{ $createRoute }}">
-                                    <button type="button" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed dark:border-danger/70 dark:text-danger" style="background-color:#c71010;color:#ffffff;">
-                                        <i data-tw-merge="" data-lucide="plus" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
-                                        {{ $createButtonLabel ?: ('Nuevo ' . ($singularTitle ?? 'Registro')) }}
-                                    </button>
+                                <a href="{{ $createRoute }}" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed dark:border-danger/70 dark:text-danger" style="background-color:#c71010;color:#ffffff;">
+                                    <i data-tw-merge="" data-lucide="plus" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
+                                    {{ $createButtonLabel ?: ('Nuevo ' . ($singularTitle ?? 'Registro')) }}
                                 </a>                       
                             @endif
                         </div>
@@ -227,7 +225,7 @@
                         @endif
                         <!-- ESTADÍSTICAS -->
                         @if($stats)
-                           <div class="box box--stacked flex flex-col p-5">
+                           <div class="box box--stacked flex flex-col p-5 {{ $statsWrapperClass ?? '' }}">
                                 <div class="grid grid-cols-4 gap-5">
                                     @foreach($stats as $key => $stat)
                                         @php
@@ -246,7 +244,7 @@
                         @endif
 
                         <!-- TABLA -->
-                        <div id="list-table-wrapper" class="box box--stacked flex w-full flex-col">
+                        <div id="list-table-wrapper" class="box box--stacked flex w-full flex-col {{ $tableWrapperClass ?? '' }}">
                             @php
                                 $filters = $filters ?? [];
                                 $showGroupClientsColumn = $showGroupClientsColumn ?? false;
@@ -433,6 +431,7 @@
                                                         @switch($column['type'] ?? 'text')
                                                             @case('text')
                                                                 @php
+                                                                    $cellValue = data_get($row, $column['key']) ?? '-';
                                                                     $canShowLink = $columnIndex === 0 
                                                                         && isset($showRoute) 
                                                                         && !empty($showRoute)
@@ -442,12 +441,12 @@
                                                                         && $canEdit;
                                                                 @endphp
                                                                 @if($canShowLink)
-                                                                    <a class="font-medium text-slate-700 hover:text-primary hover:underline @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif" href="{{ route($showRoute, data_get($row, $identifierKey)) }}">
-                                                                        {{ data_get($row, $column['key']) ?? '-' }}
+                                                                    <a class="font-medium text-slate-700 hover:text-primary hover:underline @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif" href="{{ route($showRoute, data_get($row, $identifierKey)) }}" title="{{ $cellValue }}">
+                                                                        {{ $cellValue }}
                                                                     </a>
                                                                 @else
-                                                                    <span class="font-medium @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif">
-                                                                        {{ data_get($row, $column['key']) ?? '-' }}
+                                                                    <span class="font-medium @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif" title="{{ $cellValue }}">
+                                                                        {{ $cellValue }}
                                                                     </span>
                                                                 @endif
                                                             @break
@@ -574,8 +573,11 @@
                                                                 </div>
                                                             @break
                                                             @default
-                                                                <span class="@if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @endif">
-                                                                    {{ data_get($row, $column['key']) ?? '-' }}
+                                                                @php
+                                                                    $defaultCellValue = data_get($row, $column['key']) ?? '-';
+                                                                @endphp
+                                                                <span class="@if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif" title="{{ $defaultCellValue }}">
+                                                                    {{ $defaultCellValue }}
                                                                 </span>
                                                         @endswitch
                                                     </td>
@@ -593,7 +595,7 @@
                                                                 ->pluck('nombreComercial');
                                                         @endphp
                                                         @if($clientes->count() > 0)
-                                                            <span>{{ $clientes->implode(', ') }}</span>
+                                                            <span title="{{ $clientes->implode(', ') }}">{{ $clientes->implode(', ') }}</span>
                                                         @else
                                                             <span class="text-slate-400">Sin clientes</span>
                                                         @endif
@@ -874,8 +876,12 @@
                                         {{ $items->onEachSide(1)->links('layouts.pagination') }}
                                     </div>
                                     <select data-tw-merge="" name="perPage" id="list-per-page" class="transition duration-200 ease-in-out w-full text-sm border-slate-200 shadow-sm py-2 px-3 pr-8 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 group-[.form-inline]:flex-1 rounded-[0.5rem] sm:w-20">
-                                        @foreach([10, 25, 50, 100] as $limit)
-                                            <option value="{{ $limit }}" @if(request('perPage', 10) == $limit) selected @endif>{{ $limit }}</option>
+                                        @php
+                                            $perPageOptionsArray = $perPageOptions ?? [10, 25, 50, 100];
+                                            $defaultPerPageValue = $defaultPerPage ?? 10;
+                                        @endphp
+                                        @foreach($perPageOptionsArray as $limit)
+                                            <option value="{{ $limit }}" @if(request('perPage', $defaultPerPageValue) == $limit) selected @endif>{{ $limit }}</option>
                                         @endforeach
                                     </select>
                                 </div>
@@ -1284,8 +1290,28 @@
         }
         /* límites por columna para mantener proporciones razonables */
         #list-table-wrapper table td { 
-            max-width: 155px; 
+            max-width: 150px; 
         }
+        /* Regla específica para la vista de Planes y Servicios */
+        #list-table-wrapper.planes-servicios-table table td {
+            max-width: 350px;
+        }
+
+        /* Reglas específicas para la vista de Vehículos */
+        #list-table-wrapper.vehiculos-table table td,
+        #list-table-wrapper.vehiculos-table table th {
+            padding: 0.30rem 0.5rem !important;
+            font-size: 0.65rem !important;
+        }
+
+        .vehiculos-stats {
+            padding: 0.5rem !important;
+        }
+
+        .vehiculos-stats .box {
+            padding: 0.5rem !important;
+        }
+
         #list-table-wrapper table td:first-child { 
             max-width: 48px; 
         }

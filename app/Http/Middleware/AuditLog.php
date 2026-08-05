@@ -67,7 +67,7 @@ class AuditLog
     ): void
     {
         try {
-            DB::table('auditoria')->insert([
+            DB::connection('audit')->table('auditoria')->insert([
                 'usuario' => (string) ($authData['usuario'] ?? 'anonimo'),
                 'personal_dni' => isset($authData['personal_dni']) ? (string) $authData['personal_dni'] : null,
                 'modulo' => $this->resolverModulo($request),

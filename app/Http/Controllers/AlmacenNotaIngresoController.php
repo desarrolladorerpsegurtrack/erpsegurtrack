@@ -327,7 +327,7 @@ class AlmacenNotaIngresoController extends Controller
                     // generar IMEIs aleatorios únicos contra BD
                     $generated = collect();
                     while ($generated->count() < $cantidad) {
-                        $candidate = (string) random_int(1000000000, 9999999999);
+                        $candidate = (string) random_int(100000000000000, 999999999999999);
                         // verificar colisión en BD y en esta colección
                         $exists = DB::table('elementoalmacen')->where('imei', $candidate)->exists();
                         if (!$exists && !$generated->contains($candidate)) {
@@ -541,7 +541,6 @@ class AlmacenNotaIngresoController extends Controller
 
         if (!empty($selectedIds) && is_array($selectedIds)) {
             $rows = $this->baseQuery($request)->whereIn('c.idcompras', array_values($selectedIds))->orderBy('c.idcompras')->get();
-            // Formatear fecha con hora para exportación (ej. "17 jun., 2026, 15:07")
             $rows = $rows->map(function ($r) {
                 try {
                     $r->fechaRealizacion = $r->fechaRealizacion ? Carbon::parse($r->fechaRealizacion)->locale('es')->isoFormat('D MMM YYYY, HH:mm') : '';
@@ -596,8 +595,8 @@ class AlmacenNotaIngresoController extends Controller
 
         while (count($generated) < $qty && $attempts < $maxAttempts) {
             $attempts++;
-            // Generar IMEI aleatorio de 10 dígitos
-            $imei = str_pad((string) random_int(1000000000, 9999999999), 10, '0', STR_PAD_LEFT);
+            // Generar IMEI aleatorio de 15 dígitos
+            $imei = str_pad((string) random_int(100000000000000, 999999999999999), 15, '0', STR_PAD_LEFT);
 
             // Evitar duplicados locales
             if (in_array($imei, $generated, true)) continue;
@@ -873,16 +872,9 @@ class AlmacenNotaIngresoController extends Controller
             ->get() 
             ->map(fn ($row): array => [
                 'value' => (string) $row->idalmacen,
-                'label' => trim(
-                    (string) (
-                        trim((string) ($row->razonSocial ?? '')) !== ''
-                            ? trim((string) $row->razonSocial)
-                            : 'Sin empresa'
-                    ) . ' - ' . trim((string) ($row->detalle ?? 'Sin detalle'))
-                ),
+                'label' => trim((string) ($row->detalle ?? 'Sin detalle')),
                 'idalmacen' => (int) $row->idalmacen,
                 'detalle' => trim((string) ($row->detalle ?? 'Sin detalle')),
-                'razonSocial' => trim((string) ($row->razonSocial ?? '')),
             ]);
     }
 

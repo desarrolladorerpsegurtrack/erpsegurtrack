@@ -2682,33 +2682,16 @@ class ConfiguracionController extends Controller
                 'a.idalmacen',
                 'a.detalle',
                 'ep.razonSocial',
-                'm.nombreModelo',
-                'ma.nombreMarca',
-                'te.nombre as tipoelemento_nombre',
-                'te.detalle as tipoelemento_detalle',
-                'p.nombrePlataforma',
             ])
             ->orderBy('ep.razonSocial')
-            ->orderBy('ma.nombreMarca')
-            ->orderBy('m.nombreModelo')
             ->orderBy('a.detalle')
             ->get()
             ->map(function ($r) {
                 $empresa = trim((string) ($r->razonSocial ?? '')) ?: 'Sin empresa';
-                $modelo = trim((string) ($r->nombreModelo ?? '')) ?: 'Sin modelo';
-                $marca = trim((string) ($r->nombreMarca ?? '')) ?: 'Sin marca';
-                $tipo = trim((string) ($r->tipoelemento_nombre ?? '')) ?: 'Sin tipo';
-                $detalle = trim((string) ($r->tipoelemento_detalle ?? '')) ?: 'Sin detalle';
-                $plataforma = trim((string) ($r->nombrePlataforma ?? '')) ?: 'Sin plataforma';
-
-                $isPlanServicio = preg_match('/\b(?:PLAN|SERVICIO)\b/i', $tipo) === 1 || preg_match('/\b(?:PLAN|SERVICIO)\b/i', $detalle) === 1;
-                $label = $isPlanServicio
-                    ? sprintf('%s - %s - %s - %s', $empresa, $tipo, $detalle, $plataforma)
-                    : sprintf('%s - %s - %s - %s - %s - %s', $empresa, $modelo, $marca, $tipo, $detalle, $plataforma);
-
+                $almacenDetalle = trim((string) ($r->detalle ?? '')) ?: 'Sin dispositivo';
                 return [
                     'value' => $r->idalmacen,
-                    'label' => $label,
+                    'label' => sprintf('%s', $almacenDetalle),
                 ];
             })->values()->all();
 
@@ -2782,39 +2765,20 @@ class ConfiguracionController extends Controller
         }
         $almacenOptions = DB::table('almacen as a')
             ->leftJoin('empresapropietaria as ep', 'a.empresaPropietaria_RUC', '=', 'ep.RUC')
-            ->leftJoin('modelo as m', 'a.modelo_idmodelo', '=', 'm.idmodelo')
-            ->leftJoin('marca as ma', 'm.marca_idmarca', '=', 'ma.idmarca')
-            ->leftJoin('tipoelemento as te', 'a.tipoElemento_idtipoElemento', '=', 'te.idtipoElemento')
-            ->leftJoin('plataforma as p', 'te.plataforma_idplataforma', '=', 'p.idplataforma')
             ->select([
                 'a.idalmacen',
+                'a.detalle',
                 'ep.razonSocial',
-                'm.nombreModelo',
-                'ma.nombreMarca',
-                'te.nombre as tipoelemento_nombre',
-                'te.detalle as tipoelemento_detalle',
-                'p.nombrePlataforma',
             ])
             ->orderBy('ep.razonSocial')
-            ->orderBy('ma.nombreMarca')
-            ->orderBy('m.nombreModelo')
+            ->orderBy('a.detalle')
             ->get()
             ->map(function ($r) {
                 $empresa = trim((string) ($r->razonSocial ?? '')) ?: 'Sin empresa';
-                $modelo = trim((string) ($r->nombreModelo ?? '')) ?: 'Sin modelo';
-                $marca = trim((string) ($r->nombreMarca ?? '')) ?: 'Sin marca';
-                $tipo = trim((string) ($r->tipoelemento_nombre ?? '')) ?: 'Sin tipo';
-                $detalle = trim((string) ($r->tipoelemento_detalle ?? '')) ?: 'Sin detalle';
-                $plataforma = trim((string) ($r->nombrePlataforma ?? '')) ?: 'Sin plataforma';
-
-                $isPlanServicio = preg_match('/\b(?:PLAN|SERVICIO)\b/i', $tipo) === 1 || preg_match('/\b(?:PLAN|SERVICIO)\b/i', $detalle) === 1;
-                $label = $isPlanServicio
-                    ? sprintf('%s - %s - %s - %s', $empresa, $tipo, $detalle, $plataforma)
-                    : sprintf('%s - %s - %s - %s - %s - %s', $empresa, $modelo, $marca, $tipo, $detalle, $plataforma);
-
+                $almacenDetalle = trim((string) ($r->detalle ?? '')) ?: 'Sin dispositivo';
                 return [
                     'value' => $r->idalmacen,
-                    'label' => $label,
+                    'label' => sprintf('%s', $almacenDetalle),
                 ];
             })->values()->all();
 
@@ -7645,7 +7609,7 @@ class ConfiguracionController extends Controller
 
     public function auditoriaIndex(Request $request): View
     {
-        $baseQuery = DB::table('auditoria');
+        $baseQuery = DB::connection('audit')->table('auditoria');
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -7717,7 +7681,7 @@ class ConfiguracionController extends Controller
                 ->with('error', 'Formato de exportación inválido.');
         }
 
-        $baseQuery = DB::table('auditoria');
+        $baseQuery = DB::connection('audit')->table('auditoria');
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {

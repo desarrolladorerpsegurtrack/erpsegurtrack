@@ -70,11 +70,9 @@
 						</a>
 					@endif
 					@if(!empty($createRoute) && $canCreate)
-						<a href="{{ $createRoute }}">
-							<button type="button" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed dark:border-danger/70 dark:text-danger" style="background-color:#c71010;color:#ffffff;">
-								<i data-tw-merge="" data-lucide="plus" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
-								Nuevo {{ $singularTitle ?? 'Registro' }}
-							</button>
+						<a href="{{ $createRoute }}" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed dark:border-danger/70 dark:text-danger" style="background-color:#c71010;color:#ffffff;">
+							<i data-tw-merge="" data-lucide="plus" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
+							Nuevo {{ $singularTitle ?? 'Registro' }}
 						</a>
 					@endif
 				</div>
@@ -191,7 +189,7 @@
 					</div>
 
 					<div class="overflow-auto xl:overflow-visible">
-						<table data-tw-merge="" class="w-full text-left border-b border-slate-200/60 @if(collect($columns)->contains(fn ($column) => !empty($column['wrap'] ?? false))) table-fixed @endif">
+						<table data-tw-merge="" class="w-full text-left border-b border-slate-200/60 table-fixed">
 							<thead data-tw-merge="">
 								<tr data-tw-merge="">
 									@foreach($columns as $column)
@@ -224,7 +222,7 @@
 															$canLinkToEdit = $loop->first && !empty($editRoute) && $canEdit && data_get($row, $identifierKey ?? 'id') !== null;
 															$rawCellValue = data_get($row, $column['key']);
 															if ($loop->first) {
-																$cellValue = '#' . (string) $rawCellValue;
+																$cellValue = (string) $rawCellValue;
 															} else {
 																$cellValue = is_string($rawCellValue) ? preg_replace('/^\s*\d+\s*-\s*/', '', $rawCellValue) : $rawCellValue;
 																$cellValue = $cellValue ?? '-';
@@ -233,7 +231,7 @@
 														@endphp
 
 														@if($isEmpresaCol)
-															<div class="flex items-center gap-3">
+															<div class="flex min-w-0 flex-nowrap items-center gap-3 whitespace-nowrap">
 																@if(!empty(data_get($row, 'imagen')))
 																	<img src="{{ asset('storage/' . data_get($row, 'imagen')) }}" alt="Imagen" class="h-16 w-16 rounded-md object-cover">
 																@else
@@ -242,16 +240,21 @@
 																		<span class="mt-1 text-[10px]">No Foto</span>
 																	</div>
 																@endif
-
-																<span class="font-medium @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif">{{ $cellValue }}</span>
+																@if($canLinkToEdit)
+																	<a href="{{ route($editRoute, [data_get($row, $identifierKey ?? 'id')]) }}" class="almacen-cell-text font-medium text-slate-700 hover:text-primary hover:underline  whitespace-normal break-words leading-5 " title="{{ $cellValue }}">
+																		{{ $cellValue }}
+																	</a>
+																@else
+																	<span class="almacen-cell-text min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap block font-medium" title="{{ $cellValue }}">{{ $cellValue }}</span>
+																@endif
 															</div>
 														@else
 															@if($canLinkToEdit)
-																<a href="{{ route($editRoute, [data_get($row, $identifierKey ?? 'id')]) }}" class="font-medium text-slate-700 hover:text-slate-900 hover:underline @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif">
+																<a href="{{ route($editRoute, [data_get($row, $identifierKey ?? 'id')]) }}" class="almacen-cell-text block w-full min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-medium text-slate-700 hover:text-slate-900 hover:underline" title="{{ $cellValue }}">
 																	{{ $cellValue }}
 																</a>
 															@else
-																<span class="font-medium @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif">{{ $cellValue }}</span>
+															<span class="almacen-cell-text block w-full min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-medium" title="{{ $cellValue }}">{{ $cellValue }}</span>
 															@endif
 														@endif
 												@endswitch
@@ -979,9 +982,11 @@
 				if (!form || !wrapper) {
 					init();
 				}
+
 				if (!form || !wrapper) {
 					return;
 				}
+
 				fetchList(buildUrl());
 			};
 
@@ -989,11 +994,7 @@
 				if (autoRefreshTimer) {
 					return;
 				}
-				autoRefreshTimer = setInterval(() => {
-					if (document.visibilityState === 'visible' && document.hasFocus()) {
-						window.ERPListRefresh();
-					}
-				}, 5000);
+				
 			};
 
 			const stopAutoRefresh = () => {
@@ -1317,6 +1318,27 @@
 	</script>
 
 	<style>
+
+		#list-table-wrapper table td { 
+		max-width: 280px; 
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		}
+
+		#list-table-wrapper .almacen-cell-text {
+			display: block;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		#list-table-wrapper td .flex .almacen-cell-text {
+			flex: 1 1 auto;
+			max-width: calc(100% - 4.5rem);
+		}
+
 		.dropdown--action .dropdown-content {
 			min-width: 80px !important;
 			max-width: 120px !important;

@@ -25,8 +25,19 @@ class VehiculosController extends Controller
 
     public function index(Request $request): View
     {
-        $query = $this->baseQuery();
+        $query = $this->applyIndexFilters($request, $this->baseQuery());
 
+        $items = $query->orderBy('v.placa', 'desc')
+            ->paginate($this->resolvePerPage($request, 25))
+            ->withQueryString();
+
+        $items = $this->attachVehiculoRelationGroups($items);
+
+        return view('vehiculo.vehiculos', $this->buildIndexViewData($items, $query));
+    }
+
+    private function applyIndexFilters(Request $request, $query)
+    {
         $placaFilter = trim((string) $request->input('placa', ''));
         if ($placaFilter !== '') {
             $query->where('v.placa', 'like', '%' . $placaFilter . '%');
@@ -80,84 +91,106 @@ class VehiculosController extends Controller
             });
         }
 
-        $items = $query->orderBy('v.cliente_idcliente')->paginate($this->resolvePerPage($request))->withQueryString();
+        return $query;
+    }
 
-        // Adjuntar relation_groups por cada fila para que el listado pueda
-        // desplegar las relaciones (dispositivos) usando el partial cliente.relation-panel
+    private function attachVehiculoRelationGroups($items)
+    {
         $placas = collect($items->items())->pluck('placa')->filter()->unique()->values()->all();
-        if (!empty($placas)) {
-            $dispositivosRows = DB::table('dispositivocliente')
-                ->whereIn('vehiculo_placa', $placas)
-                ->select('iddispositivoCliente', 'marcaDispositivo', 'modeloDispositivo', 'fechaInstalacion', 'fechaBaja', 'estado', 'vehiculo_placa')
-                ->get();
-
-            // Obtener números activos (última asignación) para los dispositivos encontrados
-            $deviceIds = $dispositivosRows->pluck('iddispositivoCliente')->filter()->unique()->values()->all();
-            $numbersMap = [];
-            if (!empty($deviceIds)) {
-                $numbers = DB::table('detnumerosdispositivo as n')
-                    ->whereIn('n.dispositivoCliente_iddispositivoCliente', $deviceIds)
-                    ->select(['n.dispositivoCliente_iddispositivoCliente', 'n.numeroTelefonico_numeroTelefonico'])
-                    ->orderByDesc('n.fechaAsignacion')
-                    ->orderByDesc('n.iddetNumerosDispositivo')
-                    ->get()
-                    ->groupBy('dispositivoCliente_iddispositivoCliente')
-                    ->map(function ($group) {
-                        $first = $group->first();
-                        return $first ? ($first->numeroTelefonico_numeroTelefonico ?? '-') : '-';
-                    })->all();
-
-                $numbersMap = $numbers;
-            }
-
-            $grouped = $dispositivosRows->map(function ($d) use ($numbersMap) {
-                $arr = (array) $d;
-                $arr['numero'] = $numbersMap[$arr['iddispositivoCliente']] ?? '-';
-                return $arr;
-            })->groupBy('vehiculo_placa')->map(function ($group) {
-                return $group->map(function ($d) {
-                    return (array) $d;
-                })->all();
-            })->all();
-
-            $newCollection = $items->getCollection()->map(function ($row) use ($grouped) {
-                $placa = data_get($row, 'placa');
-                $devices = $grouped[$placa] ?? [];
-
-                $relationGroups = [
-                    [
-                        'key' => 'dispositivo_cliente',
-                        'label' => 'Dispositivos cliente',
-                        'columns' => [
-                            ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo', 'type' => 'text'],
-                            ['key' => 'numero', 'label' => 'Número', 'type' => 'text'],
-                            ['key' => 'marcaDispositivo', 'label' => 'Marca', 'type' => 'text'],
-                            ['key' => 'modeloDispositivo', 'label' => 'Modelo', 'type' => 'text'],
-                            ['key' => 'fechaInstalacion', 'label' => 'Fecha de instalación', 'type' => 'date'],
-                            ['key' => 'fechaBaja', 'label' => 'Fecha de baja', 'type' => 'date'],
-                            ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
-                        ],
-                        'records' => $devices,
-                    ],
-                ];
-
-                $rowArr = (array) $row;
-                // Asignar número activo del primer dispositivo (si existe) al nivel del vehículo
-                $rowArr['numero'] = '-';
-                if (!empty($devices) && is_array($devices) && isset($devices[0]['numero'])) {
-                    $rowArr['numero'] = $devices[0]['numero'] ?? '-';
-                }
-                $rowArr['relation_groups'] = $relationGroups;
-
-                return (object) $rowArr;
-            });
-
-            $items->setCollection($newCollection);
+        if (empty($placas)) {
+            return $items;
         }
 
-        return view('vehiculo.vehiculos', [
+        $grouped = $this->loadVehiculoDeviceGroups($placas);
+        if (empty($grouped)) {
+            return $items;
+        }
+
+        $newCollection = $items->getCollection()->map(function ($row) use ($grouped) {
+            return $this->attachRelationGroupsToVehiculoRow($row, $grouped);
+        });
+
+        $items->setCollection($newCollection);
+
+        return $items;
+    }
+
+    private function loadVehiculoDeviceGroups(array $placas): array
+    {
+        $dispositivosRows = DB::table('dispositivocliente')
+            ->whereIn('vehiculo_placa', $placas)
+            ->select('iddispositivoCliente', 'marcaDispositivo', 'modeloDispositivo', 'fechaInstalacion', 'fechaBaja', 'estado', 'vehiculo_placa')
+            ->get();
+
+        $deviceIds = $dispositivosRows->pluck('iddispositivoCliente')->filter()->unique()->values()->all();
+        $numbersMap = [];
+
+        if (!empty($deviceIds)) {
+            $numbersMap = DB::table('detnumerosdispositivo as n')
+                ->whereIn('n.dispositivoCliente_iddispositivoCliente', $deviceIds)
+                ->select(['n.dispositivoCliente_iddispositivoCliente', 'n.numeroTelefonico_numeroTelefonico'])
+                ->orderByDesc('n.fechaAsignacion')
+                ->orderByDesc('n.iddetNumerosDispositivo')
+                ->get()
+                ->groupBy('dispositivoCliente_iddispositivoCliente')
+                ->map(function ($group) {
+                    $first = $group->first();
+                    return $first ? ($first->numeroTelefonico_numeroTelefonico ?? '-') : '-';
+                })->all();
+        }
+
+        return $dispositivosRows->map(function ($d) use ($numbersMap) {
+            $arr = (array) $d;
+            $arr['numero'] = $numbersMap[$arr['iddispositivoCliente']] ?? '-';
+            return $arr;
+        })->groupBy('vehiculo_placa')->map(function ($group) {
+            return $group->map(function ($d) {
+                return (array) $d;
+            })->all();
+        })->all();
+    }
+
+    private function attachRelationGroupsToVehiculoRow($row, array $grouped)
+    {
+        $placa = data_get($row, 'placa');
+        $devices = $grouped[$placa] ?? [];
+
+        $relationGroups = [
+            [
+                'key' => 'dispositivo_cliente',
+                'label' => 'Dispositivos cliente',
+                'columns' => [
+                    ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo', 'type' => 'text'],
+                    ['key' => 'numero', 'label' => 'Número', 'type' => 'text'],
+                    ['key' => 'marcaDispositivo', 'label' => 'Marca', 'type' => 'text'],
+                    ['key' => 'modeloDispositivo', 'label' => 'Modelo', 'type' => 'text'],
+                    ['key' => 'fechaInstalacion', 'label' => 'Fecha de instalación', 'type' => 'date'],
+                    ['key' => 'fechaBaja', 'label' => 'Fecha de baja', 'type' => 'date'],
+                    ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
+                ],
+                'records' => $devices,
+            ],
+        ];
+
+        $rowArr = (array) $row;
+        $rowArr['numero'] = '-';
+        if (!empty($devices) && is_array($devices) && isset($devices[0]['numero'])) {
+            $rowArr['numero'] = $devices[0]['numero'] ?? '-';
+        }
+        $rowArr['relation_groups'] = $relationGroups;
+
+        return (object) $rowArr;
+    }
+
+    private function buildIndexViewData($items, $query): array
+    {
+        return [
             'title' => 'Módulo Vehículos',
             'singularTitle' => 'Vehículo',
+            'tableWrapperClass' => 'vehiculos-table',
+            'statsWrapperClass' => 'vehiculos-stats',
+            'perPageOptions' => [25, 50, 100],
+            'defaultPerPage' => 25,
             'items' => $items,
             'columns' => [
                 ['key' => 'placa', 'label' => 'Placa', 'type' => 'text'],
@@ -170,6 +203,8 @@ class VehiculosController extends Controller
             ],
             'stats' => [
                 ['label' => 'Total de vehículos', 'value' => (clone $query)->count()],
+                ['label' => 'Total de clientes', 'value' => (clone $query)->distinct('v.cliente_idcliente')->count('v.cliente_idcliente')],
+                ['label' => 'Total de tipos de vehículo', 'value' => (clone $query)->distinct('v.tipoUnidad_idtable1')->count('v.tipoUnidad_idtable1')],
             ],
             'filters' => [
                 [
@@ -220,7 +255,7 @@ class VehiculosController extends Controller
                 'xlsx' => route('modules.vehiculos.export', ['format' => 'xlsx']),
             ],
             'identifierKey' => 'placa',
-        ]);
+        ];
     }
 
     public function export(Request $request, string $format)
@@ -274,6 +309,10 @@ class VehiculosController extends Controller
                     'required' => true,
                     'maxlength' => 20,
                     'helpText' => 'Identificador único del vehículo.',
+                    'consultButton' => true,
+                    'consultButtonLabel' => 'Consultar',
+                    'consultButtonUrl' => route('api.consultar.placa'),
+                    'consultTargetFields' => ['anio', 'color', 'marca', 'modelo'],
                 ],
                 [
                     'name' => 'cliente_idcliente',
@@ -418,7 +457,12 @@ class VehiculosController extends Controller
                     'label' => 'Placa',
                     'required' => true,
                     'maxlength' => 20,
+                    'helpText' => 'Identificador único del vehículo.',
                     'disabled' => true,
+                    'consultButton' => true,
+                    'consultButtonLabel' => 'Consultar',
+                    'consultButtonUrl' => route('api.consultar.placa'),
+                    'consultTargetFields' => ['anio', 'color', 'marca', 'modelo'],
                 ],
                 [
                     'name' => 'cliente_idcliente',
@@ -544,6 +588,24 @@ class VehiculosController extends Controller
         } catch (QueryException) {
             return redirect()->route('modules.vehiculos')->with('error', 'No se puede eliminar el vehículo porque tiene dispositivos asociados.');
         }
+    }
+
+    public function consultarPlaca(Request $request): JsonResponse
+    {
+        $placa = trim((string) $request->query('placa', ''));
+
+        if ($placa === '') {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'La placa es obligatoria para consultar.',
+            ], 422);
+        }
+
+        return response()->json([
+            'status' => 'error',
+            'message' => 'La consulta de placa aún no está implementada. Cuando la API esté lista, esta ruta devolverá año, color, marca y modelo.',
+            'data' => null,
+        ], 501);
     }
 
     public function lockStatus(string $placa): JsonResponse

@@ -244,6 +244,13 @@ class BulkDestroyController extends Controller
                 'redirectRoute' => 'modules.configuracion.detalle-lista-precio.index',
                 'label' => 'detalle de lista de precio',
             ],
+            'modules.configuracion.paquetes.bulk-destroy' => [
+                'table' => 'paquetes',
+                'primaryKey' => 'idpaquetes',
+                'lockResource' => 'configuracion.paquetes',
+                'redirectRoute' => 'modules.configuracion.paquetes.index',
+                'label' => 'paquete',
+            ],
             'modules.almacen.elemento-almacen.bulk-destroy' => [
                 'table' => 'elementoalmacen',
                 'primaryKey' => 'imei',

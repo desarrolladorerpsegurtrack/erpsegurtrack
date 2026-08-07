@@ -237,6 +237,13 @@ class ClientesController extends Controller
                     'type' => 'date',
                     'label' => 'Fecha de Ingreso',
                     'required' => false,
+                    'readonly' => true,
+                    'disabled' => true,
+                    'value' => now()->format('Y-m-d'),
+                ],
+                [
+                    'name' => 'fechaIngreso',
+                    'type' => 'hidden',
                     'value' => now()->format('Y-m-d'),
                 ],
                 [
@@ -645,9 +652,19 @@ class ClientesController extends Controller
                 ],
                 [
                     'name' => 'fechaIngreso',
-                    'type' => 'date',
+                    'type' => 'text',
                     'label' => 'Fecha de Ingreso',
                     'required' => false,
+                    'readonly' => true,
+                    'disabled' => true,
+                    'value' => isset($record->fechaIngreso) && $record->fechaIngreso
+                        ? \Carbon\Carbon::parse($record->fechaIngreso)->locale('es')->translatedFormat('j M, Y')
+                        : '',
+                ],
+                [
+                    'name' => 'fechaIngreso',
+                    'type' => 'hidden',
+                    'value' => $record->fechaIngreso ?? null,
                 ],
                 [
                     'name' => 'fechaBaja',

@@ -177,9 +177,7 @@
         }
 
         .items-section {
-            min-height: 420px;
-            max-height: 420px;
-            display: block;
+            margin-bottom: 20px;
             page-break-inside: avoid;
         }
 
@@ -195,9 +193,15 @@
             text-align: left;
         }
 
+        .items-table thead tr.section-head.section-head--light th {
+            background-color: #f2f2f2;
+            color: #000000;
+            border-bottom: none;
+        }
+
         /* Fila de cabeceras de columna */
         .items-table thead tr.col-head th {
-            background-color: #b9b9b9ff;
+            background-color: transparent;
             color: #000000;
             font-size: 13px;
             font-weight: 700;
@@ -235,9 +239,13 @@
             /* Borde derecho externo */
         }
 
-        /* Forzar línea inferior externa fuerte en la última fila del cuerpo */
-        .items-table tbody tr:last-child td {
+        /* Forzar línea inferior externa fuerte en la última fila del cuerpo solo para PLANES */
+        .items-table.items-table--dark tbody tr:last-child td {
             border-bottom: 1px solid #c0c0c0;
+        }
+
+        .items-table.items-table--light tbody tr:last-child td {
+            border-bottom: none;
         }
 
         /* Fila de total al pie de la tabla */
@@ -245,8 +253,7 @@
             background-color: #444444;
             color: #ffffff;
             font-weight: 700;
-            font-size: 13px;
-            padding: 4px 10px;
+            font-size: 15px;
             border: 1px solid #c0c0c0;
             text-align: center;
         }
@@ -256,7 +263,6 @@
             color: #000000;
             font-weight: 700;
             font-size: 15px;
-            padding: 5px 10px;
             border: 1px solid #c0c0c0;
         }
 
@@ -379,7 +385,44 @@
 </head>
 
 <body>
+    <div class="footer-fixed">
+        <table class="footer-table">
+            <tr>
+                <td class="col-terms">
+                    <div class="footer-block-title">TÉRMINOS Y CONDICIONES</div>
+                    <ul class="terms-list">
+                        <li>Todos los precios incluyen IGV.</li>
+                        <li>Garantía de 1 año.</li>
+                        <li>Entregado el producto o ejecutado<br>el servicio, no existen devoluciones.</li>
+                    </ul>
+                    <div class="thank-you">¡Gracias por la Preferencia!</div>
+                </td>
+
+                <td class="col-bcp">
+                    <div class="footer-block-title">SEGURTRAK S.A.C</div>
+                    <div class="footer-accent-text">DATOS DE PAGO</div>
+                    <div class="footer-accent-text">Banco de Crédito Del Perú (BCP)</div>
+                    <span class="footer-accent-text">Soles</span> 191-2581664-0-12<br>
+                    <span class="footer-accent-text">CCI:</span> 00219100258166401259<br>
+                    <span class="footer-accent-text">Dólares</span> 191-2559634-1-97<br>
+                    <span class="footer-accent-text">CCI:</span> 00219100255963419751
+                </td>
+
+                <td class="col-bn">
+                    <div class="footer-block-title">BANCO DE LA NACION</div>
+                    <div class="footer-accent-text">Cuenta de Detracciones</div>
+                    <span class="footer-accent-text">Soles</span> 00-099-162104
+                </td>
+            </tr>
+        </table>
+    </div>
+
     <div class="page">
+        @php
+            // Tomamos la primera cotización para encabezado y datos del cliente
+            $firstQData = $quotesData[0];
+            $quote = $firstQData['quote'];
+        @endphp
         {{-- ===== ENCABEZADO ===== --}}
         <table class="header-table">
             <tr>
@@ -439,10 +482,6 @@
                             <td class="lbl-field-left">DIRECCION:</td>
                             <td class="val-field">{{ $quote->direccion ?? '-' }}</td>
                         </tr>
-                        <tr>
-                            <td class="lbl-field-left">VIGENCIA:</td>
-                            <td class="val-field">{{ $quote->vigencia_detalle ?? '-' }}</td>
-                        </tr>
                     </table>
                 </td>
 
@@ -457,12 +496,8 @@
                             <td class="val-field">{{ $quote->telefono ?? '-' }}</td>
                         </tr>
                         <tr>
-                            <td class="lbl-field-right">F. PAGO:</td>
-                            <td class="val-field">{{ $quote->formaPago_detalle ?? '-' }}</td>
-                        </tr>
-                        <tr>
-                            <td class="lbl-field-right">MONEDA:</td>
-                            <td class="val-field">{{ $quote->moneda_detalle ?? '-' }}</td>
+                            <td class="lbl-field-left">VIGENCIA:</td>
+                            <td class="val-field">{{ $quote->vigencia_detalle ?? '-' }}</td>
                         </tr>
                     </table>
                 </td>
@@ -471,21 +506,18 @@
 
         <div class="divider-line"></div>
 
-        {{-- ===== TABLA DE ÍTEMS ===== --}}
-        @php
-            $maxRows = 15;
-            $itemsArray = collect($items);
-            $chunks = $itemsArray->isEmpty() ? collect([collect([])]) : $itemsArray->chunk($maxRows);
-        @endphp
-
-        @foreach($chunks as $chunkIndex => $chunk)
-            @if($chunkIndex > 0)
-                <div style="page-break-before: always;"></div>
-            @endif
+        {{-- ===== TABLA DE ÍTEMS (Una por cada cotización del grupo) ===== --}}
+        @foreach($quotesData as $qData)
+            @php
+                $items = $qData['items'];
+                $section_title = $qData['section_title'];
+                $total_general_label = $qData['total_general_label'];
+            @endphp
             <div class="items-section">
-                <table class="items-table">
+                <table
+                    class="items-table {{ ($section_title ?? '') === 'PLANES' ? 'items-table--dark' : 'items-table--light' }}">
                     <thead>
-                        <tr class="section-head">
+                        <tr class="section-head {{ ($section_title ?? '') === 'PLANES' ? '' : 'section-head--light' }}">
                             <th colspan="5">{{ $section_title ?? 'EQUIPAMIENTO' }}</th>
                         </tr>
                         <tr class="col-head">
@@ -497,7 +529,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach($chunk as $index => $item)
+                        @foreach($items as $index => $item)
                             <tr>
                                 <td class="text-center">{{ number_format($item->cantidad) }}</td>
                                 <td class="text-left" style="vertical-align: middle;">
@@ -505,45 +537,18 @@
                                         $periodo = trim((string) ($item->periodo ?? ''));
                                         $periodoLower = mb_strtolower($periodo, 'UTF-8');
                                     @endphp
-                                    {{ $item->producto ?? '-' }}@if($periodo !== '' && $periodoLower !== 'no') -
-                                    {{ $periodo }}@endif
+                                    {{ $item->producto ?? '-' }}@if($periodo !== '' && $periodoLower !== 'no') <span
+                                    style="color: red; font-weight: bold;">- {{ mb_strtoupper($periodo) }}</span>@endif
                                 </td>
                                 <td class="text-center">{{ $item->precio_label }}</td>
                                 <td class="text-center">{{ $item->descuento_label }}</td>
                                 <td class="text-center">{{ $item->total_label }}</td>
                             </tr>
                         @endforeach
-
-                        {{-- Rellenar filas hasta $maxRows para mantener el recuadro estático --}}
-                        @for ($i = $chunk->count(); $i < $maxRows; $i++)
-                            <tr>
-                                <td class="text-center">&nbsp;</td>
-                                <td class="text-left">&nbsp;</td>
-                                <td class="text-center">&nbsp;</td>
-                                <td class="text-center">&nbsp;</td>
-                                <td class="text-center">&nbsp;</td>
-                            </tr>
-                        @endfor
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td rowspan="5" colspan="3" style="border: none; background: transparent;"></td>
-                            <th class="text-center">Importe</th>
-                            <td class="text-center total-amount">{{ $importe_label }}</td>
-                        </tr>
-                        <tr>
-                            <th class="text-center">Descuento</th>
-                            <td class="text-center total-amount">{{ $descuento_amount_label }}</td>
-                        </tr>
-                        <tr>
-                            <th class="text-center">SubTotal</th>
-                            <td class="text-center total-amount">{{ $subtotal_after_discount_label }}</td>
-                        </tr>
-                        <tr>
-                            <th class="text-center">IGV(18%)</th>
-                            <td class="text-center total-amount">{{ $igv_amount_label }}</td>
-                        </tr>
-                        <tr>
+                            <td rowspan="1" colspan="3" style="border: none; background: transparent;"></td>
                             <th class="text-center">Total</th>
                             <td class="text-center total-amount">{{ $total_general_label }}</td>
                         </tr>
@@ -551,38 +556,6 @@
                 </table>
             </div>
         @endforeach
-    </div>
-    {{-- ===== PIE DE PÁGINA ===== --}}
-    <div class="footer-fixed">
-        <table class="footer-table">
-            <tr>
-                <td class="col-terms">
-                    <div class="footer-block-title">TÉRMINOS Y CONDICIONES</div>
-                    <ul class="terms-list">
-                        <li>Todos los precios incluyen IGV.</li>
-                        <li>Garantía de 1 año.</li>
-                        <li>Entregado el producto o ejecutado<br>el servicio, no existen devoluciones.</li>
-                    </ul>
-                    <div class="thank-you">¡Gracias por la Preferencia!</div>
-                </td>
-
-                <td class="col-bcp">
-                    <div class="footer-block-title">SEGURTRAK S.A.C</div>
-                    <div class="footer-accent-text">DATOS DE PAGO</div>
-                    <div class="footer-accent-text">Banco de Crédito Del Perú (BCP)</div>
-                    <span class="footer-accent-text">Soles</span> 191-2581664-0-12<br>
-                    <span class="footer-accent-text">CCI:</span> 00219100258166401259<br>
-                    <span class="footer-accent-text">Dólares</span> 191-2559634-1-97<br>
-                    <span class="footer-accent-text">CCI:</span> 00219100255963419751
-                </td>
-
-                <td class="col-bn">
-                    <div class="footer-block-title">BANCO DE LA NACION</div>
-                    <div class="footer-accent-text">Cuenta de Detracciones</div>
-                    <span class="footer-accent-text">Soles</span> 00-099-162104
-                </td>
-            </tr>
-        </table>
     </div>
 </body>
 

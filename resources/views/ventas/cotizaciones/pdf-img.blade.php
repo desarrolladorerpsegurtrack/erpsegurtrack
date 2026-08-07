@@ -6,13 +6,25 @@
     <meta charset="utf-8">
     <title>Cotización {{ $quote->nroCotizacion ?? '' }}</title>
     <style>
+        @php
+            $fontDir = str_replace('\\', '/', storage_path('fonts'));
+            $fontDir = str_replace(' ', '%20', $fontDir);
+        @endphp
+
+        @font-face {
+            font-family: 'Roboto';
+            font-style: normal;
+            font-weight: 400;
+            src: url("file:///{{ $fontDir }}/Roboto-Regular.ttf") format("truetype");
+        }
+
         @page {
             margin: 50px 30px 30px 30px;
             /* El tercer valor agrandado da espacio al footer fijo abajo */
         }
 
         body {
-            font-family: 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
+            font-family: 'Roboto', sans-serif;
             color: #2c3e50;
             font-size: 11px;
             line-height: 1.4;
@@ -117,7 +129,7 @@
 
         .customer-data-table td.col-half-right {
             width: 30%;
-            padding-left: 10px; /* Este es tu "gap" o espacio de separación del medio */
+            padding-left: 0px; /* Este es tu "gap" o espacio de separación del medio */
             vertical-align: top;
         }
 
@@ -502,7 +514,11 @@
                                         <tr>
                                             {{-- Celda para el texto: alineada a la izquierda y centrada verticalmente --}}
                                             <td style="border: none; padding: 0; text-align: left; vertical-align: middle;">
-                                                <span>{{ $item->producto ?? '-' }}</span>
+                                                @php
+                                                    $periodo = trim((string) ($item->periodo ?? ''));
+                                                    $periodoLower = mb_strtolower($periodo, 'UTF-8');
+                                                @endphp
+                                                <span>{{ $item->producto ?? '-' }}@if($periodo !== '' && $periodoLower !== 'no') - {{ $periodo }}@endif</span>
                                             </td>
                                             
                                             {{-- Celda para la imagen: pegada al extremo derecho y centrada verticalmente --}}

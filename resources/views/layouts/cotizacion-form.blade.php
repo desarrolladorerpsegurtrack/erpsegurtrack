@@ -195,6 +195,45 @@
         }
 
         @media (max-width: 640px) {
+            #cotizaciones-container .overflow-x-auto {
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            #cotizaciones-container .overflow-x-auto > table {
+                width: max-content !important;
+                min-width: 720px !important;
+                table-layout: auto !important;
+            }
+
+            #cotizaciones-container .overflow-x-auto > table th,
+            #cotizaciones-container .overflow-x-auto > table td {
+                white-space: nowrap !important;
+            }
+
+            #cotizaciones-container .overflow-x-auto > table th:first-child,
+            #cotizaciones-container .overflow-x-auto > table td:first-child {
+                white-space: normal !important;
+                max-width: 220px !important;
+                min-width: 180px !important;
+            }
+
+            #cotizaciones-container .overflow-x-auto > table td .form-control {
+                min-width: 0 !important;
+            }
+
+            .quick-actions-grid {
+                display: grid;
+                grid-template-columns: auto auto;
+                gap: 0.5rem;
+                align-items: center;
+            }
+            .quick-actions-grid .quick-pick-btn {
+                grid-column: 1 / -1;
+                justify-self: center;
+                width: auto;
+            }
+        }
             .quick-actions-grid {
                 display: grid;
                 grid-template-columns: auto auto;
@@ -1357,12 +1396,12 @@
         @media (max-width: 767px) {
             #modal-inputs-container {
                 display: grid !important;
-                grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+                grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
                 gap: 0.75rem !important;
                 align-items: stretch !important;
             }
             #modal-inputs-container > .product-col {
-                grid-column: span 3 / span 3 !important;
+                grid-column: span 4 / span 4 !important;
             }
             #modal-inputs-container > .modal-input-col {
                 width: 100% !important;
@@ -1373,7 +1412,7 @@
                 text-overflow: ellipsis;
             }
             #modal-inputs-container > .modal-btn-col {
-                grid-column: span 3 / span 3 !important;
+                grid-column: span 4 / span 4 !important;
                 width: 100% !important;
                 margin-top: 0.25rem !important;
             }
@@ -1674,7 +1713,7 @@
                                                 <input 
                                                     type="{{ $field['type'] === 'date' ? 'text' : $field['type'] }}" 
                                                     name="{{ $field['name'] }}" 
-                                                    @if(($field['name'] ?? '') === 'direccion') id="field-direccion" @elseif(($field['name'] ?? '') === 'telefono') id="field-telefono" @elseif(($field['name'] ?? '') === 'correo') id="field-correo" @endif
+                                                    @if(($field['name'] ?? '') === 'direccion') id="field-direccion" @elseif(($field['name'] ?? '') === 'telefono') id="field-telefono" @elseif(($field['name'] ?? '') === 'correo') id="field-correo" @elseif(($field['name'] ?? '') === 'cliente_idcliente_visual') id="cliente-idcliente-visual" @endif
                                                     @if($field['type'] !== 'password') value="{{ $fieldValue }}" @endif
                                                     class="w-full rounded-lg border {{ $hasError ? 'border-red-500' : 'border-slate-300' }} px-3 py-2 text-sm transition duration-200 ease-in-out focus:border-primary focus:ring-1 focus:ring-primary {{ $field['type'] === 'date' ? 'datepicker' : '' }} {{ ($field['readonly'] ?? false) ? 'bg-slate-50 cursor-not-allowed' : '' }}"
                                                     {{ ($field['type'] === 'date') ? 'data-no-default="true"' : '' }}
@@ -1763,6 +1802,7 @@
                                                 @foreach($normalizedOptions as $optionKey => $optionLabel)
                                                     <option 
                                                         value="{{ $optionKey }}" 
+                                                        title="{{ $optionLabel }}"
                                                         @if((string) $fieldValue === (string) $optionKey) selected @endif
                                                     >
                                                         {{ $optionLabel }}
@@ -1776,6 +1816,7 @@
                                                         @endphp
                                                         <option 
                                                             value="{{ $optKey }}" 
+                                                            title="{{ $optLabel }}"
                                                             @if((string) $fieldValue === (string) $optKey) selected @endif
                                                         >
                                                             {{ $optLabel }}
@@ -2203,6 +2244,12 @@
                                             </select>
                                         </div>
                                         <div class="w-20 modal-input-col">
+                                            <label class="block text-xs font-semibold text-slate-600 mb-3">Como Dato</label>
+                                            <label class="inline-flex items-center gap-2 text-sm text-slate-600">
+                                                <input type="checkbox" id="modal-cetear" class="h-6 w-6 transition-all duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&[type='radio']]:checked:bg-primary [&[type='radio']]:checked:border-primary [&[type='radio']]:checked:border-opacity-10 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:not(:checked)]:dark:bg-darkmode-800/50 [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed [&:disabled:checked]:dark:bg-darkmode-800/50" disabled>
+                                            </label>
+                                        </div>
+                                        <div class="w-20 modal-input-col">
                                             <label class="block text-xs font-semibold text-slate-600 mb-1">Cant.</label>
                                             <input type="number" id="modal-qty" value="1" min="1" step="1" class="form-control text-sm w-full text-center">
                                         </div>
@@ -2310,8 +2357,28 @@
                                 const inpQty = document.getElementById('modal-qty');
                                 const inpPrice = document.getElementById('modal-price');
                                 const inpDisc = document.getElementById('modal-discount');
+                                const inpCetear = document.getElementById('modal-cetear');
                                 
-                                if (selectProd) selectProd.addEventListener('change', function() { clearModalMessage(modal); });
+                                if (selectProd) selectProd.addEventListener('change', function() {
+                                    clearModalMessage(modal);
+                                    const opt = almacenOptions.find(o => String(o.idalmacen) === String(this.value));
+                                    updateCetearForOption(opt);
+                                });
+                                if (inpCetear) {
+                                    inpCetear.addEventListener('change', function() {
+                                        const opt = almacenOptions.find(o => String(o.idalmacen) === String(selectProd.value));
+                                        if (!opt || !isEquipoTipo(opt.tipo_nombre)) {
+                                            inpCetear.checked = false;
+                                            return;
+                                        }
+                                        if (inpCetear.checked) {
+                                            inpPrice.value = '0.00';
+                                        } else {
+                                            const p = parseFloat(opt.precioUnitario || opt.precio || opt.price || 0);
+                                            if (!Number.isNaN(p)) inpPrice.value = p.toFixed(2);
+                                        }
+                                    });
+                                }
                                 let tomSelectInstance = null;
                                 let tempItems = []; // For modal
                                 const oldCotizaciones = @json(old('cotizaciones', []));
@@ -2338,7 +2405,7 @@
                                     almacenOptions.forEach(opt => {
                                         const option = document.createElement('option');
                                         option.value = opt.idalmacen;
-                                        option.textContent = opt.label;
+                                        option.textContent = normalizeLabelText(opt.label);
                                         if (selectedIds.has(String(opt.idalmacen))) {
                                             option.disabled = true;
                                             option.dataset.disabled = 'true';
@@ -2374,7 +2441,10 @@
                                                 render: {
                                                     option: function(data, escape) {
                                                         const disabledClass = data.disabled ? ' text-slate-500 opacity-60' : '';
-                                                        return `<div class="px-2 py-1 text-xs ${disabledClass}">${escape(data.text)}</div>`;
+                                                        return `<div class="px-2 py-1 text-xs ${disabledClass}" title="${escape(data.text)}">${escape(data.text)}</div>`;
+                                                    },
+                                                    item: function(data, escape) {
+                                                        return `<div class="truncate" title="${escape(data.text)}">${escape(data.text)}</div>`;
                                                     }
                                                 },
                                                 onChange: function(val) {
@@ -2384,10 +2454,7 @@
                                                         return;
                                                     }
                                                     const opt = almacenOptions.find(o => String(o.idalmacen) === String(val));
-                                                    if (opt) {
-                                                        const p = parseFloat(opt.precioUnitario || opt.precio || opt.price || 0);
-                                                        if (p > 0) inpPrice.value = p.toFixed(2);
-                                                    }
+                                                    updateCetearForOption(opt);
                                                 }
                                             });
                                         } catch(e) {
@@ -2400,6 +2467,41 @@
                                     refreshModalProductSelect();
                                 }
 
+                                function isEquipoTipo(tipoNombre) {
+                                    if (!tipoNombre) return false;
+                                    const tipo = String(tipoNombre).toUpperCase();
+                                    return !tipo.includes('SERVIC') && !tipo.includes('PLAN');
+                                }
+
+                                function updateCetearForOption(opt) {
+                                    const enabled = Boolean(opt && isEquipoTipo(opt.tipo_nombre));
+                                    if (inpCetear) {
+                                        inpCetear.disabled = !enabled;
+                                        if (!enabled) {
+                                            inpCetear.checked = false;
+                                        }
+                                    }
+                                    if (!opt) {
+                                        if (inpPrice) inpPrice.value = '';
+                                        return;
+                                    }
+                                    const price = parseFloat(opt.precioUnitario || opt.precio || opt.price || 0);
+                                    if (enabled && inpCetear && inpCetear.checked) {
+                                        inpPrice.value = '0.00';
+                                    } else if (!Number.isNaN(price) && inpPrice) {
+                                        inpPrice.value = price.toFixed(2);
+                                    }
+                                }
+
+                                function setGroupComentario(tipo, value) {
+                                    const safeTipo = getSafeTipo(tipo);
+                                    const wrapper = getOrCreateGroupWrapper(tipo);
+                                    const textarea = wrapper.querySelector(`textarea[name="cotizaciones[${safeTipo}][comentario]"]`);
+                                    if (textarea && !textarea.value.trim()) {
+                                        textarea.value = value;
+                                    }
+                                }
+
                                 function escapeHtml(value) {
                                     return String(value || '').replace(/[&<>\"]/g, function (char) {
                                         return {
@@ -2409,6 +2511,14 @@
                                             '"': '&quot;'
                                         }[char];
                                     });
+                                }
+
+                                function normalizeLabelText(label) {
+                                    let text = String(label || '').trim();
+                                    if (!text) return '';
+                                    // Remove common trailing suffix for service labels like "- No"
+                                    text = text.replace(/\s*-\s*No\s*$/i, '').trim();
+                                    return text;
                                 }
 
                                 function getGroupFieldValue(safeTipo, fieldName, defaultValue = '') {
@@ -2756,16 +2866,18 @@
 
                                     tempItems.push({
                                         id: id,
-                                        label: opt.label,
+                                        label: normalizeLabelText(opt.label),
                                         tipo_nombre: opt.tipo_nombre,
                                         qty: qty,
                                         price: price,
                                         desc: desc,
-                                        subtotal: subtotal
+                                        subtotal: subtotal,
+                                        cetear: Boolean(inpCetear && inpCetear.checked && isEquipoTipo(opt.tipo_nombre))
                                     });
 
                                     renderTempTable();
                                     if(tomSelectInstance) tomSelectInstance.clear();
+                                    updateCetearForOption(null);
                                     inpQty.value = 1;
                                     inpPrice.value = '';
                                     inpDisc.value = 0;
@@ -2960,10 +3072,10 @@
                                         return false;
                                     }
                                     
-                                    const itemLabel = itemData.label || itemData.producto || itemData.nombre || (() => {
+                                    const itemLabel = normalizeLabelText(itemData.label || itemData.producto || itemData.nombre || (() => {
                                         const opt = almacenOptions.find(o => String(o.idalmacen) === String(itemData.id));
                                         return opt ? opt.label : '';
-                                    })();
+                                    })());
 
                                     const tr = document.createElement('tr');
                                     tr.className = 'border-b border-slate-100 hover:bg-slate-50/50 transition-colors group-row';
@@ -2971,7 +3083,7 @@
                                     tr.innerHTML = `
                                         <td class="px-4 py-2">
                                             <div class="w-full">
-                                                <input type="text" readonly class="form-control row-product-label w-full truncate overflow-hidden text-xs text-slate-800 bg-slate-50 border border-slate-200 px-2 py-2" value="${itemLabel}" title="${itemLabel}">
+                                                <input type="text" readonly class="form-control row-product-label w-full truncate overflow-hidden text-xs text-slate-800 bg-slate-50 border border-slate-200 px-2 py-2" value="${escapeHtml(itemLabel)}" title="${escapeHtml(itemLabel)}">
                                                 <input type="hidden" class="row-product" value="${itemData.id || ''}">
                                             </div>
                                         </td>
@@ -3144,9 +3256,14 @@
                                 btnSave.addEventListener('click', function() {
                                     if(tempItems.length === 0) { setModalMessage(modal, 'No hay items seleccionados.'); return; }
                                     let duplicateCount = 0;
+                                    const updatedComentarios = new Set();
                                     tempItems.forEach(item => {
                                         const tipo = getGroupKey(item.tipo_nombre);
                                         const wasAdded = addRowToGroup(tipo, item);
+                                        if (item.cetear && !updatedComentarios.has(tipo)) {
+                                            setGroupComentario(tipo, 'Como dato');
+                                            updatedComentarios.add(tipo);
+                                        }
                                         if (!wasAdded) {
                                             duplicateCount += 1;
                                         }
@@ -4981,6 +5098,37 @@
     </style>
 
     <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            function decorateTomSelectTitles(root) {
+                (root || document).querySelectorAll('.ts-dropdown .option, .ts-control .item').forEach(function(el) {
+                    if (!el.hasAttribute('title')) {
+                        const text = el.textContent.trim();
+                        if (text) el.setAttribute('title', text);
+                    }
+                });
+            }
+
+            decorateTomSelectTitles(document);
+
+            const observer = new MutationObserver(function(mutations) {
+                mutations.forEach(function(mutation) {
+                    mutation.addedNodes.forEach(function(node) {
+                        if (!(node instanceof HTMLElement)) return;
+                        if (node.matches('.ts-dropdown .option, .ts-control .item')) {
+                            if (!node.hasAttribute('title')) {
+                                const text = node.textContent.trim();
+                                if (text) node.setAttribute('title', text);
+                            }
+                        } else {
+                            decorateTomSelectTitles(node);
+                        }
+                    });
+                });
+            });
+
+            observer.observe(document.body, { childList: true, subtree: true });
+        });
+
         // Lógica de separación de Persona Natural (Nombres y Apellidos) vs Empresa (Razón Social)
         document.addEventListener('DOMContentLoaded', function() {
             const tipoClienteSelect = document.querySelector('select[name="tipoCliente"]');
@@ -5812,15 +5960,25 @@
                     } catch (e) { console.error(e); }
                 }
 
+                const clienteIdVisual = document.getElementById('cliente-idcliente-visual');
+
+                function syncClienteIdVisual(clienteId) {
+                    if (clienteIdVisual) {
+                        clienteIdVisual.value = clienteId || '';
+                    }
+                }
+
                 // TomSelect may wrap the real select; listen change on the select/input itself
                 clienteSelect.addEventListener('change', function () {
                     const val = this.value || '';
+                    syncClienteIdVisual(val);
                     fetchClienteInfo(val, true);
                 });
 
                 // Si ya hay un cliente seleccionado al cargar la página, obtener su info
                 try {
                     const initial = clienteSelect.value || '';
+                    syncClienteIdVisual(initial);
                     if (initial) fetchClienteInfo(initial, false);
                 } catch (e) { /* noop */ }            });
     </script>

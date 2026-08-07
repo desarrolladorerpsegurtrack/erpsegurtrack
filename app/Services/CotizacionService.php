@@ -246,6 +246,13 @@ class CotizacionService
                 'helpText' => 'Identificador del cliente.',
             ],
             [
+                'name' => 'cliente_idcliente_visual',
+                'type' => 'text',
+                'label' => 'RUC / DNI',
+                'helpText' => 'ID del cliente seleccionado.',
+                'readonly' => true,
+            ],
+            [
                 'name' => 'direccion',
                 'type' => 'text',
                 'label' => 'Dirección',
@@ -482,7 +489,7 @@ class CotizacionService
     {
         return DB::table('vigenciaoferta')
             ->select('idvigenciaOferta', 'detalle', 'dias')
-            ->orderBy('detalle')
+            ->orderBy('idvigenciaOferta')
             ->get()
             ->map(function ($r) use ($includeDays) {
                 $label = trim((string) ($r->detalle ?? ''));
@@ -611,6 +618,13 @@ class CotizacionService
                 if ($request->filled('cliente_idcliente')) {
                     $fields[$idx]['value'] = $request->input('cliente_idcliente');
                 }
+            }
+
+            if (($f['name'] ?? '') === 'cliente_idcliente_visual') {
+                if ($request->filled('cliente_idcliente')) {
+                    $fields[$idx]['value'] = $request->input('cliente_idcliente');
+                }
+                $fields[$idx]['readonly'] = true;
             }
 
             if (($f['name'] ?? '') === 'vigenciaOferta_idvigenciaOferta') {
@@ -799,6 +813,13 @@ class CotizacionService
                 $f['optionsData'] = $clientes;
                 $f['optionKey'] = 'idcliente';
                 $f['optionLabel'] = 'label';
+            }
+
+            if (($f['name'] ?? '') === 'cliente_idcliente_visual') {
+                $f['readonly'] = true;
+                if ($record && isset($record->cliente_idcliente)) {
+                    $f['value'] = $record->cliente_idcliente;
+                }
             }
 
             if (($f['name'] ?? '') === 'vigenciaOferta_idvigenciaOferta') {
@@ -1115,7 +1136,7 @@ class CotizacionService
             return '-';
         }
 
-        return trim($currencySymbol) . ' ' . number_format((float) $value, 2, ',', '.');
+        return trim($currencySymbol) . ' ' . number_format((float) $value, 2, '.', ',');
     }
 
     public function currencySymbol(?string $moneda): string

@@ -92,7 +92,14 @@ class CotizacionController extends Controller
             $row->anularRoute = $row->canAnular ? route('modules.ventas.cotizaciones.anular', ['id' => $row->nroCotizacion]) : null;
             $row->download_link = '<a href="' . route('modules.ventas.cotizaciones.pdf', ['id' => $row->nroCotizacion]) . '" data-download-cotizacion="' . e($row->nroCotizacion) . '" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item text-slate-600 w-full text-left" title="Descargar PDF"><i data-lucide="download" class="mr-1 h-4 w-4 stroke-[1.3]"></i>Descargar</a>';
             $row->copyRoute = route('modules.ventas.cotizaciones.create', ['copy_from' => $row->nroCotizacion]);
-            $row->group_label = (!empty($row->batch_id) ? 'Sí' : 'No');
+            $batchId = $row->batch_id ?? null;
+            $groupText = $this->formatCotizacionGroupLabel($batchId);
+            if ($batchId) {
+                $groupDownloadUrl = route('modules.ventas.cotizaciones.pdf-grupo', ['batch_id' => $batchId]);
+                $row->group_label = '<a href="' . $groupDownloadUrl . '" class="font-medium text-slate-700 hover:text-primary hover:underline  whitespace-nowrap " title="Descargar PDF Grupal" target="_blank">' . e($groupText) . '</a>';
+            } else {
+                $row->group_label = e($groupText);
+            }
 
             return $row;
         });
@@ -123,7 +130,7 @@ class CotizacionController extends Controller
                 ['key' => 'subtotal_label', 'label' => 'Subtotal', 'type' => 'text'],
                 ['key' => 'total_label', 'label' => 'Total', 'type' => 'text'],
                 ['key' => 'fecha_emision_label', 'label' => 'Fecha Emisión', 'type' => 'text'],
-                ['key' => 'group_label', 'label' => 'Grupo', 'type' => 'text'],
+                ['key' => 'group_label', 'label' => 'Grupo', 'type' => 'custom'],
                 ['key' => 'estado_label', 'label' => 'Estado', 'type' => 'custom'],
             ],
             'stats' => [
@@ -211,6 +218,7 @@ class CotizacionController extends Controller
             } else {
                 $row->estado_label = $this->formatCotizacionEstadoName($row->estado);
             }
+            $row->group_label = $this->formatCotizacionGroupLabel($row->batch_id ?? null);
             return $row;
         });
 
@@ -219,6 +227,7 @@ class CotizacionController extends Controller
             ['key' => 'cliente_label', 'label' => 'Cliente'],
             ['key' => 'vigencia_detalle', 'label' => 'Vigencia de oferta'],
             // ['key' => 'entidadCotizadora', 'label' => 'Entidad Cotizadora'],
+            ['key' => 'group_label', 'label' => 'Grupo / Batch ID'],
             ['key' => 'estado_label', 'label' => 'Estado'],
             ['key' => 'fecha_emision_label', 'label' => 'Fecha Emisión'],
             ['key' => 'total_label', 'label' => 'Total'],
@@ -241,6 +250,7 @@ class CotizacionController extends Controller
                 } else {
                     $row->estado_label = $this->formatCotizacionEstadoName($row->estado);
                 }
+                $row->group_label = $this->formatCotizacionGroupLabel($row->batch_id ?? null);
                 return $row;
             });
 
@@ -288,8 +298,9 @@ class CotizacionController extends Controller
 
             DB::transaction(function () use ($validated, $cotizaciones, $request, &$downloadUrls, &$createdIds, $includeImage, $groupConfirm): void {
                 $batchId = null;
+                $nextIndividualBatchId = null;
                 if ($groupConfirm && is_array($cotizaciones) && count($cotizaciones) >= 2) {
-                    $batchId = (string) \Illuminate\Support\Str::uuid();
+                    $batchId = $this->generateBatchId('GRP');
                 }
 
                 foreach ($cotizaciones as $tipo => $datosCotizacion) {
@@ -330,9 +341,15 @@ class CotizacionController extends Controller
                         $payload['fechaHoraEmision'] = now()->format('Y-m-d H:i:s');
                     }
 
-                    // Assign batch id if grouping was requested
                     if ($batchId !== null) {
                         $payload['batch_id'] = $batchId;
+                    } else {
+                        if ($nextIndividualBatchId === null) {
+                            $nextIndividualBatchId = $this->generateBatchId('IND');
+                        } else {
+                            $nextIndividualBatchId = $this->incrementBatchId($nextIndividualBatchId);
+                        }
+                        $payload['batch_id'] = $nextIndividualBatchId;
                     }
 
                     DB::table('cotizacion')->insert($payload);
@@ -396,6 +413,7 @@ class CotizacionController extends Controller
         }
 
         $payload['estado'] = CotizacionService::STATE_GENERADO;
+        $payload['batch_id'] = $this->generateBatchId('IND');
 
         $tipoId = (int) ($payload['tipoDocumento_idtipoDocumento'] ?? 0);
         if ($tipoId > 0) {
@@ -497,6 +515,7 @@ class CotizacionController extends Controller
             ->select([
                 'a.detalle as producto',
                 'a.imagen as producto_imagen',
+                'a.periodo as periodo',
                 'te.nombre as tipo_nombre',
                 'd.precioUnitario',
                 'd.cantidad',
@@ -561,6 +580,125 @@ class CotizacionController extends Controller
         $canvas->page_text($x, $y, $pageText, $font, $fontSize, [0, 0, 0]);
 
         return $pdf->download('cotizacion_' . $id . '.pdf');
+    }
+
+    public function downloadGroupPdf(Request $request, string $batch_id)
+    {
+        $includeImage = $request->input('include_image', '1') === '1';
+
+        $quotes = DB::table('cotizacion as c')
+            ->leftJoin('cliente as cli', 'c.cliente_idcliente', '=', 'cli.idcliente')
+            ->leftJoin('tipodocumento as td', 'c.tipoDocumento_idtipoDocumento', '=', 'td.idtipoDocumento')
+            ->leftJoin('vigenciaoferta as v', 'c.vigenciaOferta_idvigenciaOferta', '=', 'v.idvigenciaOferta')
+            ->leftJoin('formapago as fp', 'c.formaPago_idformaPago', '=', 'fp.idformaPago')
+            ->leftJoin('moneda as m', 'c.moneda_idmoneda', '=', 'm.idmoneda')
+            ->leftJoin('personal as p', 'c.personal_dniPersonal', '=', 'p.dniPersonal')
+            ->select([
+                'c.*',
+                'td.detalle as tipoDocumento_nombre',
+                DB::raw("COALESCE(cli.razonSocial, cli.nombreComercial, c.cliente_idcliente, 'Cliente sin nombre') as cliente_label"),
+                'v.detalle as vigencia_detalle',
+                'fp.detalle as formaPago_detalle',
+                'fp.tiempo as formaPago_tiempo',
+                'm.detalle as moneda_detalle',
+                'p.nombre as personal_nombre',
+                'p.apellido as personal_apellido',
+            ])
+            ->where('c.batch_id', $batch_id)
+            ->orderBy('c.fechaHoraEmision', 'asc')
+            ->get();
+
+        if ($quotes->isEmpty()) {
+            abort(404, 'No se encontraron cotizaciones para este grupo.');
+        }
+
+        $quotesData = [];
+
+        foreach ($quotes as $quote) {
+            $formaPagoDetalle = trim((string) ($quote->formaPago_detalle ?? ''));
+            $formaPagoTiempo = (int) ($quote->formaPago_tiempo ?? 0);
+            if ($formaPagoTiempo > 0 && !str_contains(mb_strtolower($formaPagoDetalle), 'contado')) {
+                $formaPagoDetalle .= ' (' . $formaPagoTiempo . ' días)';
+            }
+            $quote->formaPago_detalle = $formaPagoDetalle;
+
+            $quote->moneda_simbolo = $this->currencySymbol($quote->moneda_detalle ?? null);
+
+            $items = DB::table('detallecotizacion as d')
+                ->leftJoin('almacen as a', 'd.almacen_idalmacen', '=', 'a.idalmacen')
+                ->leftJoin('tipoelemento as te', 'a.tipoElemento_idtipoElemento', '=', 'te.idtipoElemento')
+                ->where('d.cotizacion_nroCotizacion', $quote->nroCotizacion)
+                ->select([
+                    'a.detalle as producto',
+                    'a.imagen as producto_imagen',
+                    'a.periodo as periodo',
+                    'te.nombre as tipo_nombre',
+                    'd.precioUnitario',
+                    'd.cantidad',
+                    'd.descuento',
+                    'd.total',
+                ])
+                ->orderBy('a.detalle')
+                ->get()
+                ->map(function ($item) use ($quote) {
+                    $item->tipo_nombre = trim((string) ($item->tipo_nombre ?? ''));
+                    $item->precio_label = $this->formatMoney($item->precioUnitario, $quote->moneda_simbolo);
+                    $item->total_label = $this->formatMoney($item->total, $quote->moneda_simbolo);
+                    $item->descuento_label = is_numeric($item->descuento) ? number_format($item->descuento, 2, '.', ',') . '%' : '-';
+                    return $item;
+                });
+
+            $importe = (float) ($quote->subtotal ?? 0);
+            $descuentoPercent = (float) ($quote->descuento ?? 0);
+            $descuentoAmount = round($importe * $descuentoPercent / 100, 2);
+            $subtotalAfterDiscount = round($importe - $descuentoAmount, 2);
+            $igvAmount = round($subtotalAfterDiscount * 0.18, 2);
+            $totalGeneral = round($subtotalAfterDiscount + $igvAmount, 2);
+
+            $sectionTitle = 'EQUIPAMIENTO';
+            foreach ($items as $item) {
+                $tipo = strtoupper($item->tipo_nombre ?? '');
+                if (str_contains($tipo, 'SERVIC')) {
+                    $sectionTitle = 'SERVICIOS TÉCNICOS';
+                    break;
+                }
+                if (str_contains($tipo, 'PLAN')) {
+                    $sectionTitle = 'PLANES';
+                    break;
+                }
+            }
+
+            $quotesData[] = [
+                'quote' => $quote,
+                'items' => $items,
+                'section_title' => $sectionTitle,
+                'importe_label' => $this->formatMoney($importe, $quote->moneda_simbolo),
+                'descuento_amount_label' => $this->formatMoney($descuentoAmount, $quote->moneda_simbolo),
+                'subtotal_after_discount_label' => $this->formatMoney($subtotalAfterDiscount, $quote->moneda_simbolo),
+                'igv_amount_label' => $this->formatMoney($igvAmount, $quote->moneda_simbolo),
+                'total_general_label' => $this->formatMoney($totalGeneral, $quote->moneda_simbolo),
+                'descuento_percent' => $descuentoPercent,
+            ];
+        }
+
+        $pdf = Pdf::loadView('ventas.cotizaciones.pdf-grupo', [
+            'quotesData' => $quotesData,
+            'include_image' => $includeImage,
+        ]);
+
+        $pdf->render();
+        $canvas = $pdf->getDomPDF()->getCanvas();
+        $pageText = 'Página {PAGE_NUM} de {PAGE_COUNT}';
+        $font = 'helvetica';
+        $fontSize = 10;
+        $marginRight = -95;
+        $marginBottom = 28;
+        $textWidth = $canvas->get_text_width($pageText, $font, $fontSize);
+        $x = max(30, $canvas->get_width() - $textWidth - $marginRight);
+        $y = $canvas->get_height() - $marginBottom;
+        $canvas->page_text($x, $y, $pageText, $font, $fontSize, [0, 0, 0]);
+
+        return $pdf->download('cotizaciones_grupo_' . $batch_id . '.pdf');
     }
 
     public function edit(string $id): View|RedirectResponse
@@ -939,7 +1077,7 @@ class CotizacionController extends Controller
 
         $currentUser = (string) session('erp_auth.usuario', '');
         $ticketId = null;
-        $isGroup = !empty($record->batch_id);
+        $isGroup = $this->isCotizacionGroup($record);
         $referenciaToUse = $isGroup ? $record->batch_id : $id;
 
         DB::transaction(function () use ($id, $isGroup, $record, $newEstado, $currentUser, &$ticketId, $referenciaToUse) {
@@ -978,6 +1116,63 @@ class CotizacionController extends Controller
         return redirect()
             ->route('modules.ventas.cotizaciones.index')
             ->with('success', 'Cotización aprobada correctamente.');
+    }
+
+    private function isCotizacionGroup(?object $record): bool
+    {
+        if (!$record) {
+            return false;
+        }
+
+        $batchId = trim((string) ($record->batch_id ?? ''));
+        if ($batchId === '') {
+            return false;
+        }
+
+        return DB::table('cotizacion')
+            ->where('batch_id', $batchId)
+            ->where('nroCotizacion', '!=', $record->nroCotizacion)
+            ->exists();
+    }
+
+    private function generateBatchId(string $type): string
+    {
+        $prefix = $type === 'GRP' ? 'GRP-' : 'IND-';
+        $existingIds = DB::table('cotizacion')
+            ->where('batch_id', 'like', $prefix . '%')
+            ->pluck('batch_id');
+
+        $maxIndex = 0;
+        foreach ($existingIds as $id) {
+            $id = trim((string) $id);
+            if (!str_starts_with($id, $prefix)) {
+                continue;
+            }
+            $number = (int) substr($id, strlen($prefix));
+            $maxIndex = max($maxIndex, $number);
+        }
+
+        return $prefix . ($maxIndex + 1);
+    }
+
+    private function incrementBatchId(string $batchId): string
+    {
+        if (preg_match('/^(IND|GRP)-(\d+)$/', $batchId, $matches)) {
+            return $matches[1] . '-' . ((int) $matches[2] + 1);
+        }
+
+        return $batchId . '-1';
+    }
+
+    private function formatCotizacionGroupLabel(mixed $batchId): string
+    {
+        $value = trim((string) ($batchId ?? ''));
+
+        if ($value === '') {
+            return 'Sin batch';
+        }
+
+        return $value;
     }
 
     private function formatCotizacionEstadoName(?string $estado): string

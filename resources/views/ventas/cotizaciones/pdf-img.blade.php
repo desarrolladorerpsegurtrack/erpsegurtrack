@@ -108,27 +108,28 @@
             font-weight: 700;
             color: #000000;
             letter-spacing: 0.5px;
-            margin-bottom: 1px;
+            margin-bottom: 5px;
             margin-top: 15px;
         }
-
+        
         .customer-data-table {
             width: 100%;
             border-collapse: collapse;
             margin-bottom: 20px;
             text-transform: uppercase;
             table-layout: fixed;
+            margin-top: -8px;
         }
 
         /* Forzamos que las dos mitades midan exactamente el 50% de la hoja */
         .customer-data-table td.col-half-left {
-            width: 60%;
-            padding-right: 10px; /* Este es tu "gap" o espacio de separación del medio */
+            width: 55%;
+            padding-right: 15px; /* Este es tu "gap" o espacio de separación del medio */
             vertical-align: top;
         }
 
         .customer-data-table td.col-half-right {
-            width: 30%;
+            width: 45%;
             padding-left: 0px; /* Este es tu "gap" o espacio de separación del medio */
             vertical-align: top;
         }
@@ -144,28 +145,33 @@
             border: none !important;
             vertical-align: top;
             font-size: 11px;
+            word-wrap: break-word;
+            word-break: break-word;
         }
         /* Etiquetas Bloque Izquierdo: Al ser textos cortos basta con un 22% */
         .lbl-field-left {
             font-weight: 700;
             color: #000000;
-            width: 15%;
+            width: 20%;
             white-space: nowrap;
+            padding-right: 5px;
         }
 
         /* Etiquetas Bloque Derecho: Al ser textos más largos ('Nº CONTACTO:') necesitan más espacio (32%) */
         .lbl-field-right {
             font-weight: 700;
             color: #000000;
-            width: 38%;
+            width: 26%;
             white-space: nowrap;
-            text-transform: uppercase;
+            padding-right: 5px;
         }
 
         .val-field {
             color: #000000;
-            text-transform: uppercase;
             word-wrap: break-word;
+            word-break: break-word;
+            white-space: normal;
+            overflow-wrap: break-word;
         }
 
 
@@ -261,8 +267,8 @@
             background-color: #f0f0f0;
             color: #000000;
             font-weight: 700;
-            font-size: 12px;
-            padding: 5px 10px;
+            font-size: 15px;
+            padding: 0px 0px;
             border: 1px solid #c0c0c0;
         }
 
@@ -424,7 +430,7 @@
                         <div class="cotizacion-numero">N° COTIZACIÓN</div>
                         <div class="document-number">{{ $quote->nroCotizacion ?? '-' }}</div>
                         <div class="vendedor-dni">VENDEDOR:
-                            {{ ((string) ($quote->personal_dniPersonal ?? '')) . ' - ' . ($quote->personal_nombre ?? '') . ' ' . trim((string) ($quote->personal_apellido ?? '')) }}
+                            {{ ($quote->personal_nombre ?? '') . ' ' . trim((string) ($quote->personal_apellido ?? '')) }}
                         </div>
                     </td>
                 </tr>

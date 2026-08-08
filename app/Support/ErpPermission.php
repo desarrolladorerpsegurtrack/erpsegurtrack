@@ -311,7 +311,7 @@ class ErpPermission
 
     public static function allPermissionKeys(): array
     {
-        $permissionKeys = ['inicio', 'personal', 'roles', 'usuarios', 'vehiculos', 'almacen', 'dispositivo_cliente', 'servicio_cliente', 'tickets', 'cuentasporcobrar'];
+        $permissionKeys = ['inicio', 'tickets', 'almacen', 'personal', 'roles', 'usuarios', 'vehiculos', 'dispositivo_cliente', 'servicio_cliente', 'cuentasporcobrar'];
 
         foreach (self::MODULE_CHILDREN as $children) {
             $permissionKeys = array_merge($permissionKeys, $children);

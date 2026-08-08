@@ -4,7 +4,7 @@
 
 <head>
     <meta charset="utf-8">
-    <title>Cotización {{ $quote->nroCotizacion ?? '' }}</title>
+    <title>Cotización {{ $batchId ?? $quote->batch_id ?? ($quote->nroCotizacion ?? '') }}</title>
     <style>
         @php
             $fontDir = str_replace('\\', '/', storage_path('fonts'));
@@ -108,7 +108,7 @@
             font-weight: 700;
             color: #000000;
             letter-spacing: 0.5px;
-            margin-bottom: 1px;
+            margin-bottom: 5px;
             margin-top: 15px;
         }
 
@@ -118,18 +118,19 @@
             margin-bottom: 20px;
             text-transform: uppercase;
             table-layout: fixed;
+            margin-top: -8px;
         }
 
         /* Forzamos que las dos mitades midan exactamente el 50% de la hoja */
         .customer-data-table td.col-half-left {
-            width: 60%;
-            padding-right: 10px;
+            width: 55%;
+            padding-right: 15px;
             /* Este es tu "gap" o espacio de separación del medio */
             vertical-align: top;
         }
 
         .customer-data-table td.col-half-right {
-            width: 30%;
+            width: 45%;
             padding-left: 0px;
             /* Este es tu "gap" o espacio de separación del medio */
             vertical-align: top;
@@ -146,27 +147,34 @@
             border: none !important;
             vertical-align: top;
             font-size: 11px;
+            word-wrap: break-word;
+            word-break: break-word;
         }
 
         /* Etiquetas Bloque Izquierdo: Al ser textos cortos basta con un 22% */
         .lbl-field-left {
             font-weight: 700;
             color: #000000;
-            width: 15%;
+            width: 20%;
             white-space: nowrap;
+            padding-right: 5px;
         }
 
         /* Etiquetas Bloque Derecho: Al ser textos más largos ('Nº CONTACTO:') necesitan más espacio (32%) */
         .lbl-field-right {
             font-weight: 700;
             color: #000000;
-            width: 38%;
+            width: 26%;
             white-space: nowrap;
+            padding-right: 5px;
         }
 
         .val-field {
             color: #000000;
             word-wrap: break-word;
+            word-break: break-word;
+            white-space: normal;
+            overflow-wrap: break-word;
         }
 
         /* ===== TABLA DE ÍTEMS  */
@@ -240,12 +248,8 @@
         }
 
         /* Forzar línea inferior externa fuerte en la última fila del cuerpo solo para PLANES */
-        .items-table.items-table--dark tbody tr:last-child td {
+        .items-table tbody tr:last-child td {
             border-bottom: 1px solid #c0c0c0;
-        }
-
-        .items-table.items-table--light tbody tr:last-child td {
-            border-bottom: none;
         }
 
         /* Fila de total al pie de la tabla */
@@ -385,38 +389,6 @@
 </head>
 
 <body>
-    <div class="footer-fixed">
-        <table class="footer-table">
-            <tr>
-                <td class="col-terms">
-                    <div class="footer-block-title">TÉRMINOS Y CONDICIONES</div>
-                    <ul class="terms-list">
-                        <li>Todos los precios incluyen IGV.</li>
-                        <li>Garantía de 1 año.</li>
-                        <li>Entregado el producto o ejecutado<br>el servicio, no existen devoluciones.</li>
-                    </ul>
-                    <div class="thank-you">¡Gracias por la Preferencia!</div>
-                </td>
-
-                <td class="col-bcp">
-                    <div class="footer-block-title">SEGURTRAK S.A.C</div>
-                    <div class="footer-accent-text">DATOS DE PAGO</div>
-                    <div class="footer-accent-text">Banco de Crédito Del Perú (BCP)</div>
-                    <span class="footer-accent-text">Soles</span> 191-2581664-0-12<br>
-                    <span class="footer-accent-text">CCI:</span> 00219100258166401259<br>
-                    <span class="footer-accent-text">Dólares</span> 191-2559634-1-97<br>
-                    <span class="footer-accent-text">CCI:</span> 00219100255963419751
-                </td>
-
-                <td class="col-bn">
-                    <div class="footer-block-title">BANCO DE LA NACION</div>
-                    <div class="footer-accent-text">Cuenta de Detracciones</div>
-                    <span class="footer-accent-text">Soles</span> 00-099-162104
-                </td>
-            </tr>
-        </table>
-    </div>
-
     <div class="page">
         @php
             // Tomamos la primera cotización para encabezado y datos del cliente
@@ -442,9 +414,9 @@
                         {{ $quote->fechaHoraEmision ? Carbon::parse($quote->fechaHoraEmision)->locale('es')->isoFormat('D [de] MMMM YYYY') : '-' }}
                     </div>
                     <div class="cotizacion-numero">N° COTIZACIÓN</div>
-                    <div class="document-number">{{ $quote->nroCotizacion ?? '-' }}</div>
+                    <div class="document-number">{{ $batchId ?? $quote->batch_id ?? '-' }}</div>
                     <div class="vendedor-dni">VENDEDOR:
-                        {{ ((string) ($quote->personal_dniPersonal ?? '')) . ' - ' . ($quote->personal_nombre ?? '') . ' ' . trim((string) ($quote->personal_apellido ?? '')) }}
+                        {{  ($quote->personal_nombre ?? '') . ' ' . trim((string) ($quote->personal_apellido ?? '')) }}
                     </div>
                 </td>
             </tr>
@@ -509,6 +481,7 @@
         {{-- ===== TABLA DE ÍTEMS (Una por cada cotización del grupo) ===== --}}
         @foreach($quotesData as $qData)
             @php
+                $quoteItem = $qData['quote'];
                 $items = $qData['items'];
                 $section_title = $qData['section_title'];
                 $total_general_label = $qData['total_general_label'];
@@ -518,8 +491,7 @@
                     class="items-table {{ ($section_title ?? '') === 'PLANES' ? 'items-table--dark' : 'items-table--light' }}">
                     <thead>
                         <tr class="section-head {{ ($section_title ?? '') === 'PLANES' ? '' : 'section-head--light' }}">
-                            <th colspan="5">{{ $section_title ?? 'EQUIPAMIENTO' }}</th>
-                        </tr>
+                        <th colspan="5">{{ ($section_title ?? 'EQUIPAMIENTO') }} &nbsp;&nbsp;{{ $quoteItem->nroCotizacion ?? '' }}</th>                        </tr>
                         <tr class="col-head">
                             <th class="col-cant">Cant.</th>
                             <th class="col-prod ">Descripción</th>
@@ -556,6 +528,37 @@
                 </table>
             </div>
         @endforeach
+    </div>
+    <div class="footer-fixed">
+        <table class="footer-table">
+            <tr>
+                <td class="col-terms">
+                    <div class="footer-block-title">TÉRMINOS Y CONDICIONES</div>
+                    <ul class="terms-list">
+                        <li>Todos los precios incluyen IGV.</li>
+                        <li>Garantía de 1 año.</li>
+                        <li>Entregado el producto o ejecutado<br>el servicio, no existen devoluciones.</li>
+                    </ul>
+                    <div class="thank-you">¡Gracias por la Preferencia!</div>
+                </td>
+
+                <td class="col-bcp">
+                    <div class="footer-block-title">SEGURTRAK S.A.C</div>
+                    <div class="footer-accent-text">DATOS DE PAGO</div>
+                    <div class="footer-accent-text">Banco de Crédito Del Perú (BCP)</div>
+                    <span class="footer-accent-text">Soles</span> 191-2581664-0-12<br>
+                    <span class="footer-accent-text">CCI:</span> 00219100258166401259<br>
+                    <span class="footer-accent-text">Dólares</span> 191-2559634-1-97<br>
+                    <span class="footer-accent-text">CCI:</span> 00219100255963419751
+                </td>
+
+                <td class="col-bn">
+                    <div class="footer-block-title">BANCO DE LA NACION</div>
+                    <div class="footer-accent-text">Cuenta de Detracciones</div>
+                    <span class="footer-accent-text">Soles</span> 00-099-162104
+                </td>
+            </tr>
+        </table>
     </div>
 </body>
 

@@ -1507,7 +1507,7 @@
                     <form id="main-crud-form" method="POST" action="{{ $formAction }}" enctype="multipart/form-data" class="box box--stacked flex flex-col p-5">
                         @csrf
                         <input type="hidden" name="download_after_save" id="download-after-save" value="0">
-                        <input type="hidden" name="include_image" id="include-image-flag" value="1">
+                        <input type="hidden" name="include_image" id="include-image-flag" value="{{ ($mode ?? '') === 'create' ? '0' : '1' }}">
                         <input type="hidden" name="group_confirm" id="group-confirm-flag" value="0">
                         <input type="hidden" name="tipoDocumentoIDCliente" id="tipo-documento-id-cliente" value="">
                         @if($mode === 'edit')
@@ -2244,7 +2244,7 @@
                                             </select>
                                         </div>
                                         <div class="w-20 modal-input-col">
-                                            <label class="block text-xs font-semibold text-slate-600 mb-3">Como Dato</label>
+                                            <label class="block text-xs font-semibold text-slate-600 mb-3">Comodato</label>
                                             <label class="inline-flex items-center gap-2 text-sm text-slate-600">
                                                 <input type="checkbox" id="modal-cetear" class="h-6 w-6 transition-all duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&[type='radio']]:checked:bg-primary [&[type='radio']]:checked:border-primary [&[type='radio']]:checked:border-opacity-10 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:not(:checked)]:dark:bg-darkmode-800/50 [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed [&:disabled:checked]:dark:bg-darkmode-800/50" disabled>
                                             </label>
@@ -2540,9 +2540,15 @@
                                     }
                                     const prefix = `cotizaciones[${safeTipo}][`;
                                     const suffix = ']';
+
+                                    // Defaults por tipo: Contado (1) para todos, Dolar (2) para EQUIPAMIENTO, Sol (1) para PLANES y SERVICIOS TÉCNICOS
+                                    const isEquipamiento = safeTipo === 'equipamiento';
+                                    const defaultFormaPago = '1';  // Contado
+                                    const defaultMoneda = isEquipamiento ? '2' : '1'; // Dolar para equipo, Sol para planes/servicios
+
                                     const selectedVigencia = getGroupFieldValue(safeTipo, 'vigenciaOferta_idvigenciaOferta', '');
-                                    const selectedFormaPago = getGroupFieldValue(safeTipo, 'formaPago_idformaPago', '');
-                                    const selectedMoneda = getGroupFieldValue(safeTipo, 'moneda_idmoneda', '');
+                                    const selectedFormaPago = getGroupFieldValue(safeTipo, 'formaPago_idformaPago', defaultFormaPago);
+                                    const selectedMoneda = getGroupFieldValue(safeTipo, 'moneda_idmoneda', defaultMoneda);
                                     const comentario = getGroupFieldValue(safeTipo, 'comentario', '');
 
                                     const vigenciaOptions = groupGeneralOptions.vigencias.map(opt => `
@@ -2830,6 +2836,18 @@
                                     modal.classList.add('hidden');
                                     modal.classList.remove('flex');
                                     document.body.style.overflow = '';
+                                    
+                                    // Limpiar los campos del modal
+                                    if (selectProd) {
+                                        selectProd.value = '';
+                                        if (selectProd.tomselect) {
+                                            selectProd.tomselect.clear(true);
+                                        }
+                                    }
+                                    if (inpQty) inpQty.value = '1';
+                                    if (inpPrice) inpPrice.value = '';
+                                    if (inpDisc) inpDisc.value = '0';
+                                    if (inpCetear) inpCetear.checked = false;
                                 }
 
                                 
@@ -3261,7 +3279,7 @@
                                         const tipo = getGroupKey(item.tipo_nombre);
                                         const wasAdded = addRowToGroup(tipo, item);
                                         if (item.cetear && !updatedComentarios.has(tipo)) {
-                                            setGroupComentario(tipo, 'Como dato');
+                                            setGroupComentario(tipo, 'Comodato');
                                             updatedComentarios.add(tipo);
                                         }
                                         if (!wasAdded) {
@@ -3445,20 +3463,6 @@
                 </div>
             </div>
         </div> 
-    </div>
-
-    <div id="save-download-modal" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;background:rgba(0,0,0,0.8);" role="dialog" aria-modal="true" aria-labelledby="save-download-title" aria-describedby="save-download-message">
-        <div class="modal-dialog" style="max-width:520px;padding:0;background:#fff;border-radius:1rem;overflow:hidden;">
-            <div style="padding:1.25rem;border-bottom:1px solid #e2e8f0;">
-                <h2 id="save-download-title" style="margin:0;font-size:1.125rem;font-weight:700;color:#111827;">Guardar y descargar cotización</h2>
-                <p id="save-download-message" style="margin:0.75rem 0 0;color:#475569;line-height:1.5;">Selecciona si deseas guardar la cotización y descargar el PDF con imagen o sin imagen.</p>
-            </div>
-            <div style="padding:1.25rem;display:grid;gap:0.75rem;">
-                <button type="button" id="save-download-without-image" style="width:100%;padding:0.85rem 1rem;border:1px solid #cbd5e1;border-radius:0.75rem;background:#ffffff;color:#111827;font-weight:700;cursor:pointer;">Guardar y descargar sin imagen</button>
-                <button type="button" id="save-download-with-image" style="width:100%;padding:0.85rem 1rem;border:0;border-radius:0.75rem;background:#c71010;color:#fff;font-weight:700;cursor:pointer;">Guardar y descargar con imagen</button>
-                <button type="button" id="save-download-cancel" style="width:100%;padding:0.85rem 1rem;border:1px solid #cbd5e1;border-radius:0.75rem;background:#f8fafc;color:#111827;cursor:pointer;">Cancelar</button>
-            </div>
-        </div>
     </div>
 
     <!-- Select2 removido: usando select nativo -->
@@ -4762,7 +4766,6 @@
             const isCreateMode = !isEditMode;
             let relationConfirmationConfirmed = false;
             let relationModalActive = false; // indica que el modal de confirmación fue abierto por openRelationModal
-            let saveDownloadConfirmed = false;
 
             const getSubmitButton = () => mainForm.querySelector('button[type="submit"]');
 
@@ -4806,62 +4809,10 @@
                 }
             };
 
-            const saveDownloadModal = document.getElementById('save-download-modal');
-            const saveDownloadWithImageBtn = saveDownloadModal ? saveDownloadModal.querySelector('#save-download-with-image') : null;
-            const saveDownloadWithoutImageBtn = saveDownloadModal ? saveDownloadModal.querySelector('#save-download-without-image') : null;
-            const saveDownloadCancelBtn = saveDownloadModal ? saveDownloadModal.querySelector('#save-download-cancel') : null;
-
-            if (saveDownloadModal && saveDownloadModal.parentElement !== document.body) {
-                document.body.appendChild(saveDownloadModal);
-            }
-
-            const closeSaveDownloadModal = () => {
-                if (!saveDownloadModal) {
-                    return;
-                }
-                saveDownloadModal.style.display = 'none';
-                document.body.style.overflow = '';
-                unlockSubmit();
+            const setCreateDownloadFlags = () => {
+                document.getElementById('download-after-save').value = '1';
+                document.getElementById('include-image-flag').value = '0';
             };
-
-            const openSaveDownloadModal = () => {
-                if (!saveDownloadModal) {
-                    return;
-                }
-                saveDownloadModal.style.display = 'flex';
-                saveDownloadModal.style.justifyContent = 'center';
-                saveDownloadModal.style.alignItems = 'center';
-                saveDownloadModal.style.background = 'rgba(0,0,0,0.8)';
-                saveDownloadModal.style.zIndex = '9999';
-                document.body.style.overflow = 'hidden';
-            };
-
-            if (saveDownloadCancelBtn) {
-                saveDownloadCancelBtn.addEventListener('click', () => {
-                    closeSaveDownloadModal();
-                    saveDownloadConfirmed = false;
-                });
-            }
-
-            if (saveDownloadWithImageBtn) {
-                saveDownloadWithImageBtn.addEventListener('click', () => {
-                    saveDownloadConfirmed = true;
-                    document.getElementById('download-after-save').value = '1';
-                    document.getElementById('include-image-flag').value = '1';
-                    closeSaveDownloadModal();
-                    mainForm.submit();
-                });
-            }
-
-            if (saveDownloadWithoutImageBtn) {
-                saveDownloadWithoutImageBtn.addEventListener('click', () => {
-                    saveDownloadConfirmed = true;
-                    document.getElementById('download-after-save').value = '1';
-                    document.getElementById('include-image-flag').value = '0';
-                    closeSaveDownloadModal();
-                    mainForm.submit();
-                });
-            }
 
             const openRelationModal = (summary) => {
                 if (!relationModal || !relationModalMessage || !relationModalRelations || !relationModalHint || !relationModalSubmit || !relationModalTitle) {
@@ -5035,20 +4986,8 @@
                                 }
                                 input.value = confirmed ? '1' : '0';
                                 mainForm.dataset.groupDecision = 'true';
-                                // Open explicit save/download modal so user can choose include image option
-                                try {
-                                    if (typeof openSaveDownloadModal === 'function') {
-                                        openSaveDownloadModal();
-                                    } else if (window.openSaveDownloadModal) {
-                                        window.openSaveDownloadModal();
-                                    } else {
-                                        // Fallback: submit form
-                                        mainForm.submit();
-                                    }
-                                } catch (e) {
-                                    console.warn('Agrupado: no se pudo abrir modal de descarga, enviando formulario', e);
-                                    mainForm.submit();
-                                }
+                                setCreateDownloadFlags();
+                                mainForm.submit();
                             });
                             return;
                         }
@@ -5057,12 +4996,8 @@
                     }
                 }
 
-                if (isCreateMode && !saveDownloadConfirmed) {
-                    event.preventDefault();
-                    unlockSubmit(event.submitter);
-                    mainForm.dataset.submitted = 'false';
-                    openSaveDownloadModal();
-                    return;
+                if (isCreateMode) {
+                    setCreateDownloadFlags();
                 }
 
                 if (isEditMode && !relationConfirmationConfirmed) {
@@ -5907,21 +5842,24 @@
                         const dir = document.querySelector('input[name="direccion"]');
                         const tel = document.querySelector('input[name="telefono"]');
                         const mail = document.querySelector('input[name="correo"]');
+                        const ruc = document.querySelector('input[name="rucDni"]') || document.querySelector('input[name="ruc_dni"]') || document.querySelector('input[name="ruc"]');
 
-                        if (dir && info.direccion !== undefined && info.direccion !== null) {
-                            if (overwrite || String(dir.value).trim() === '') {
-                                dir.value = info.direccion || '';
-                            }
+                        // Limpiar siempre los campos antes de rellenar con el nuevo cliente
+                        if (overwrite) {
+                            if (dir) dir.value = '';
+                            if (tel) tel.value = '';
+                            if (mail) mail.value = '';
+                            if (ruc) ruc.value = '';
                         }
-                        if (tel && info.telefono !== undefined && info.telefono !== null) {
-                            if (overwrite || String(tel.value).trim() === '') {
-                                tel.value = info.telefono || '';
-                            }
+
+                        if (dir && (overwrite || String(dir.value).trim() === '')) {
+                            dir.value = info.direccion || '';
                         }
-                        if (mail && info.correo !== undefined && info.correo !== null) {
-                            if (overwrite || String(mail.value).trim() === '') {
-                                mail.value = info.correo || '';
-                            }
+                        if (tel && (overwrite || String(tel.value).trim() === '')) {
+                            tel.value = info.telefono || '';
+                        }
+                        if (mail && (overwrite || String(mail.value).trim() === '')) {
+                            mail.value = info.correo || '';
                         }
                         if (tipoClienteInput) {
                             const clienteId = info.clienteId ?? '';
@@ -5942,6 +5880,7 @@
                         console.error(e);
                     }
                 }
+
 
                 async function fetchClienteInfo(clienteId, overwrite = true) {
                     try {

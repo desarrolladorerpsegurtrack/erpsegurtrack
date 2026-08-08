@@ -295,9 +295,9 @@ class CotizacionController extends Controller
             $cotizaciones = $request->input('cotizaciones');
             $downloadUrls = [];
             $createdIds = [];
+            $batchId = null;
 
-            DB::transaction(function () use ($validated, $cotizaciones, $request, &$downloadUrls, &$createdIds, $includeImage, $groupConfirm): void {
-                $batchId = null;
+            DB::transaction(function () use ($validated, $cotizaciones, $request, &$downloadUrls, &$createdIds, &$batchId, $includeImage, $groupConfirm): void {
                 $nextIndividualBatchId = null;
                 if ($groupConfirm && is_array($cotizaciones) && count($cotizaciones) >= 2) {
                     $batchId = $this->generateBatchId('GRP');
@@ -386,6 +386,13 @@ class CotizacionController extends Controller
             });
 
             if ($downloadAfterSave && !empty($createdIds)) {
+                if ($groupConfirm && is_array($cotizaciones) && count($cotizaciones) >= 2 && !empty($batchId)) {
+                    $downloadUrls = [route('modules.ventas.cotizaciones.pdf-grupo', [
+                        'batch_id' => $batchId,
+                        'include_image' => $includeImage,
+                    ])];
+                }
+
                 return redirect()
                     ->route('modules.ventas.cotizaciones.index')
                     ->with('success', 'Cotizaciones generadas correctamente.')
@@ -684,6 +691,7 @@ class CotizacionController extends Controller
         $pdf = Pdf::loadView('ventas.cotizaciones.pdf-grupo', [
             'quotesData' => $quotesData,
             'include_image' => $includeImage,
+            'batchId' => $batch_id,
         ]);
 
         $pdf->render();

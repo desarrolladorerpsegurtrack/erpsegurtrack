@@ -634,6 +634,10 @@ class CotizacionService
                 $fields[$idx]['optionKey'] = 'idvigenciaOferta';
                 $fields[$idx]['optionLabel'] = 'label';
                 $fields[$idx]['required'] = true;
+                // Default: "Vigencia de 10 dias" (idvigenciaOferta = 1) si no hay valor previo
+                if (empty($fields[$idx]['value'])) {
+                    $fields[$idx]['value'] = '1';
+                }
             }
 
             if (($f['name'] ?? '') === 'formaPago_idformaPago') {

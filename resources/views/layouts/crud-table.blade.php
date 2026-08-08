@@ -3678,22 +3678,7 @@
                             approveConfirmationSubmit.textContent = 'Aprobando...';
                             if (approveConfirmationStatus) approveConfirmationStatus.classList.remove('hidden');
 
-                            const batchId = activeApproveForm.getAttribute('data-batch-id') || '';
-                            if (batchId) {
-                                // submit all approve forms that share the same batch id
-                                const selector = `form.delete-confirmation-form[data-delete-mode="aprobar"][data-batch-id="${batchId}"]`;
-                                const forms = Array.from(document.querySelectorAll(selector));
-                                // ensure unique and submit sequentially
-                                const uniqueForms = Array.from(new Set(forms));
-                                uniqueForms.forEach((f, i) => {
-                                    setTimeout(() => {
-                                        try { f.submit(); } catch (e) { console.error('Error submitting approve form', e); }
-                                    }, i * 120);
-                                });
-                            } else {
-                                // default single submit
-                                setTimeout(() => activeApproveForm.submit(), 50);
-                            }
+                            setTimeout(() => activeApproveForm.submit(), 50);
                         }
                     });
                 }

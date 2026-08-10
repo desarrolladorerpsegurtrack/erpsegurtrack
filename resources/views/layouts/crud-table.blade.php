@@ -1507,10 +1507,10 @@
                     if (!cotizacionCurrentHref) {
                         return;
                     }
-                    const targetHref = cotizacionCurrentHref;
+                    const targetHref = new URL(cotizacionCurrentHref, window.location.origin);
+                    targetHref.searchParams.set('include_image', includeImage ? '1' : '0');
                     closeModal();
-                    const separator = targetHref.includes('?') ? '&' : '?';
-                    window.location.href = targetHref + separator + 'include_image=' + (includeImage ? '1' : '0');
+                    window.open(targetHref.toString(), '_blank');
                 };
 
                 if (btnWithImage) {

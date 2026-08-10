@@ -225,7 +225,6 @@
         .items-table tbody tr,
         .items-table tbody tr td {
             height: 60px;
-            
         }
 
         .items-table tbody td {
@@ -516,23 +515,28 @@
                                 @if($include_image && !empty($item->producto_imagen))
                                     
                                     {{-- Estructura de tabla interna para forzar alineación vertical perfecta en PDFs --}}
-                                    <table style="width: 100%; border: none; padding: 0; margin: 0; border-collapse: collapse;">
+                                    <table style="width: 100%; border: none; padding: 0; margin: 0; border-collapse: collapse; table-layout: fixed;">
                                         <tr>
                                             {{-- Celda para el texto: alineada a la izquierda y centrada verticalmente --}}
-                                            <td style="border: none; padding: 0; text-align: left; vertical-align: middle;">
+                                            <td style="border: none; padding: 0 8px 0 0; text-align: left; vertical-align: top; width: calc(100% - 70px); word-wrap: break-word; word-break: break-word; white-space: normal;">
                                                 @php
                                                     $periodo = trim((string) ($item->periodo ?? ''));
                                                     $periodoLower = mb_strtolower($periodo, 'UTF-8');
                                                 @endphp
-                                                <span>{{ $item->producto ?? '-' }}@if($periodo !== '' && $periodoLower !== 'no') - {{ $periodo }}@endif</span>
+                                                <div style="display: block; width: 100%; word-wrap: break-word; word-break: break-word; white-space: normal;">
+                                                    {{ $item->producto ?? '-' }}
+                                                    @if($periodo !== '' && $periodoLower !== 'no')
+                                                        <span style="color: red; font-weight: bold; margin-top: 2px;">- {{ mb_strtoupper($periodo) }}</span>
+                                                    @endif
+                                                </div>
                                             </td>
                                             
                                             {{-- Celda para la imagen: pegada al extremo derecho y centrada verticalmente --}}
-                                            <td style="border: none; padding: 0; text-align: right; vertical-align: middle; width: 38px;">
+                                            <td style="border: none; padding: 0; text-align: right; vertical-align: top; width: 70px; min-width: 70px;">
                                                 <img 
                                                     src="{{ public_path('storage/' . $item->producto_imagen) }}" 
                                                     alt="Producto" 
-                                                    style="width: 60px; height: 60px; object-fit: cover; border-radius: 2px; display: block; margin-left: auto;" 
+                                                    style="width: 60px; height: 60px; object-fit: cover; border-radius: 2px; display: block;" 
                                                 />
                                             </td>
                                         </tr>

@@ -48,7 +48,7 @@ class CotizacionController extends Controller
 
         $items->through(function ($row) {
             $row->moneda_simbolo = $this->currencySymbol($row->moneda_detalle ?? null);
-            $row->total_label = $this->formatMoney($row->total ?? null, $row->moneda_simbolo);
+            $row->total_label = $this->formatMoney(round((float) ($row->total ?? 0), 0), $row->moneda_simbolo);
             $row->subtotal_label = $this->formatMoney($row->subtotal ?? null, $row->moneda_simbolo);
             $row->fecha_emision_label = $row->fechaHoraEmision ? date('d/m/Y H:i', strtotime($row->fechaHoraEmision)) : '-';
             // Cliente legible: respetar `cliente_label` devuelto por la consulta si existe
@@ -543,8 +543,8 @@ class CotizacionController extends Controller
         $descuentoPercent = (float) ($quote->descuento ?? 0);
         $descuentoAmount = round($importe * $descuentoPercent / 100, 2);
         $subtotalAfterDiscount = round($importe - $descuentoAmount, 2);
-        $igvAmount = round($subtotalAfterDiscount * 0.18, 2);
-        $totalGeneral = round($subtotalAfterDiscount + $igvAmount, 2);
+        $igvAmount = round($subtotalAfterDiscount * 0.18, 0);
+        $totalGeneral = round($subtotalAfterDiscount + $igvAmount, 0);
 
         $sectionTitle = 'EQUIPAMIENTO';
         foreach ($items as $item) {
@@ -586,7 +586,7 @@ class CotizacionController extends Controller
         $y = $canvas->get_height() - $marginBottom;
         $canvas->page_text($x, $y, $pageText, $font, $fontSize, [0, 0, 0]);
 
-        return $pdf->download('cotizacion_' . $id . '.pdf');
+        return $pdf->download('Cotizacion_' . $id . '.pdf');
     }
 
     public function downloadGroupPdf(Request $request, string $batch_id)
@@ -650,7 +650,8 @@ class CotizacionController extends Controller
                 ->map(function ($item) use ($quote) {
                     $item->tipo_nombre = trim((string) ($item->tipo_nombre ?? ''));
                     $item->precio_label = $this->formatMoney($item->precioUnitario, $quote->moneda_simbolo);
-                    $item->total_label = $this->formatMoney($item->total, $quote->moneda_simbolo);
+                    $itemTaxed = round((float) $item->total * 1.18, 0);
+                    $item->total_label = $this->formatMoney($itemTaxed, $quote->moneda_simbolo);
                     $item->descuento_label = is_numeric($item->descuento) ? number_format($item->descuento, 2, '.', ',') . '%' : '-';
                     return $item;
                 });
@@ -659,8 +660,8 @@ class CotizacionController extends Controller
             $descuentoPercent = (float) ($quote->descuento ?? 0);
             $descuentoAmount = round($importe * $descuentoPercent / 100, 2);
             $subtotalAfterDiscount = round($importe - $descuentoAmount, 2);
-            $igvAmount = round($subtotalAfterDiscount * 0.18, 2);
-            $totalGeneral = round($subtotalAfterDiscount + $igvAmount, 2);
+            $igvAmount = round($subtotalAfterDiscount * 0.18, 0);
+            $totalGeneral = round($subtotalAfterDiscount + $igvAmount, 0);
 
             $sectionTitle = 'EQUIPAMIENTO';
             foreach ($items as $item) {
@@ -706,7 +707,7 @@ class CotizacionController extends Controller
         $y = $canvas->get_height() - $marginBottom;
         $canvas->page_text($x, $y, $pageText, $font, $fontSize, [0, 0, 0]);
 
-        return $pdf->download('cotizaciones_grupo_' . $batch_id . '.pdf');
+        return $pdf->download('Cotizaciones_' . $batch_id . '.pdf');
     }
 
     public function edit(string $id): View|RedirectResponse

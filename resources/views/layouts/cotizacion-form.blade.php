@@ -2244,7 +2244,7 @@
                                             </select>
                                         </div>
                                         <div class="w-20 modal-input-col">
-                                            <label class="block text-xs font-semibold text-slate-600 mb-3">Comodato</label>
+                                            <label class="block text-xs font-semibold text-slate-600 mb-3">COMODATO</label>
                                             <label class="inline-flex items-center gap-2 text-sm text-slate-600">
                                                 <input type="checkbox" id="modal-cetear" class="h-6 w-6 transition-all duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&[type='radio']]:checked:bg-primary [&[type='radio']]:checked:border-primary [&[type='radio']]:checked:border-opacity-10 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:not(:checked)]:dark:bg-darkmode-800/50 [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed [&:disabled:checked]:dark:bg-darkmode-800/50" disabled>
                                             </label>
@@ -3253,9 +3253,10 @@
                                     const baseNeto = rawSubtotal - descAmount;
                                     const igvAmount = baseNeto * (igvPercent / 100);
                                     const finalTotal = baseNeto + igvAmount;
+                                    const finalTotalRounded = Math.round(finalTotal);
 
                                     if(inpSub) inpSub.value = rawSubtotal.toFixed(2);
-                                    if(inpTotal) inpTotal.value = finalTotal.toFixed(2);
+                                    if(inpTotal) inpTotal.value = finalTotalRounded.toFixed(2);
 
                                     // Sync hidden inputs for edit mode
                                     if (isEditMode) {
@@ -3266,7 +3267,7 @@
                                         if(hSub) hSub.value = rawSubtotal.toFixed(2);
                                         if(hDesc && inpDescG) hDesc.value = inpDescG.value;
                                         if(hIgv) hIgv.value = igvPercent.toFixed(2);
-                                        if(hTotal) hTotal.value = finalTotal.toFixed(2);
+                                        if(hTotal) hTotal.value = finalTotalRounded.toFixed(2);
                                     }
                                 }
 
@@ -3279,7 +3280,7 @@
                                         const tipo = getGroupKey(item.tipo_nombre);
                                         const wasAdded = addRowToGroup(tipo, item);
                                         if (item.cetear && !updatedComentarios.has(tipo)) {
-                                            setGroupComentario(tipo, 'Comodato');
+                                            setGroupComentario(tipo, 'COMODATO');
                                             updatedComentarios.add(tipo);
                                         }
                                         if (!wasAdded) {

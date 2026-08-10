@@ -220,6 +220,10 @@
             border-top: none;
         }
 
+        .items-table--dark thead tr.col-head th {
+            background-color: #b9b9b9ff;
+        }
+
         /* Bordes extremos para simular el recuadro */
         .items-table thead tr.col-head th:first-child {
             border-left: 1px solid #c0c0c0;
@@ -295,6 +299,10 @@
 
         .col-descuento {
             width: 17%;
+            text-align: center;
+        }
+        .col-igv {
+            width: 10%;
             text-align: center;
         }
 
@@ -491,12 +499,13 @@
                     class="items-table {{ ($section_title ?? '') === 'PLANES' ? 'items-table--dark' : 'items-table--light' }}">
                     <thead>
                         <tr class="section-head {{ ($section_title ?? '') === 'PLANES' ? '' : 'section-head--light' }}">
-                        <th colspan="5">{{ ($section_title ?? 'EQUIPAMIENTO') }} &nbsp;&nbsp;{{ $quoteItem->nroCotizacion ?? '' }}</th>                        </tr>
+                        <th colspan="6">{{ ($section_title ?? 'EQUIPAMIENTO') }} &nbsp;&nbsp;{{ $quoteItem->nroCotizacion ?? '' }}</th>                        </tr>
                         <tr class="col-head">
                             <th class="col-cant">Cant.</th>
                             <th class="col-prod ">Descripción</th>
                             <th class="col-punit ">P. Unitario</th>
                             <th class="col-descuento ">Desct %</th>
+                            <th class="col-igv">IGV</th>
                             <th class="col-total ">Total</th>
                         </tr>
                     </thead>
@@ -514,13 +523,14 @@
                                 </td>
                                 <td class="text-center">{{ $item->precio_label }}</td>
                                 <td class="text-center">{{ $item->descuento_label }}</td>
+                                <td class="text-center">18%</td>
                                 <td class="text-center">{{ $item->total_label }}</td>
                             </tr>
                         @endforeach
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td rowspan="1" colspan="3" style="border: none; background: transparent;"></td>
+                            <td rowspan="1" colspan="4" style="border: none; background: transparent;"></td>
                             <th class="text-center">Total</th>
                             <td class="text-center total-amount">{{ $total_general_label }}</td>
                         </tr>

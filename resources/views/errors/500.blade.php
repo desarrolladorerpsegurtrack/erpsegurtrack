@@ -3,23 +3,21 @@
 @section('title', 'Página no encontrada')
 
 @section('content')
-    <div class="min-h-screen flex items-center justify-center bg-slate-200 px-4">
+    <div class="min-h-screen relative flex items-center justify-center bg-slate-50 px-4 overflow-hidden">
 
-        <div class="w-full max-w-2xl text-center">
+        <div class="relative w-full max-w-lg">
 
-            {{-- Ilustración / número 500 --}}
-            <div class="relative mb-8">
+            <div class="rounded-3xl bg-white shadow-xl shadow-slate-200/60 ring-1 ring-slate-100 px-6 py-10 sm:px-12 sm:py-12 text-center">
 
-                {{-- 500 de fondo --}}
-                <span class="select-none text-[140px] sm:text-[180px] font-bold leading-none tracking-tight text-slate-100">
-                    500
-                </span>
+                {{-- Ícono ilustrativo --}}
+                <div class="relative mx-auto mb-4 flex h-24 w-24 items-center justify-center">
 
-                {{-- Ícono central --}}
-                <div class="absolute inset-0 flex items-center justify-center">
-                    <div class="flex h-20 w-20 items-center justify-center rounded-2xl bg-white border border-slate-200 shadow-sm">
+                    {{-- Aro decorativo --}}
+                    <span class="absolute inset-0 rounded-full bg-danger/10"></span>
+
+                    <div class="relative flex h-16 w-16 animate-[bounce_3s_ease-in-out_infinite] items-center justify-center rounded-2xl bg-white shadow-md ring-1 ring-slate-100">
                         <svg xmlns="http://www.w3.org/2000/svg"
-                            class="h-10 w-10 text-slate-400"
+                            class="h-10 w-10 text-danger"
                             fill="none"
                             viewBox="0 0 24 24"
                             stroke="currentColor"
@@ -32,23 +30,21 @@
                         </svg>
                     </div>
                 </div>
-            </div>
 
-            {{-- Contenido --}}
-            <div class="mx-auto max-w-lg">
-
-                <h1 class="text-2xl sm:text-3xl font-semibold text-slate-900">
+                {{-- Contenido --}}
+                <h1 class="mt-2 text-2xl sm:text-3xl font-bold text-slate-900">
                     Página no encontrada
                 </h1>
 
-                <p class="mt-3 text-sm sm:text-base leading-7 text-slate-500">
-                    Parece que la página que estás buscando no existe,
-                    fue movida o ya no está disponible.
+                <p class="mt-3 text-sm sm:text-base leading-7 text-slate-500 max-w-sm mx-auto">
+                    Puede que el enlace esté mal escrito, que la página se haya movido o que ya no exista.
+                    Tranquilo, esto no afecta el resto del sistema.
                 </p>
 
                 {{-- Acciones --}}
                 <div class="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
 
+                   
                     {{-- Volver --}}
                     <button
                         type="button"
@@ -60,9 +56,9 @@
                         class="inline-flex w-full sm:w-auto items-center justify-center gap-2
                                rounded-lg bg-danger px-5 py-2.5
                                text-sm font-medium text-white
-                               transition hover:bg-slate-800
+                               transition hover:bg-red-700
                                focus:outline-none focus:ring-2
-                               focus:ring-slate-400 focus:ring-offset-2">
+                               focus:ring-danger focus:ring-offset-2">
 
                         <svg xmlns="http://www.w3.org/2000/svg"
                             class="h-4 w-4"
@@ -83,8 +79,9 @@
             </div>
 
             {{-- Mensaje inferior --}}
-            <p class="mt-10 text-xs text-slate-400">
-                Si crees que esto es un error, contacta con el área de Sistemas.
+            <p class="mt-6 text-center text-xs text-slate-400">
+                ¿Crees que esto es un error? Contacta con el área de
+                <span class="font-medium text-slate-500">Sistemas</span>.
             </p>
 
         </div>

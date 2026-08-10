@@ -513,8 +513,8 @@
                                         $periodo = trim((string) ($item->periodo ?? ''));
                                         $periodoLower = mb_strtolower($periodo, 'UTF-8');
                                     @endphp
-                                    {{ $item->producto ?? '-' }}@if($periodo !== '' && $periodoLower !== 'no') -
-                                    {{ $periodo }}@endif
+                                    {{ $item->producto ?? '-' }}@if($periodo !== '' && $periodoLower !== 'no') <span
+                                    style="color: red; font-weight: bold;">- {{ mb_strtoupper($periodo) }}</span>@endif
                                 </td>
                                 <td class="text-center">{{ $item->precio_label }}</td>
                                 <td class="text-center">{{ $item->descuento_label }}</td>

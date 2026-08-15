@@ -636,21 +636,75 @@ class ErpPermission
             return 'home';
         }
         $moduleRouteMap = [
+            // Tickets
             'tickets' => 'modules.tickets',
+            // Ventas
+            'ventas' => 'modules.ventas',
             'ventas.planes_servicios' => 'modules.ventas.planes-servicios.index',
+            'ventas.cotizaciones' => 'modules.ventas.cotizaciones.index',
+            // Cuentas por Cobrar
             'cuentasporcobrar' => 'modules.cuentasporcobrar',
+            // Planificación
+            'planificacion' => 'modules.planificacion',
+            // Clientes
             'clientes.cliente' => 'modules.clientes',
+            'clientes.credenciales' => 'modules.clientes.credenciales.opciones',
             'clientes.grupo_cliente' => 'modules.clientes.grupos.index',
             'servicio_cliente' => 'modules.servicio-cliente',
             'vehiculos' => 'modules.vehiculos',
             'dispositivo_cliente' => 'modules.dispositivo-cliente',
+            // Lineas y Chips
+            'lineas_chips' => 'modules.lineas-chips',
+            'lineas_chips.numero_dispositivo' => 'modules.lineas-chips.numeros-dispositivo.index',
             'lineas_chips.numero_telefonico' => 'modules.lineas-chips.numeros-telefonico.index',
+            'lineas_chips.simcard' => 'modules.lineas-chips.simcard.index',
+            'lineas_chips.detallesimcard' => 'modules.lineas-chips.detallesimcard.index',
+            // Almacén
             'almacen.almacen' => 'modules.almacen',
+            'almacen.elemento_almacen' => 'modules.almacen.elementos.index',
+            'almacen.nota_ingreso' => 'modules.almacen.notas-ingreso.index',
+            'almacen.nota_salida' => 'modules.almacen.notas-salida.index',
+            // Configuración
+            'configuracion' => 'modules.configuracion', 
             'configuracion.estado' => 'modules.configuracion.estados.index',
+            'configuracion.tipo_contacto' => 'modules.configuracion.tipos-contacto.index',
+            'configuracion.ubigeo' => 'modules.configuracion.ubigeos.index',
+            'configuracion.entidad_bancaria' => 'modules.configuracion.entidades-bancarias.index',
+            'configuracion.proveedor' => 'modules.configuracion.proveedores.index',
+            'configuracion.tipo_cobro' => 'modules.configuracion.tipos-cobro.index',
+            'configuracion.tipo_gasto' => 'modules.configuracion.tipos-gasto.index',
+            'configuracion.certificadosunat' => 'modules.configuracion.certificados-sunat.index',
+            'configuracion.forma_pago' => 'modules.configuracion.formas-pago.index',
+            'configuracion.moneda' => 'modules.configuracion.monedas.index',
+            'configuracion.tributo' => 'modules.configuracion.tributos.index',
+            'configuracion.tipo_documento' => 'modules.configuracion.tipos-documento.index',
+            'configuracion.paquete' => 'modules.configuracion.paquetes.index',
+            'configuracion.vigencia_oferta' => 'modules.configuracion.vigencias-oferta.index',
+            'configuracion.cargo' => 'modules.configuracion.cargos.index',
+            'configuracion.plataforma' => 'modules.configuracion.plataformas.index',
+            'configuracion.tipo_plataforma' => 'modules.configuracion.tipos-plataforma.index',
+            'configuracion.tipo_operacion' => 'modules.configuracion.tipos-operacion.index',
+            'configuracion.detalle_lista_precio' => 'modules.configuracion.detalles-lista-precio.index',
+            'configuracion.empresapropietaria' => 'modules.configuracion.empresas-propietarias.index',
+            'configuracion.lista_precio' => 'modules.configuracion.listas-precio.index',
+            'configuracion.marca' => 'modules.configuracion.marcas.index',
+            'configuracion.modelo' => 'modules.configuracion.modelos.index',
+            'configuracion.tecnologia' => 'modules.configuracion.tecnologias.index',
+            'configuracion.tipo_elemento' => 'modules.configuracion.tipos-elemento.index',
+            'configuracion.tipo_pedido' => 'modules.configuracion.tipos-pedido.index',
+            'configuracion.unidad_medida' => 'modules.configuracion.unidades-medida.index',
+            'configuracion.operador' => 'modules.configuracion.operadores.index',
+            'configuracion.tipo_vehiculo' => 'modules.configuracion.tipos-vehiculo.index',
+            'configuracion.auditoria' => 'modules.configuracion.auditoria.index',
+            // Usuario y Personal
             'personal' => 'modules.personal',
             'roles' => 'modules.roles',
             'usuarios' => 'modules.usuarios',
+            // Sistema
             'sistema.vista' => 'modules.sistema.vistas.index',
+            'sistema.flujo' => 'modules.sistema.flujos.index',
+            'sistema.flujoregla' => 'modules.sistema.flujoreglas.index',
+            'sistema.historialflujo' => 'modules.sistema.historial-flujos.index',
         ];
         foreach ($moduleRouteMap as $permissionKey => $routeName) {
             $parentModule = self::permissionKeyToModule($permissionKey);

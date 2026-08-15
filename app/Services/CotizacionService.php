@@ -528,6 +528,35 @@ class CotizacionService
             ->map(fn($r) => (object) ['idmoneda' => $r->idmoneda, 'label' => $r->detalle]);
     }
 
+    private function formatPeriodoLabel(mixed $value): string
+    {
+        if ($value === null || $value === '') {
+            return '';
+        }
+
+        $periodo = trim((string) $value);
+        if ($periodo === '' || $periodo === 'No') {
+            return '';
+        }
+
+        if (is_numeric($periodo)) {
+            $mapping = [
+                30 => 'Mensual',
+                90 => '3 Meses',
+                180 => '6 Meses',
+                365 => '12 Meses',
+                730 => '24 Meses',
+                1095 => '36 Meses',
+                1460 => '48 Meses',
+            ];
+
+            $days = (int) $periodo;
+            return $mapping[$days] ?? $periodo;
+        }
+
+        return $periodo;
+    }
+
     private function loadAlmacenes(): Collection
     {
         return DB::table('almacen as a')
@@ -556,7 +585,10 @@ class CotizacionService
                 $isPlanServicio = str_contains($tipoNombre, 'plan') || str_contains($tipoNombre, 'servicio');
                 
                 if ($isPlanServicio && !empty($row->periodo)) {
-                    $label .= ' - ' . trim((string) $row->periodo);
+                    $formattedPeriodo = $this->formatPeriodoLabel($row->periodo);
+                    if ($formattedPeriodo !== '') {
+                        $label .= ' - ' . $formattedPeriodo;
+                    }
                 }
 
                 return (object) [

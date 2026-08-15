@@ -35,7 +35,7 @@ class AlmacenController extends Controller
 
         $items->through(function ($row) {
             $row->cantidad_disponible_label = $this->formatDecimal($row->cantidadDisponible ?? null);
-            $row->precio_label = $this->formatMoney($row->precio ?? null);
+            $row->precio_label = $this->formatMoneyWithSymbol($row->precio ?? null, $row->moneda_simbolo ?? '');
             $row->renovacion_label = is_null($row->renovacion) ? '-' : (string) $row->renovacion;
             $row->usa_red_movil_label = $this->formatYesNo($row->usaRedMovil ?? null);
             return $row;
@@ -313,6 +313,7 @@ class AlmacenController extends Controller
             ->leftJoin('tecnologia as tg', 'a.tecnologia_idtecnologia', '=', 'tg.idtecnologia')
             ->leftJoin('unidadmedida as um', 'a.unidadMedida_idunidadMedida', '=', 'um.idunidadMedida')
             ->leftJoin('plataforma as p', 'te.plataforma_idplataforma', '=', 'p.idplataforma')
+            ->leftJoin('moneda as mn', 'a.moneda_idmoneda', '=', 'mn.idmoneda')
             ->whereRaw("LOWER(TRIM(COALESCE(te.nombre, ''))) NOT LIKE '%plan%'")
             ->whereRaw("LOWER(TRIM(COALESCE(te.nombre, ''))) NOT LIKE '%servicio%'")
             ->select(
@@ -323,6 +324,7 @@ class AlmacenController extends Controller
                 'a.tipoElemento_idtipoElemento',
                 'a.tecnologia_idtecnologia',
                 'a.unidadMedida_idunidadMedida',
+                'a.moneda_idmoneda',
                 'a.usaRedMovil',
                 'a.cantidadDisponible',
                 'a.detalle',
@@ -334,7 +336,8 @@ class AlmacenController extends Controller
                 DB::raw("CONCAT(COALESCE(te.nombre, 'Sin tipo'), IF(COALESCE(te.detalle, '') != '', CONCAT(' - ', te.detalle), '')) as tipo_elemento_label"),
                 DB::raw("COALESCE(tg.nombreTecnologia, 'Sin tecnología') as tecnologia_label"),
                 DB::raw("COALESCE(um.nomenclatura, 'Sin unidad') as unidad_medida_label"),
-                DB::raw('COALESCE(eac.cantidad, 0) as cantidad')
+                DB::raw('COALESCE(eac.cantidad, 0) as cantidad'),
+                DB::raw('COALESCE(mn.simbolo, "") as moneda_simbolo')
             );
 
         $query->leftJoin('marca as ma', 'm.marca_idmarca', '=', 'ma.idmarca');
@@ -495,6 +498,18 @@ class AlmacenController extends Controller
                 'placeholder' => 'Selecciona una opción',
             ],
             [
+                'name' => 'moneda_idmoneda',
+                'type' => 'select',
+                'label' => 'Moneda',
+                'required' => false,
+                'tomSelect' => true,
+                'optionsData' => $this->monedaOptions(),
+                'optionKey' => 'idmoneda',
+                'optionLabel' => 'moneda_label',
+                'value' => $almacenId === null ? '2' : null,
+                'placeholder' => 'Selecciona moneda',
+            ],
+            [
                 'name' => 'precio',
                 'type' => 'number',
                 'label' => 'Precio',
@@ -546,6 +561,7 @@ class AlmacenController extends Controller
             'tipoElemento_idtipoElemento' => ['required', 'integer', Rule::exists('tipoelemento', 'idtipoElemento')],
             'tecnologia_idtecnologia' => ['required', 'integer', Rule::exists('tecnologia', 'idtecnologia')],
             'unidadMedida_idunidadMedida' => ['required', 'integer', Rule::exists('unidadmedida', 'idunidadMedida')],
+            'moneda_idmoneda' => ['nullable', 'integer', Rule::exists('moneda', 'idmoneda')],
             'usaRedMovil' => ['nullable', 'string', 'size:1', Rule::in(['S', 'N'])],
             'cantidadDisponible' => ['nullable', 'numeric', 'min:0'],
             'detalle' => ['nullable', 'string', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
@@ -565,6 +581,7 @@ class AlmacenController extends Controller
             'tipoElemento_idtipoElemento' => (int) $validated['tipoElemento_idtipoElemento'],
             'tecnologia_idtecnologia' => (int) $validated['tecnologia_idtecnologia'],
             'unidadMedida_idunidadMedida' => (int) $validated['unidadMedida_idunidadMedida'],
+            'moneda_idmoneda' => !empty($validated['moneda_idmoneda']) ? (int) $validated['moneda_idmoneda'] : null,
             'usaRedMovil' => $this->nullableString($validated['usaRedMovil'] ?? null),
             'cantidadDisponible' => null,
             'detalle' => $this->nullableString($validated['detalle'] ?? null),
@@ -808,7 +825,48 @@ class AlmacenController extends Controller
             return '-';
         }
 
-        return '$ ' . number_format((float) $value, 2, ',', '.');
+        return number_format((float) $value, 2, ',', '.');
+    }
+
+    private function formatMoneyWithSymbol(mixed $value, string $symbol = ''): string
+    {
+        if ($value === null || $value === '') {
+            $displayValue = '-';
+        } else {
+            $displayValue = number_format((float) $value, 2, ',', '.');
+        }
+
+        $normalizedSymbol = $this->normalizeCurrencySymbol($symbol);
+
+        if (!empty($normalizedSymbol)) {
+            return $normalizedSymbol . ' ' . $displayValue;
+        }
+
+        return $displayValue;
+    }
+
+    private function normalizeCurrencySymbol(?string $currency): string
+    {
+        $symbol = trim((string) ($currency ?? ''));
+        if ($symbol === '') {
+            return '$';
+        }
+
+        $lower = mb_strtolower($symbol, 'UTF-8');
+
+        if ($lower === 's/' || $lower === 's' || str_contains($lower, 'sol')) {
+            return 'S/';
+        }
+
+        if (str_contains($lower, 'dolar') || str_contains($lower, 'dólar') || str_contains($lower, '$')) {
+            return '$';
+        }
+
+        if (str_contains($lower, 'euro') || str_contains($lower, '€')) {
+            return '€';
+        }
+
+        return '$';
     }
 
     private function formatYesNo(mixed $value): string
@@ -820,5 +878,19 @@ class AlmacenController extends Controller
             'n', '0', 'no' => 'No',
             default => '-',
         };
+    }
+
+    private function monedaOptions(): Collection
+    {
+        return DB::table('moneda')
+            ->select(['idmoneda', DB::raw('CONCAT(detalle) as moneda_label')])
+            ->orderBy('detalle')
+            ->get()
+            ->map(function ($row): array {
+                return [
+                    'idmoneda' => (string) $row->idmoneda,
+                    'moneda_label' => trim((string) $row->moneda_label),
+                ];
+            });
     }
 }

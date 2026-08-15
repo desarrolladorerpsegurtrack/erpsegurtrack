@@ -2259,7 +2259,7 @@
                                         </div>
                                         <div class="w-20 modal-input-col">
                                             <label class="block text-xs font-semibold text-slate-600 mb-1">Desc. %</label>
-                                            <input type="number" id="modal-discount" value="0" step="0.01" class="form-control text-sm w-full text-center">
+                                            <input type="number" id="modal-discount" value="0" min="0" step="1" class="form-control text-sm w-full text-center">
                                         </div>
                                         <button type="button" id="btn-add-modal-row" class="rounded bg-emerald-600 text-white px-4 py-2 text-sm font-medium hover:bg-emerald-700 h-[38px] modal-btn-col">
                                             Añadir
@@ -2879,7 +2879,7 @@
 
                                     const qty = parseFloat(inpQty.value) || 1;
                                     const price = parseFloat(inpPrice.value) || 0;
-                                    const desc = parseFloat(inpDisc.value) || 0;
+                                    const desc = Number.parseInt(inpDisc.value, 10) || 0;
                                     const subtotal = (qty * price * (1 - desc/100)).toFixed(2);
 
                                     tempItems.push({
@@ -3051,7 +3051,7 @@
                                                 </div>
                                                 <div class="flex flex-col gap-1 w-full sm:w-32">
                                                     <label class="text-xs text-slate-500 tracking-wider">Descuento Global (%)</label>
-                                                    <input type="number" step="0.01" name="${sumPrefix}descuento${sumSuffix}" class="form-control text-sm text-right px-2 py-1 h-8 summary-desc-global" value="${initDescGlobal}" ${formReadOnly ? 'disabled' : ''}>
+                                                    <input type="number" min="0" step="1" name="${sumPrefix}descuento${sumSuffix}" class="form-control text-sm text-right px-2 py-1 h-8 summary-desc-global" value="${Math.round(Number(initDescGlobal) || 0)}" ${formReadOnly ? 'disabled' : ''}>
                                                 </div>
                                                 <div class="flex flex-col gap-1 w-full sm:w-32">
                                                     <label class="text-xs text-slate-500 tracking-wider">IGV (%)</label>
@@ -3059,7 +3059,7 @@
                                                 </div>
                                                 <div class="flex flex-col gap-1 w-full sm:w-32">
                                                     <label class="text-xs text-slate-700 tracking-wider">Total</label>
-                                                    <input type="text" name="${sumPrefix}total${sumSuffix}" readonly class="form-control text-base font-bold text-emerald-700 bg-transparent px-2 py-1 text-right h-8 summary-total" value="0.00">
+                                                    <input type="number" min="0" step="1" name="${sumPrefix}total${sumSuffix}" class="form-control text-base font-bold text-emerald-700 bg-transparent px-2 py-1 text-right h-8 summary-total" value="0" ${formReadOnly ? 'readonly' : ''}>
                                                 </div>
                                             </div>
                                         </div>
@@ -3075,7 +3075,76 @@
                                     const inpDescG = wrapper.querySelector('.summary-desc-global');
                                     inpDescG.addEventListener('input', function() { recalcGroupTotals(safeTipo); });
 
+                                    const inpTotal = wrapper.querySelector('.summary-total');
+                                    if (inpTotal && !formReadOnly) {
+                                        inpTotal.addEventListener('input', function() {
+                                            adjustPricesToTargetTotal(wrapper, safeTipo);
+                                        });
+                                    }
+
                                     return wrapper;
+                                }
+
+                                function adjustPricesToTargetTotal(wrapper, safeTipo) {
+                                    const inpTotal = wrapper.querySelector('.summary-total');
+                                    const inpDescG = wrapper.querySelector('.summary-desc-global');
+                                    const inpIgv = wrapper.querySelector('.summary-igv');
+                                    if (!inpTotal || !inpDescG || !inpIgv) return;
+
+                                    const targetTotal = parseFloat(inpTotal.value);
+                                    if (!Number.isFinite(targetTotal) || targetTotal <= 0) {
+                                        return;
+                                    }
+
+                                    const igvPercent = parseFloat(inpIgv.value) || 18;
+                                    const descGlobalPercent = parseFloat(inpDescG.value) || 0;
+
+                                    const rows = Array.from(wrapper.querySelectorAll('tr.group-row'));
+                                    if (rows.length === 0) return;
+
+                                    const currentRawSubtotal = rows.reduce((sum, row) => {
+                                        const subtotalEl = row.querySelector('.row-subtotal');
+                                        return sum + (subtotalEl ? parseFloat(subtotalEl.value) || 0 : 0);
+                                    }, 0);
+
+                                    const desiredRawSubtotal = targetTotal / (1 + igvPercent / 100) / (1 - descGlobalPercent / 100);
+                                    if (!Number.isFinite(desiredRawSubtotal) || desiredRawSubtotal <= 0) return;
+
+                                    if (rows.length === 1) {
+                                        const row = rows[0];
+                                        const qty = parseFloat(row.querySelector('.row-qty').value) || 0;
+                                        const rowDesc = parseFloat(row.querySelector('.row-desc').value) || 0;
+                                        if (qty <= 0) return;
+
+                                        const newPrice = desiredRawSubtotal / (qty * (1 - rowDesc / 100));
+                                        const priceInput = row.querySelector('.row-price');
+                                        if (priceInput) {
+                                            priceInput.value = newPrice.toFixed(2);
+                                            recalcRow(row, safeTipo);
+                                        }
+                                        return;
+                                    }
+
+                                    if (currentRawSubtotal <= 0) return;
+                                    const factor = desiredRawSubtotal / currentRawSubtotal;
+                                    if (!Number.isFinite(factor) || factor <= 0) return;
+
+                                    rows.forEach(row => {
+                                        const priceInput = row.querySelector('.row-price');
+                                        const qtyInput = row.querySelector('.row-qty');
+                                        const descInput = row.querySelector('.row-desc');
+                                        const subtotalEl = row.querySelector('.row-subtotal');
+                                        if (!priceInput || !qtyInput || !descInput || !subtotalEl) return;
+
+                                        const currentPrice = parseFloat(priceInput.value) || 0;
+                                        const newPrice = currentPrice * factor;
+                                        const qty = parseFloat(qtyInput.value) || 0;
+                                        const rowDesc = parseFloat(descInput.value) || 0;
+                                        priceInput.value = newPrice.toFixed(2);
+                                        subtotalEl.value = (qty * newPrice * (1 - rowDesc / 100)).toFixed(2);
+                                    });
+
+                                    recalcGroupTotals(safeTipo);
                                 }
 
                                 // Adds a fully editable row to a group's table
@@ -3112,7 +3181,7 @@
                                             <input type="number" min="0" step="0.01" class="form-control row-price text-right h-9 px-1" value="${Number(itemData.price || 0).toFixed(2)}" ${window.formReadOnly ? 'disabled' : ''}>
                                         </td>
                                         <td class="px-2 py-2 text-center">
-                                            <input type="number" min="0" step="0.01" class="form-control row-desc text-center h-9 px-1" value="${itemData.desc || 0}" ${window.formReadOnly ? 'disabled' : ''}>
+                                            <input type="number" min="0" step="1" class="form-control row-desc text-center h-9 px-1" value="${Math.round(Number(itemData.desc || 0))}" ${window.formReadOnly ? 'disabled' : ''}>
                                         </td>
                                         <td class="px-4 py-2 text-right">
                                             <input type="text" readonly class="form-control row-subtotal text-right h-9 bg-slate-100 border-none font-medium px-2" value="${Number(itemData.subtotal || 0).toFixed(2)}">
@@ -3172,7 +3241,7 @@
                                 function recalcRow(tr, safeTipo) {
                                     const qty = parseFloat(tr.querySelector('.row-qty').value) || 0;
                                     const price = parseFloat(tr.querySelector('.row-price').value) || 0;
-                                    const desc = parseFloat(tr.querySelector('.row-desc').value) || 0;
+                                    const desc = Number.parseInt(tr.querySelector('.row-desc').value, 10) || 0;
                                     const subtotal = qty * price * (1 - desc/100);
                                     tr.querySelector('.row-subtotal').value = subtotal.toFixed(2);
                                     recalcGroupTotals(safeTipo);
@@ -3246,7 +3315,7 @@
                                     const inpIgv = wrapper.querySelector('.summary-igv');
                                     const inpTotal = wrapper.querySelector('.summary-total');
 
-                                    const descGlobalPercent = parseFloat(inpDescG.value) || 0;
+                                    const descGlobalPercent = Number.parseInt(inpDescG.value, 10) || 0;
                                     const igvPercent = parseFloat(inpIgv.value) || 18;
 
                                     const descAmount = rawSubtotal * (descGlobalPercent / 100);
@@ -3256,7 +3325,7 @@
                                     const finalTotalRounded = Math.round(finalTotal);
 
                                     if(inpSub) inpSub.value = rawSubtotal.toFixed(2);
-                                    if(inpTotal) inpTotal.value = finalTotalRounded.toFixed(2);
+                                    if(inpTotal) inpTotal.value = finalTotalRounded.toFixed(0);
 
                                     // Sync hidden inputs for edit mode
                                     if (isEditMode) {
@@ -3306,7 +3375,7 @@
                                             id: almacenId,
                                             qty: parseFloat(d.cantidad) || 0,
                                             price: parseFloat(d.precioUnitario) || 0,
-                                            desc: parseFloat(d.descuento) || 0,
+                                            desc: Math.round(parseFloat(d.descuento) || 0),
                                             subtotal: parseFloat(d.total) || 0
                                         };
                                         addRowToGroup(tipo, itemData);
@@ -3321,7 +3390,7 @@
                                                     id: almacenId,
                                                     qty: parseFloat(d.cantidad) || 0,
                                                     price: parseFloat(d.precioUnitario) || 0,
-                                                    desc: parseFloat(d.descuento) || 0,
+                                                    desc: Math.round(parseFloat(d.descuento) || 0),
                                                     subtotal: parseFloat(d.total) || 0
                                                 };
                                                 addRowToGroup(tipo, itemData);

@@ -114,6 +114,14 @@ class ServicioClienteController extends Controller
                 $estadoRaw = strtolower(trim((string)($row->estado ?? '')));
                 $row->estado = $estadoRaw === 'activo' || $estadoRaw === '1' || $estadoRaw === 'true' ? 1 : 0;
 
+                // Formatear monto con símbolo de moneda
+                if (!empty($row->moneda_simbolo)) {
+                    $montoDisplay = $row->monto !== null && $row->monto !== '' ? $row->monto : '-';
+                    $row->monto = $this->normalizeCurrencySymbol($row->moneda_simbolo) . ' ' . $montoDisplay;
+                } else {
+                    $row->monto = $row->monto !== null && $row->monto !== '' ? $row->monto : '-';
+                }
+
                 return $row;
             })
         );
@@ -232,6 +240,14 @@ class ServicioClienteController extends Controller
                     $r->fecheVencimiento = $r->fecheVencimiento ?? '';
                 }
 
+                // Formatear monto con símbolo de moneda
+                if (!empty($r->moneda_simbolo)) {
+                    $montoDisplay = $r->monto !== null && $r->monto !== '' ? $r->monto : '-';
+                    $r->monto = $this->normalizeCurrencySymbol($r->moneda_simbolo) . ' ' . $montoDisplay;
+                } else {
+                    $r->monto = $r->monto !== null && $r->monto !== '' ? $r->monto : '-';
+                }
+
                 return $r;
             });
 
@@ -256,6 +272,14 @@ class ServicioClienteController extends Controller
                 $r->fecheVencimiento = $r->fecheVencimiento ? Carbon::parse($r->fecheVencimiento)->locale('es')->isoFormat('D MMM, YYYY') : '';
             } catch (\Exception $e) {
                 $r->fecheVencimiento = $r->fecheVencimiento ?? '';
+            }
+
+            // Formatear monto con símbolo de moneda
+            if (!empty($r->moneda_simbolo)) {
+                $montoDisplay = $r->monto !== null && $r->monto !== '' ? $r->monto : '-';
+                $r->monto = $this->normalizeCurrencySymbol($r->moneda_simbolo) . ' ' . $montoDisplay;
+            } else {
+                $r->monto = $r->monto !== null && $r->monto !== '' ? $r->monto : '-';
             }
 
             return $r;
@@ -337,6 +361,17 @@ class ServicioClienteController extends Controller
                     'helpText' => 'Ingresa un monto.',
                 ],
                 [
+                    'name' => 'moneda_idmoneda',
+                    'type' => 'select',
+                    'label' => 'Moneda',
+                    'required' => false,
+                    'tomSelect' => true,
+                    'optionsData' => $this->monedaOptions(),
+                    'optionKey' => 'idmoneda',
+                    'optionLabel' => 'moneda_label',
+                    'placeholder' => 'Selecciona moneda',
+                ],
+                [
                     'name' => 'estado',
                     'type' => 'select',
                     'label' => 'Estado',
@@ -366,6 +401,7 @@ class ServicioClienteController extends Controller
             'fechaInicio' => ['required', 'date_format:Y-m-d'],
             'fecheVencimiento' => ['nullable', 'date_format:Y-m-d'],
             'monto' => ['nullable', 'numeric', 'min:0'],
+            'moneda_idmoneda' => ['nullable', 'exists:moneda,idmoneda'],
             'estado' => ['required', 'in:activo,inactivo'],
             'docReferencia' => ['nullable', 'string', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX],
         ];
@@ -387,6 +423,7 @@ class ServicioClienteController extends Controller
             'fechaInicio' => 'fecha inicio',
             'fecheVencimiento' => 'fecha vencimiento',
             'monto' => 'monto',
+            'moneda_idmoneda' => 'moneda',
             'estado' => 'estado',
             'docReferencia' => 'documento referencia',
         ];
@@ -474,6 +511,17 @@ class ServicioClienteController extends Controller
                     'step' => '0.01',
                 ],
                 [
+                    'name' => 'moneda_idmoneda',
+                    'type' => 'select',
+                    'label' => 'Moneda',
+                    'required' => false,
+                    'tomSelect' => true,
+                    'optionsData' => $this->monedaOptions(),
+                    'optionKey' => 'idmoneda',
+                    'optionLabel' => 'moneda_label',
+                    'placeholder' => 'Selecciona moneda',
+                ],
+                [
                     'name' => 'estado',
                     'type' => 'select',
                     'label' => 'Estado',
@@ -510,6 +558,7 @@ class ServicioClienteController extends Controller
             'fechaInicio' => ['nullable', 'date_format:Y-m-d'],
             'fecheVencimiento' => ['nullable', 'date_format:Y-m-d'],
             'monto' => ['nullable', 'numeric', 'min:0'],
+            'moneda_idmoneda' => ['nullable', 'exists:moneda,idmoneda'],
             'estado' => ['required', 'in:activo,inactivo'],
             'docReferencia' => ['nullable', 'string', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX],
         ];
@@ -531,6 +580,7 @@ class ServicioClienteController extends Controller
             'fechaInicio' => 'fecha inicio',
             'fecheVencimiento' => 'fecha vencimiento',
             'monto' => 'monto',
+            'moneda_idmoneda' => 'moneda',
             'estado' => 'estado',
             'docReferencia' => 'documento referencia',
         ];
@@ -621,11 +671,13 @@ class ServicioClienteController extends Controller
             ->leftJoin('cliente as c', 'c.idcliente', '=', 'sc.cliente_idcliente')
             ->leftJoin('vehiculo as v', 'v.placa', '=', 'sc.vehiculo_placa')
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'sc.almacen_idalmacen')
+            ->leftJoin('moneda as m', 'm.idmoneda', '=', 'sc.moneda_idmoneda')
             ->select([
                 'sc.idservicioCliente',
                 'sc.cliente_idcliente',
                 'sc.vehiculo_placa',
                 'sc.almacen_idalmacen',
+                'sc.moneda_idmoneda',
                 'sc.fechaInicio',
                 'sc.fecheVencimiento',
                 'sc.monto',
@@ -635,7 +687,33 @@ class ServicioClienteController extends Controller
                 DB::raw('COALESCE(v.marca, "") as vehiculo_marca'),
                 DB::raw('COALESCE(v.modelo, "") as vehiculo_modelo'),
                 DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
+                DB::raw('COALESCE(m.simbolo, "") as moneda_simbolo'),
+                DB::raw('COALESCE(m.detalle, "") as moneda_detalle'),
             ]);
+    }
+
+    private function normalizeCurrencySymbol(?string $currency): string
+    {
+        $symbol = trim((string) ($currency ?? ''));
+        if ($symbol === '') {
+            return 'S/';
+        }
+
+        $lower = mb_strtolower($symbol, 'UTF-8');
+
+        if ($lower === 's/' || $lower === 's' || str_contains($lower, 'sol')) {
+            return 'S/';
+        }
+
+        if (str_contains($lower, 'dolar') || str_contains($lower, 'dólar') || str_contains($lower, '$')) {
+            return '$';
+        }
+
+        if (str_contains($lower, 'euro') || str_contains($lower, '€')) {
+            return '€';
+        }
+
+        return 'S/';
     }
 
     private function clienteOptions()
@@ -676,5 +754,16 @@ class ServicioClienteController extends Controller
             (object) ['value' => 'activo', 'label' => 'Activo'],
             (object) ['value' => 'inactivo', 'label' => 'Inactivo'],
         ]);
+    }
+
+    private function monedaOptions()
+    {
+        return DB::table('moneda')
+            ->select([
+                'idmoneda',
+                DB::raw('CONCAT(detalle) as moneda_label'),
+            ])
+            ->orderBy('detalle')
+            ->get();
     }
 }

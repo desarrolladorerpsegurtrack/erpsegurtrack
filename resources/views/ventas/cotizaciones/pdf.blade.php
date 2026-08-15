@@ -1,10 +1,45 @@
 @php use Illuminate\Support\Carbon; @endphp
+@php
+    $periodoPdfMap = [
+        30 => 'Mensual',
+        90 => '3 Meses',
+        180 => '6 Meses',
+        365 => '12 Meses',
+        730 => '24 Meses',
+        1095 => '36 Meses',
+        1460 => '48 Meses',
+    ];
+    $formatPeriodoPdf = function ($value) use ($periodoPdfMap) {
+        if ($value === null || $value === '') {
+            return '';
+        }
+
+        $periodo = trim((string) $value);
+        if ($periodo === '' || mb_strtolower($periodo, 'UTF-8') === 'no') {
+            return '';
+        }
+
+        if (is_numeric($periodo)) {
+            $days = (int) $periodo;
+            return $periodoPdfMap[$days] ?? $periodo;
+        }
+
+        return $periodo;
+    };
+@endphp
 <!doctype html>
 <html lang="es">
 
 <head>
     <meta charset="utf-8">
-    <title>Cotización {{ $quote->nroCotizacion ?? '' }}</title>
+    @php
+        $firstQuote = $quotesData[0]['quote'] ?? null;
+        $fileTitleClient = trim((string) ($firstQuote->cliente_label ?? 'Cotización'));
+        $fileTitleIdentifier = trim((string) ($batchId ?? $firstQuote->batch_id ?? ($firstQuote->nroCotizacion ?? '')));
+        $fileTitleClient = preg_replace('/\s+/', ' ', $fileTitleClient);
+        $fileTitleIdentifier = $fileTitleIdentifier !== '' ? '_'.$fileTitleIdentifier : '';
+    @endphp
+    <title>{{ $fileTitleClient.$fileTitleIdentifier }}</title>
     <style>
         @php
             $fontDir = str_replace('\\', '/', storage_path('fonts'));
@@ -484,6 +519,13 @@
             $maxRows = 15;
             $itemsArray = collect($items);
             $chunks = $itemsArray->isEmpty() ? collect([collect([])]) : $itemsArray->chunk($maxRows);
+            $showDiscountColumn = false;
+            foreach ($itemsArray as $item) {
+                if (isset($item->descuento) && is_numeric($item->descuento) && (float) $item->descuento > 0) {
+                    $showDiscountColumn = true;
+                    break;
+                }
+            }
         @endphp
 
         @foreach($chunks as $chunkIndex => $chunk)
@@ -494,13 +536,15 @@
                 <table class="items-table">
                     <thead>
                         <tr class="section-head">
-                            <th colspan="5">{{ $section_title ?? 'EQUIPAMIENTO' }}</th>
+                            <th colspan="{{ $showDiscountColumn ? 5 : 4 }}">{{ $section_title ?? 'EQUIPAMIENTO' }}</th>
                         </tr>
                         <tr class="col-head">
                             <th class="col-cant">Cant.</th>
                             <th class="col-prod ">Descripción</th>
                             <th class="col-punit ">P. Unitario</th>
-                            <th class="col-descuento ">Desct %</th>
+                            @if($showDiscountColumn)
+                                <th class="col-descuento ">Desct %</th>
+                            @endif
                             <th class="col-total ">Total</th>
                         </tr>
                     </thead>
@@ -510,14 +554,15 @@
                                 <td class="text-center">{{ number_format($item->cantidad) }}</td>
                                 <td class="text-left" style="vertical-align: middle;">
                                     @php
-                                        $periodo = trim((string) ($item->periodo ?? ''));
-                                        $periodoLower = mb_strtolower($periodo, 'UTF-8');
+                                        $periodo = $formatPeriodoPdf($item->periodo ?? '');
                                     @endphp
-                                    {{ $item->producto ?? '-' }}@if($periodo !== '' && $periodoLower !== 'no') <span
+                                    {{ $item->producto ?? '-' }}@if($periodo !== '') <span
                                     style="color: red; font-weight: bold;">- {{ mb_strtoupper($periodo) }}</span>@endif
                                 </td>
                                 <td class="text-center">{{ $item->precio_label }}</td>
-                                <td class="text-center">{{ $item->descuento_label }}</td>
+                                @if($showDiscountColumn)
+                                    <td class="text-center">{{ $item->descuento_label }}</td>
+                                @endif
                                 <td class="text-center">{{ $item->total_label }}</td>
                             </tr>
                         @endforeach
@@ -528,25 +573,29 @@
                                 <td class="text-center">&nbsp;</td>
                                 <td class="text-left">&nbsp;</td>
                                 <td class="text-center">&nbsp;</td>
-                                <td class="text-center">&nbsp;</td>
+                                @if($showDiscountColumn)
+                                    <td class="text-center">&nbsp;</td>
+                                @endif
                                 <td class="text-center">&nbsp;</td>
                             </tr>
                         @endfor
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td rowspan="5" colspan="3" style="border: none; background: transparent;"></td>
+                            <td rowspan="{{ $showDiscountColumn ? 5 : 3 }}" colspan="{{ $showDiscountColumn ? 3 : 2 }}" style="border: none; background: transparent;"></td>
                             <th class="text-center">Importe</th>
                             <td class="text-center total-amount">{{ $importe_label }}</td>
                         </tr>
-                        <tr>
-                            <th class="text-center">Descuento</th>
-                            <td class="text-center total-amount">{{ $descuento_amount_label }}</td>
-                        </tr>
-                        <tr>
-                            <th class="text-center">SubTotal</th>
-                            <td class="text-center total-amount">{{ $subtotal_after_discount_label }}</td>
-                        </tr>
+                        @if($showDiscountColumn)
+                            <tr>
+                                <th class="text-center">Descuento</th>
+                                <td class="text-center total-amount">{{ $descuento_amount_label }}</td>
+                            </tr>
+                            <tr>
+                                <th class="text-center">SubTotal</th>
+                                <td class="text-center total-amount">{{ $subtotal_after_discount_label }}</td>
+                            </tr>
+                        @endif
                         <tr>
                             <th class="text-center">IGV(18%)</th>
                             <td class="text-center total-amount">{{ $igv_amount_label }}</td>

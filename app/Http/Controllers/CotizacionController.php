@@ -543,8 +543,8 @@ class CotizacionController extends Controller
         $descuentoPercent = (float) ($quote->descuento ?? 0);
         $descuentoAmount = round($importe * $descuentoPercent / 100, 2);
         $subtotalAfterDiscount = round($importe - $descuentoAmount, 2);
-        $igvAmount = round($subtotalAfterDiscount * 0.18, 0);
-        $totalGeneral = round($subtotalAfterDiscount + $igvAmount, 0);
+        $igvAmount = round($subtotalAfterDiscount * 0.18, 2);
+        $totalGeneral = round($subtotalAfterDiscount + $igvAmount, 2);
 
         $sectionTitle = 'EQUIPAMIENTO';
         foreach ($items as $item) {
@@ -586,7 +586,7 @@ class CotizacionController extends Controller
         $y = $canvas->get_height() - $marginBottom;
         $canvas->page_text($x, $y, $pageText, $font, $fontSize, [0, 0, 0]);
 
-        return $pdf->download('Cotizacion_' . $id . '.pdf');
+        return $pdf->download($this->buildQuotePdfFileName($quote, $id));
     }
 
     public function downloadGroupPdf(Request $request, string $batch_id)
@@ -650,7 +650,8 @@ class CotizacionController extends Controller
                 ->map(function ($item) use ($quote) {
                     $item->tipo_nombre = trim((string) ($item->tipo_nombre ?? ''));
                     $item->precio_label = $this->formatMoney($item->precioUnitario, $quote->moneda_simbolo);
-                    $itemTaxed = round((float) $item->total * 1.18, 0);
+                    $itemTaxed = round((float) $item->total * 1.18, 2);
+                    $item->igv_label = $this->formatMoney(round((float) $item->total * 0.18, 2), $quote->moneda_simbolo);
                     $item->total_label = $this->formatMoney($itemTaxed, $quote->moneda_simbolo);
                     $item->descuento_label = is_numeric($item->descuento) ? number_format($item->descuento, 2, '.', ',') . '%' : '-';
                     return $item;
@@ -707,7 +708,7 @@ class CotizacionController extends Controller
         $y = $canvas->get_height() - $marginBottom;
         $canvas->page_text($x, $y, $pageText, $font, $fontSize, [0, 0, 0]);
 
-        return $pdf->download('Cotizaciones_' . $batch_id . '.pdf');
+        return $pdf->download($this->buildQuotePdfFileName($quotes->first(), $batch_id));
     }
 
     public function edit(string $id): View|RedirectResponse
@@ -1182,6 +1183,27 @@ class CotizacionController extends Controller
         }
 
         return $value;
+    }
+
+    private function buildQuotePdfFileName(?object $quote, string $identifier): string
+    {
+        $clientLabel = trim((string) ($quote->cliente_label ?? ''));
+        $identifierValue = trim((string) $identifier);
+
+        $safeClient = preg_replace('/[^\pL\pN._-]+/u', '_', $clientLabel);
+        $safeClient = trim($safeClient, "._-");
+        $safeIdentifier = preg_replace('/[^\pL\pN._-]+/u', '_', $identifierValue);
+        $safeIdentifier = trim($safeIdentifier, "._-");
+
+        if ($safeClient === '') {
+            $safeClient = 'cliente';
+        }
+
+        if ($safeIdentifier === '') {
+            $safeIdentifier = 'sin-identificador';
+        }
+
+        return $safeClient . '_' . $safeIdentifier . '.pdf';
     }
 
     private function formatCotizacionEstadoName(?string $estado): string

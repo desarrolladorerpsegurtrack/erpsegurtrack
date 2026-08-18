@@ -43,16 +43,10 @@ class ClientesController extends Controller
             'stats' => $stats,
             'columns' => [
                 ['key' => 'idcliente', 'label' => 'RUC/DNI', 'type' => 'text'],
-                ['key' => 'nombreComercial', 'label' => 'Nombre Comercial', 'type' => 'text', 'wrap' => true],
                 ['key' => 'razonSocial', 'label' => 'Razón Social', 'type' => 'text', 'wrap' => true],
                 ['key' => 'grupo_asignado', 'label' => 'Grupo Asignado', 'type' => 'text'],
-                ['key' => 'rubro', 'label' => 'Rubro', 'type' => 'text'],
-                [
-                    'key' => 'direccion_completa',
-                    'label' => 'Dirección',
-                    'type' => 'custom', // Para permitir HTML (salto de línea)
-                    'wrap' => true,
-                ],
+                ['key' => 'telefono', 'label' => 'Número Telefónico', 'type' => 'text'],
+                ['key' => 'correo', 'label' => 'Correo Electrónico', 'type' => 'text'],
                 ['key' => 'estadoDetalle', 'label' => 'Estado', 'type' => 'status'],
             ],
             'filters' => [
@@ -75,10 +69,16 @@ class ClientesController extends Controller
                     'placeholder' => 'Filtrar por grupo',
                 ],
                 [
-                    'name' => 'rubro',
-                    'label' => 'Rubro',
+                    'name' => 'telefono',
+                    'label' => 'Teléfono',
                     'type' => 'text',
-                    'placeholder' => 'Filtrar por rubro',
+                    'placeholder' => 'Filtrar por teléfono',
+                ],
+                [
+                    'name' => 'correo',
+                    'label' => 'Correo',
+                    'type' => 'text',
+                    'placeholder' => 'Filtrar por correo',
                 ],
                 [
                     'name' => 'estado',
@@ -102,6 +102,7 @@ class ClientesController extends Controller
                 'xlsx' => route('modules.clientes.export', ['format' => 'xlsx']),
             ],
             'identifierKey' => 'idcliente',
+            'tableWrapperClass' => 'clientes-table',
         ]);
     }
 

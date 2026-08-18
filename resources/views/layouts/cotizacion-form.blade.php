@@ -1396,12 +1396,12 @@
         @media (max-width: 767px) {
             #modal-inputs-container {
                 display: grid !important;
-                grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+                grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
                 gap: 0.75rem !important;
                 align-items: stretch !important;
             }
             #modal-inputs-container > .product-col {
-                grid-column: span 4 / span 4 !important;
+                grid-column: span 3 / span 3 !important;
             }
             #modal-inputs-container > .modal-input-col {
                 width: 100% !important;
@@ -1412,7 +1412,7 @@
                 text-overflow: ellipsis;
             }
             #modal-inputs-container > .modal-btn-col {
-                grid-column: span 4 / span 4 !important;
+                grid-column: span 3 / span 3 !important;
                 width: 100% !important;
                 margin-top: 0.25rem !important;
             }
@@ -2224,7 +2224,7 @@
                         <!-- MODAL AGREGAR ITEM -->
 
                         <div id="modal-agregar-item" class="fixed inset-0 hidden items-center justify-center px-4 backdrop-blur-sm" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.78);">
-                            <div class="w-full rounded-lg bg-white shadow-2xl ring-1 ring-slate-900/10 border-t-4 border-emerald-600 overflow-hidden flex flex-col" style="max-width: 880px; height: 55vh; max-height: 65vh;">
+                            <div class="w-full rounded-lg bg-white shadow-2xl ring-1 ring-slate-900/10 border-t-4 border-emerald-600 overflow-hidden flex flex-col" style="max-width: 980px; height: 62vh; max-height: 72vh;">
                                 <div class="flex items-start justify-between border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white px-6 py-5 shrink-0">
                                     <div>
                                         <h3 class="text-lg font-bold text-slate-900">Agregar Items a Cotizar</h3>
@@ -2235,7 +2235,7 @@
                                     </button>
                                 </div>
 
-                                <div class="flex-1 overflow-y-auto px-6 py-4 bg-slate-50/50">
+                                <div class="flex-1 overflow-y-auto px-4 py-4 bg-slate-50/50">
                                     <div id="modal-inputs-container" class="flex flex-col md:flex-row gap-4 mb-6 items-end bg-white p-4 rounded-md border border-slate-200 shadow-sm">
                                         <div class="flex-1 w-full relative product-col">
                                             <label class="block text-xs font-semibold text-slate-600 mb-1">Producto / Servicio</label>
@@ -2243,8 +2243,8 @@
                                                 <option value="">Buscar producto o servicio...</option>
                                             </select>
                                         </div>
-                                        <div class="w-20 modal-input-col">
-                                            <label class="block text-xs font-semibold text-slate-600 mb-3">COMODATO</label>
+                                        <div class="w-10 modal-input-col">
+                                            <label class="block text-xs font-semibold text-slate-600 mb-2">Como<br>Dato</label>
                                             <label class="inline-flex items-center gap-2 text-sm text-slate-600">
                                                 <input type="checkbox" id="modal-cetear" class="h-6 w-6 transition-all duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&[type='radio']]:checked:bg-primary [&[type='radio']]:checked:border-primary [&[type='radio']]:checked:border-opacity-10 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:not(:checked)]:dark:bg-darkmode-800/50 [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed [&:disabled:checked]:dark:bg-darkmode-800/50" disabled>
                                             </label>
@@ -2253,9 +2253,17 @@
                                             <label class="block text-xs font-semibold text-slate-600 mb-1">Cant.</label>
                                             <input type="number" id="modal-qty" value="1" min="1" step="1" class="form-control text-sm w-full text-center">
                                         </div>
-                                        <div class="w-28 modal-input-col">
-                                            <label class="block text-xs font-semibold text-slate-600 mb-1">Precio Unit.</label>
+                                        <div class="w-20 modal-input-col">
+                                            <label class="block text-xs font-semibold text-slate-600 mb-1">
+                                                Precio Unit.
+                                            </label>
                                             <input type="number" id="modal-price" step="0.01" class="form-control text-sm w-full">
+                                        </div>
+                                        <div class="w-8 modal-input-col">
+                                            <label class="block text-xs font-semibold text-slate-600 mb-2">Con<br>IGV</label>
+                                            <label class="inline-flex items-center gap-2 text-sm text-slate-600">
+                                                <input type="checkbox" id="modal-price-includes-igv" class="h-6 w-6 transition-all duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&[type='radio']]:checked:bg-primary [&[type='radio']]:checked:border-primary [&[type='radio']]:checked:border-opacity-10 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:not(:checked)]:dark:bg-darkmode-800/50 [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed [&:disabled:checked]:dark:bg-darkmode-800/50" checked>
+                                            </label>
                                         </div>
                                         <div class="w-20 modal-input-col">
                                             <label class="block text-xs font-semibold text-slate-600 mb-1">Desc. %</label>
@@ -2292,7 +2300,15 @@
                             </div>
                         </div>
 
+                        {{-- Hidden totals for edit mode so the controller can read them --}}
+                        @if(($mode ?? '') === 'edit' && $record)
+                            <input type="hidden" name="subtotal" id="edit-hidden-subtotal" value="{{ old('subtotal', $record->subtotal ?? '0.00') }}">
+                            <input type="hidden" name="descuento" id="edit-hidden-descuento" value="{{ old('descuento', $record->descuento ?? '0.00') }}">
+                            <input type="hidden" name="igv" id="edit-hidden-igv" value="{{ old('igv', $record->igv ?? '18.00') }}">
+                            <input type="hidden" name="total" id="edit-hidden-total" value="{{ old('total', $record->total ?? '0.00') }}">
+                        @endif
                         <script>
+                            window.isInitialLoad = true;
                             (function (){
                                 const almacenOptions = @json($almacenes ?? []);
                                 const initialDetalles = @json($detalles ?? []);
@@ -2309,9 +2325,14 @@
                                     const wrappers = document.querySelectorAll('[id^="group-wrapper-"]');
                                     wrappers.forEach((wrapper) => {
                                         wrapper.querySelectorAll('input, select, textarea, button').forEach((el) => {
-                                            if (el.classList.contains('summary-total') || el.classList.contains('summary-subtotal') || el.classList.contains('summary-igv')) {
+                                            if (el.classList.contains('summary-subtotal') || el.classList.contains('summary-igv')) {
                                                 return;
                                             }
+
+                                            if (el.classList.contains('summary-total')) {
+                                                el.readOnly = false;
+                                            }
+
                                             el.disabled = false;
                                             if (el.classList.contains('btn-remove')) {
                                                 el.classList.remove('opacity-50', 'cursor-not-allowed');
@@ -2356,8 +2377,18 @@
                                 const selectProd = document.getElementById('modal-product-select');
                                 const inpQty = document.getElementById('modal-qty');
                                 const inpPrice = document.getElementById('modal-price');
+                                const inpPriceIncludesIgv = document.getElementById('modal-price-includes-igv');
                                 const inpDisc = document.getElementById('modal-discount');
                                 const inpCetear = document.getElementById('modal-cetear');
+
+                                if (inpPriceIncludesIgv) {
+                                    inpPriceIncludesIgv.addEventListener('change', function() {
+                                        const price = parseFloat(inpPrice?.value);
+                                        if (!inpPrice || !Number.isFinite(price) || price <= 0) return;
+
+                                        inpPrice.value = (this.checked ? price / 1.18 : price * 1.18).toFixed(2);
+                                    });
+                                }
                                 
                                 if (selectProd) selectProd.addEventListener('change', function() {
                                     clearModalMessage(modal);
@@ -2489,7 +2520,7 @@
                                     if (enabled && inpCetear && inpCetear.checked) {
                                         inpPrice.value = '0.00';
                                     } else if (!Number.isNaN(price) && inpPrice) {
-                                        inpPrice.value = price.toFixed(2);
+                                        inpPrice.value = (inpPriceIncludesIgv && !inpPriceIncludesIgv.checked ? price * 1.18 : price).toFixed(2);
                                     }
                                 }
 
@@ -2848,6 +2879,7 @@
                                     if (inpPrice) inpPrice.value = '';
                                     if (inpDisc) inpDisc.value = '0';
                                     if (inpCetear) inpCetear.checked = false;
+                                    if (inpPriceIncludesIgv) inpPriceIncludesIgv.checked = true;
                                 }
 
                                 
@@ -3028,15 +3060,16 @@
                                             ${!isEditMode ? `<input type="hidden" name="cotizaciones[${safeTipo}][tipo_nombre]" value="${tipo}">` : ''}
                                         </div>
                                         <div class="p-0 overflow-x-auto">
-                                            <table class="w-full text-left text-sm text-slate-600 min-w-[800px]">
-                                                <thead class="bg-slate-50 text-[11px] font-bold uppercase tracking-[0.1em] text-slate-500 border-b border-slate-200">
+                                            <table class="px-1 w-full text-left text-sm text-slate-600 min-w-[640px] border-separate border-spacing-0" style="table-layout: fixed;">
+                                                <thead class="bg-slate-50 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500 border-b border-slate-200">
                                                     <tr>
-                                                        <th class="px-4 py-3 w-[45%]">Producto / Servicio</th>
-                                                        <th class="px-2 py-3 text-center w-[8%]">Cant.</th>
-                                                        <th class="px-2 py-3 text-center w-[15%]">Precio Unit.</th>
-                                                        <th class="px-2 py-3 text-center w-[12%]">Desc. %</th>
-                                                        <th class="px-4 py-3 text-center w-[15%]">Subtotal</th>
-                                                        <th class="px-4 py-3 text-center w-[5%]">X</th>
+                                                        <th class="py-2 pr-2 pl-0 text-left" style="width: 52%;">Producto / Servicio</th>
+                                                        <th class="px-1 py-2 text-center" style="width: 8%;">Cant.</th>
+                                                        <th class="px-1 py-2 text-center" style="width: 12%;">Precio Unit.</th>
+                                                        <th class="px-1 py-2 text-center" style="width: 9%;">Desc. %</th>
+                                                        <th class="px-1 py-2 text-center" style="width: 10%;">IGV</th>
+                                                        <th class="px-1 py-2 text-center" style="width: 12%;">Subtotal</th>
+                                                        <th class="px-1 py-2 text-center" style="width: 4%;">X</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody id="group-tbody-${safeTipo}" data-group="${safeTipo}">
@@ -3046,20 +3079,17 @@
                                         <div class="bg-slate-50 px-4 py-2 border-t border-slate-200">
                                             <div class="grid grid-cols-2 gap-4 sm:flex sm:flex-row sm:justify-end sm:gap-6 w-full">
                                                 <div class="flex flex-col gap-1 w-full sm:w-32">
-                                                    <label class="text-xs text-slate-500 tracking-wider">Subtotal</label>
-                                                    <input type="text" name="${sumPrefix}subtotal${sumSuffix}" readonly class="form-control text-sm font-medium bg-transparent px-2 py-1 text-right h-8 summary-subtotal" value="0.00">
-                                                </div>
-                                                <div class="flex flex-col gap-1 w-full sm:w-32">
-                                                    <label class="text-xs text-slate-500 tracking-wider">Descuento Global (%)</label>
+                                                    <label class="text-xs text-slate-500 tracking-wider">Descuento Total(%)</label>
                                                     <input type="number" min="0" step="1" name="${sumPrefix}descuento${sumSuffix}" class="form-control text-sm text-right px-2 py-1 h-8 summary-desc-global" value="${Math.round(Number(initDescGlobal) || 0)}" ${formReadOnly ? 'disabled' : ''}>
                                                 </div>
                                                 <div class="flex flex-col gap-1 w-full sm:w-32">
-                                                    <label class="text-xs text-slate-500 tracking-wider">IGV (%)</label>
+                                                    <label class="text-xs text-slate-500 tracking-wider">IGV Total</label>
                                                     <input type="text" name="${sumPrefix}igv${sumSuffix}" readonly class="form-control text-sm font-medium bg-transparent px-2 py-1 text-right h-8 summary-igv" value="${initIgvGlobal}">
                                                 </div>
+                                                ${!isEditMode ? `<input type="hidden" name="cotizaciones[${safeTipo}][subtotal]" class="summary-subtotal" value="0">` : ''}
                                                 <div class="flex flex-col gap-1 w-full sm:w-32">
                                                     <label class="text-xs text-slate-700 tracking-wider">Total</label>
-                                                    <input type="number" min="0" step="1" name="${sumPrefix}total${sumSuffix}" class="form-control text-base font-bold text-emerald-700 bg-transparent px-2 py-1 text-right h-8 summary-total" value="0" ${formReadOnly ? 'readonly' : ''}>
+                                                    <input type="number" min="0" step="0.01" name="${sumPrefix}total${sumSuffix}" class="form-control text-base font-bold text-emerald-700 bg-transparent px-2 py-1 text-right h-8 summary-total" value="0" ${formReadOnly ? 'readonly' : ''}>
                                                 </div>
                                             </div>
                                         </div>
@@ -3088,16 +3118,12 @@
                                 function adjustPricesToTargetTotal(wrapper, safeTipo) {
                                     const inpTotal = wrapper.querySelector('.summary-total');
                                     const inpDescG = wrapper.querySelector('.summary-desc-global');
-                                    const inpIgv = wrapper.querySelector('.summary-igv');
-                                    if (!inpTotal || !inpDescG || !inpIgv) return;
+                                    if (!inpTotal || !inpDescG) return;
 
                                     const targetTotal = parseFloat(inpTotal.value);
-                                    if (!Number.isFinite(targetTotal) || targetTotal <= 0) {
+                                    if (!Number.isFinite(targetTotal) || targetTotal < 0) {
                                         return;
                                     }
-
-                                    const igvPercent = parseFloat(inpIgv.value) || 18;
-                                    const descGlobalPercent = parseFloat(inpDescG.value) || 0;
 
                                     const rows = Array.from(wrapper.querySelectorAll('tr.group-row'));
                                     if (rows.length === 0) return;
@@ -3107,26 +3133,13 @@
                                         return sum + (subtotalEl ? parseFloat(subtotalEl.value) || 0 : 0);
                                     }, 0);
 
-                                    const desiredRawSubtotal = targetTotal / (1 + igvPercent / 100) / (1 - descGlobalPercent / 100);
-                                    if (!Number.isFinite(desiredRawSubtotal) || desiredRawSubtotal <= 0) return;
-
-                                    if (rows.length === 1) {
-                                        const row = rows[0];
-                                        const qty = parseFloat(row.querySelector('.row-qty').value) || 0;
-                                        const rowDesc = parseFloat(row.querySelector('.row-desc').value) || 0;
-                                        if (qty <= 0) return;
-
-                                        const newPrice = desiredRawSubtotal / (qty * (1 - rowDesc / 100));
-                                        const priceInput = row.querySelector('.row-price');
-                                        if (priceInput) {
-                                            priceInput.value = newPrice.toFixed(2);
-                                            recalcRow(row, safeTipo);
-                                        }
-                                        return;
-                                    }
-
                                     if (currentRawSubtotal <= 0) return;
-                                    const factor = desiredRawSubtotal / currentRawSubtotal;
+
+                                    const descGlobalPercent = parseFloat(inpDescG.value) || 0;
+                                    const subtotalBeforeDiscount = targetTotal / (1 - descGlobalPercent / 100);
+                                    if (!Number.isFinite(subtotalBeforeDiscount) || subtotalBeforeDiscount <= 0) return;
+
+                                    const factor = subtotalBeforeDiscount / currentRawSubtotal;
                                     if (!Number.isFinite(factor) || factor <= 0) return;
 
                                     rows.forEach(row => {
@@ -3134,14 +3147,20 @@
                                         const qtyInput = row.querySelector('.row-qty');
                                         const descInput = row.querySelector('.row-desc');
                                         const subtotalEl = row.querySelector('.row-subtotal');
-                                        if (!priceInput || !qtyInput || !descInput || !subtotalEl) return;
+                                        const igvEl = row.querySelector('.row-igv');
+                                        if (!priceInput || !qtyInput || !descInput || !subtotalEl || !igvEl) return;
 
                                         const currentPrice = parseFloat(priceInput.value) || 0;
-                                        const newPrice = currentPrice * factor;
                                         const qty = parseFloat(qtyInput.value) || 0;
                                         const rowDesc = parseFloat(descInput.value) || 0;
+                                        const newPrice = currentPrice * factor;
                                         priceInput.value = newPrice.toFixed(2);
-                                        subtotalEl.value = (qty * newPrice * (1 - rowDesc / 100)).toFixed(2);
+
+                                        const newSubtotal = qty * newPrice * (1 - rowDesc / 100);
+                                        subtotalEl.value = newSubtotal.toFixed(2);
+
+                                        const baseSinIgv = newSubtotal / 1.18;
+                                        igvEl.value = (newSubtotal - baseSinIgv).toFixed(2);
                                     });
 
                                     recalcGroupTotals(safeTipo);
@@ -3166,27 +3185,31 @@
 
                                     const tr = document.createElement('tr');
                                     tr.className = 'border-b border-slate-100 hover:bg-slate-50/50 transition-colors group-row';
+                                    tr.style.verticalAlign = 'middle';
                                     
                                     tr.innerHTML = `
-                                        <td class="px-4 py-2">
+                                        <td class="py-2 pr-2 pl-0" style="width: 52%; padding-right: 8px;">
                                             <div class="w-full">
-                                                <input type="text" readonly class="form-control row-product-label w-full truncate overflow-hidden text-xs text-slate-800 bg-slate-50 border border-slate-200 px-2 py-2" value="${escapeHtml(itemLabel)}" title="${escapeHtml(itemLabel)}">
+                                                <input type="text" readonly class="form-control row-product-label w-full truncate overflow-hidden text-xs text-slate-800 bg-slate-50 border border-slate-200 px-2 py-2 h-8" value="${escapeHtml(itemLabel)}" title="${escapeHtml(itemLabel)}" style="min-width:0; width:100%;">
                                                 <input type="hidden" class="row-product" value="${itemData.id || ''}">
                                             </div>
                                         </td>
-                                        <td class="px-2 py-2 text-center">
-                                            <input type="number" min="0" step="1" class="form-control row-qty text-center h-9 px-1" value="${itemData.qty || 1}" ${window.formReadOnly ? 'disabled' : ''}>
+                                        <td class="px-1 py-2 text-center">
+                                            <input type="number" min="0" step="1" class="form-control row-qty text-center h-8 px-1 text-xs w-full" value="${itemData.qty || 1}" ${window.formReadOnly ? 'disabled' : ''}>
                                         </td>
-                                        <td class="px-2 py-2 text-right">
-                                            <input type="number" min="0" step="0.01" class="form-control row-price text-right h-9 px-1" value="${Number(itemData.price || 0).toFixed(2)}" ${window.formReadOnly ? 'disabled' : ''}>
+                                        <td class="px-1 py-2 text-center" style="width: 12%; padding: 0 4px; vertical-align: middle;">
+                                            <input type="number" min="0" step="0.01" class="form-control row-price text-right h-8 px-1 text-xs w-full" value="${Number(itemData.price || 0).toFixed(2)}" ${window.formReadOnly ? 'disabled' : ''}>
                                         </td>
-                                        <td class="px-2 py-2 text-center">
-                                            <input type="number" min="0" step="1" class="form-control row-desc text-center h-9 px-1" value="${Math.round(Number(itemData.desc || 0))}" ${window.formReadOnly ? 'disabled' : ''}>
+                                        <td class="px-1 py-2 text-center" style="width: 9%; padding: 0 4px; vertical-align: middle;">
+                                            <input type="number" min="0" step="1" class="form-control row-desc text-center h-8 px-1 text-xs w-full" value="${Math.round(Number(itemData.desc || 0))}" ${window.formReadOnly ? 'disabled' : ''}>
                                         </td>
-                                        <td class="px-4 py-2 text-right">
-                                            <input type="text" readonly class="form-control row-subtotal text-right h-9 bg-slate-100 border-none font-medium px-2" value="${Number(itemData.subtotal || 0).toFixed(2)}">
+                                        <td class="px-1 py-2 text-center" style="width: 10%; padding: 0 4px; vertical-align: middle;">
+                                            <input type="text" readonly class="form-control row-igv text-center h-8 bg-slate-100 border-none font-medium px-2 text-xs w-full" value="0.00" style="max-width:82px; margin-left:auto;">
                                         </td>
-                                        <td class="px-4 py-2 text-center">
+                                        <td class="px-1 py-2 text-center" style="width: 12%; padding: 0 4px; vertical-align: middle;">
+                                            <input type="number" min="0" step="0.01" class="form-control row-subtotal text-right h-8 bg-slate-100 border-none font-medium px-2 text-xs w-full" value="${Number(itemData.subtotal || 0).toFixed(2)}"  ${window.formReadOnly ? 'readonly' : ''}>
+                                        </td>
+                                        <td class="px-1 py-2 text-center" style="width: 4%; padding: 0 4px; vertical-align: middle;">
                                             <button type="button" class="btn-remove text-red-500 hover:text-red-700 bg-white border border-red-200 rounded p-1.5 hover:bg-red-50 transition-colors" ${window.formReadOnly ? 'disabled' : ''}>
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                                             </button>
@@ -3199,12 +3222,25 @@
                                     const iQty = tr.querySelector('.row-qty');
                                     const iPrice = tr.querySelector('.row-price');
                                     const iDesc = tr.querySelector('.row-desc');
+                                    const iSubtotal = tr.querySelector('.row-subtotal');
+                                    const iIgv = tr.querySelector('.row-igv');
                                     const rmBtn = tr.querySelector('.btn-remove');
 
                                     const onInput = () => recalcRow(tr, safeTipo);
                                     iQty.addEventListener('input', onInput);
                                     iPrice.addEventListener('input', onInput);
                                     iDesc.addEventListener('input', onInput);
+                                    iSubtotal.addEventListener('input', () => {
+                                        if (window.formReadOnly) return;
+                                        const qty = parseFloat(iQty.value) || 0;
+                                        const desc = parseFloat(iDesc.value) || 0;
+                                        const subtotal = Math.max(0, parseFloat(iSubtotal.value) || 0);
+                                        const price = qty > 0 ? subtotal / qty / (1 - desc / 100) : 0;
+                                        iPrice.value = price.toFixed(2);
+                                        const baseSinIgv = subtotal / 1.18;
+                                        iIgv.value = (subtotal - baseSinIgv).toFixed(2);
+                                        recalcGroupTotals(safeTipo);
+                                    });
 
                                     rmBtn.addEventListener('click', function() {
                                         if (window.formReadOnly) return;
@@ -3242,8 +3278,15 @@
                                     const qty = parseFloat(tr.querySelector('.row-qty').value) || 0;
                                     const price = parseFloat(tr.querySelector('.row-price').value) || 0;
                                     const desc = Number.parseInt(tr.querySelector('.row-desc').value, 10) || 0;
-                                    const subtotal = qty * price * (1 - desc/100);
-                                    tr.querySelector('.row-subtotal').value = subtotal.toFixed(2);
+                                    const subtotal = qty * price * (1 - desc / 100);
+                                    const subtotalInput = tr.querySelector('.row-subtotal');
+                                    const igvInput = tr.querySelector('.row-igv');
+
+                                    subtotalInput.value = subtotal.toFixed(2);
+
+                                    const baseSinIgv = subtotal / 1.18;
+                                    igvInput.value = (subtotal - baseSinIgv).toFixed(2);
+
                                     recalcGroupTotals(safeTipo);
                                 }
 
@@ -3306,26 +3349,29 @@
                                     if(!tbody) return;
 
                                     let rawSubtotal = 0;
-                                    tbody.querySelectorAll('.row-subtotal').forEach(el => {
-                                        rawSubtotal += parseFloat(el.value) || 0;
+                                    let igvTotal = 0;
+                                    tbody.querySelectorAll('.group-row').forEach(row => {
+                                        const subtotalEl = row.querySelector('.row-subtotal');
+                                        const igvEl = row.querySelector('.row-igv');
+                                        rawSubtotal += parseFloat(subtotalEl.value) || 0;
+                                        igvTotal += parseFloat(igvEl.value) || 0;
                                     });
 
-                                    const inpSub = wrapper.querySelector('.summary-subtotal');
                                     const inpDescG = wrapper.querySelector('.summary-desc-global');
+                                    const inpSubtotal = wrapper.querySelector('.summary-subtotal');
                                     const inpIgv = wrapper.querySelector('.summary-igv');
                                     const inpTotal = wrapper.querySelector('.summary-total');
 
-                                    const descGlobalPercent = Number.parseInt(inpDescG.value, 10) || 0;
-                                    const igvPercent = parseFloat(inpIgv.value) || 18;
-
+                                    const descGlobalPercent = Number.parseFloat(inpDescG.value) || 0;
                                     const descAmount = rawSubtotal * (descGlobalPercent / 100);
-                                    const baseNeto = rawSubtotal - descAmount;
-                                    const igvAmount = baseNeto * (igvPercent / 100);
-                                    const finalTotal = baseNeto + igvAmount;
-                                    const finalTotalRounded = Math.round(finalTotal);
+                                    const totalConDescuento = rawSubtotal - descAmount;
 
-                                    if(inpSub) inpSub.value = rawSubtotal.toFixed(2);
-                                    if(inpTotal) inpTotal.value = finalTotalRounded.toFixed(0);
+                                    if(inpIgv) inpIgv.value = igvTotal.toFixed(2);
+                                    if(inpSubtotal) inpSubtotal.value = rawSubtotal.toFixed(2);
+
+                                    if(inpTotal && document.activeElement !== inpTotal) {
+                                        inpTotal.value = totalConDescuento.toFixed(2);
+                                    }
 
                                     // Sync hidden inputs for edit mode
                                     if (isEditMode) {
@@ -3335,10 +3381,21 @@
                                         const hTotal = document.getElementById('edit-hidden-total');
                                         if(hSub) hSub.value = rawSubtotal.toFixed(2);
                                         if(hDesc && inpDescG) hDesc.value = inpDescG.value;
-                                        if(hIgv) hIgv.value = igvPercent.toFixed(2);
-                                        if(hTotal) hTotal.value = finalTotalRounded.toFixed(2);
+                                        if(hIgv) hIgv.value = igvTotal.toFixed(2);
+                                        if(hTotal && inpTotal) hTotal.value = inpTotal.value;
                                     }
                                 }
+
+                                window.syncCotizacionSubtotals = function() {
+                                    document.querySelectorAll('[id^="group-wrapper-"]').forEach((wrapper) => {
+                                        const subtotalInput = wrapper.querySelector('.summary-subtotal');
+                                        if (!subtotalInput) return;
+
+                                        const subtotal = Array.from(wrapper.querySelectorAll('.row-subtotal'))
+                                            .reduce((sum, input) => sum + (parseFloat(input.value) || 0), 0);
+                                        subtotalInput.value = subtotal.toFixed(2);
+                                    });
+                                };
 
                                 // Handle save from modal
                                 btnSave.addEventListener('click', function() {
@@ -3398,16 +3455,10 @@
                                         }
                                     });
                                 }
+                                window.isInitialLoad = false;
                             })();
                         </script>
                         
-{{-- Hidden totals for edit mode so the controller can read them --}}
-                        @if(($mode ?? '') === 'edit' && $record)
-                            <input type="hidden" name="subtotal" id="edit-hidden-subtotal" value="{{ old('subtotal', $record->subtotal ?? '0.00') }}">
-                            <input type="hidden" name="descuento" id="edit-hidden-descuento" value="{{ old('descuento', $record->descuento ?? '0.00') }}">
-                            <input type="hidden" name="igv" id="edit-hidden-igv" value="{{ old('igv', $record->igv ?? '18.00') }}">
-                            <input type="hidden" name="total" id="edit-hidden-total" value="{{ old('total', $record->total ?? '0.00') }}">
-                        @endif
 
                         <!-- BOTONES DE ACCIÓN -->
                         <div class="mt-6 flex items-center justify-end gap-2 resumen-actions">
@@ -3451,8 +3502,11 @@
                                 <a href="{{ $backRoute }}" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 [&:hover:not(:disabled)]:dark:bg-darkmode-100/10" style="border-color:#000000;color:#000000;">
                                     cancelar
                                 </a>
+                                <button type="button" id="btnPreview" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 [&:hover:not(:disabled)]:dark:bg-darkmode-100/10" style="border-color:#000000;color:#000000;">
+                                    Previsualizar
+                                </button>
                                 <button type="submit" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed bg-primary border-primary text-white dark:border-primary">
-                                    Guardar cambios
+                                    Generar cotización
                                 </button>
                             @endif
                         </div>
@@ -3533,6 +3587,33 @@
                 </div>
             </div>
         </div> 
+    </div>
+
+    <!-- Modal de Previsualización de PDF -->
+    <div id="preview-pdf-modal" class="fixed inset-0 hidden items-center justify-center p-4" style="z-index: 20000; background-color: rgba(0, 0, 0, 0.78);" role="dialog" aria-modal="true">
+        <div class="w-full overflow-hidden rounded-md bg-white shadow-[0_24px_80px_rgba(15,23,42,0.16)] flex flex-col modal-dialog" style="max-width: 1100px; width: 100%; height: calc(100vh - 3rem); min-height: calc(90vh - 3rem); max-height: calc(95vh - 3rem);">
+            <!-- Header -->
+            <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-2">
+                <div>
+                    <h3 class="text-lg font-semibold text-slate-800">Previsualización de Cotización</h3>
+                    <p class="mt-1 text-sm text-slate-600">Vista previa del PDF de la cotización actual sin guardar cambios.</p>
+                </div>
+                <button type="button" id="preview-pdf-close" class="ml-auto rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700">
+                    <span class="text-2xl leading-none" style="display:flex; align-items:center; justify-content:center; width:20px; height:20px;">×</span>
+                </button>
+            </div>
+
+            <!-- Body with PDF Canvas Container -->
+            <div class="flex-1 overflow-y-auto bg-slate-700 relative p-4 flex flex-col gap-4 items-center" id="preview-canvas-container">
+                <div id="preview-loading" class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-10 hidden">
+                    <svg class="animate-spin h-10 w-10 text-primary mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span class="text-sm font-medium text-slate-600">Generando vista previa...</span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Select2 removido: usando select nativo -->
@@ -5019,6 +5100,10 @@
             };
 
             mainForm.addEventListener('submit', function (event) {
+                if (window.syncCotizacionSubtotals) {
+                    window.syncCotizacionSubtotals();
+                }
+
                 if (mainForm.dataset.submitted === 'true') {
                     event.preventDefault();
                     return;
@@ -5899,6 +5984,7 @@
             });
         </script>
         @includeIf('cliente.relation-panel-script')
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
         <script>
             // Autocompletar dirección, teléfono y correo al seleccionar cliente
             document.addEventListener('DOMContentLoaded', function () {
@@ -5978,18 +6064,133 @@
                 }
 
                 // TomSelect may wrap the real select; listen change on the select/input itself
-                clienteSelect.addEventListener('change', function () {
-                    const val = this.value || '';
-                    syncClienteIdVisual(val);
-                    fetchClienteInfo(val, true);
-                });
+                if (clienteSelect) {
+                    clienteSelect.addEventListener('change', function () {
+                        const val = this.value || '';
+                        syncClienteIdVisual(val);
+                        fetchClienteInfo(val, true);
+                    });
+                }
 
                 // Si ya hay un cliente seleccionado al cargar la página, obtener su info
                 try {
-                    const initial = clienteSelect.value || '';
+                    const initial = clienteSelect ? clienteSelect.value || '' : '';
                     syncClienteIdVisual(initial);
                     if (initial) fetchClienteInfo(initial, false);
-                } catch (e) { /* noop */ }            });
+                } catch (e) { /* noop */ }
+
+                // Lógica del botón Previsualizar y su modal con PDF.js (Opción B)
+                const btnPreview = document.getElementById('btnPreview');
+                const previewModal = document.getElementById('preview-pdf-modal');
+                const previewClose = document.getElementById('preview-pdf-close');
+                const previewCloseBtn = document.getElementById('preview-pdf-close-btn');
+                const previewCanvasContainer = document.getElementById('preview-canvas-container');
+                const previewLoading = document.getElementById('preview-loading');
+                const mainForm = document.getElementById('main-crud-form') || document.querySelector('form');
+
+                if (btnPreview && previewModal) {
+                    if (previewModal.parentElement !== document.body) {
+                        document.body.appendChild(previewModal);
+                    }
+
+                    // Configurar Worker de PDF.js
+                    if (window.pdfjsLib) {
+                        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+                    }
+
+                    const closePreviewModal = () => {
+                        if (previewCanvasContainer) {
+                            const canvases = previewCanvasContainer.querySelectorAll('canvas');
+                            canvases.forEach(canvas => canvas.remove());
+                        }
+                        previewModal.classList.add('hidden');
+                        previewModal.classList.remove('flex');
+                        document.body.style.overflow = '';
+                    };
+
+                    btnPreview.addEventListener('click', function (e) {
+                        e.preventDefault();
+
+                        if (window.syncCotizacionSubtotals) {
+                            window.syncCotizacionSubtotals();
+                        }
+                        
+                        previewModal.classList.remove('hidden');
+                        previewModal.classList.add('flex');
+                        document.body.style.overflow = 'hidden';
+                        previewLoading.classList.remove('hidden');
+
+                        const canvases = previewCanvasContainer.querySelectorAll('canvas');
+                        canvases.forEach(canvas => canvas.remove());
+
+                        const formData = new FormData(mainForm);
+
+                        fetch('{{ route("modules.ventas.cotizaciones.preview") }}', {
+                            method: 'POST',
+                            body: formData,
+                            headers: {
+                                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                            }
+                        })
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error('Error al generar la previsualización');
+                            }
+                            return response.arrayBuffer();
+                        })
+                        .then(arrayBuffer => {
+                            if (!window.pdfjsLib) {
+                                throw new Error('Librería PDF.js no cargada');
+                            }
+                            return pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                        })
+                        .then(pdf => {
+                            let renderPromise = Promise.resolve();
+
+                            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                                renderPromise = renderPromise.then(() => {
+                                    return pdf.getPage(pageNum).then(page => {
+                                        const canvas = document.createElement('canvas');
+                                        canvas.className = 'shadow-lg border border-slate-300 bg-white max-w-full my-2';
+                                        previewCanvasContainer.appendChild(canvas);
+
+                                        const viewport = page.getViewport({ scale: 1.5 });
+                                        const context = canvas.getContext('2d');
+                                        canvas.height = viewport.height;
+                                        canvas.width = viewport.width;
+
+                                        const renderContext = {
+                                            canvasContext: context,
+                                            viewport: viewport
+                                        };
+                                        return page.render(renderContext).promise;
+                                    });
+                                });
+                            }
+
+                            return renderPromise;
+                        })
+                        .then(() => {
+                            previewLoading.classList.add('hidden');
+                        })
+                        .catch(error => {
+                            console.error(error);
+                            alert('Ocurrió un error al generar la vista previa. Asegúrate de haber completado los campos requeridos.');
+                            previewLoading.classList.add('hidden');
+                            closePreviewModal();
+                        });
+                    });
+
+                    previewClose?.addEventListener('click', closePreviewModal);
+                    previewCloseBtn?.addEventListener('click', closePreviewModal);
+
+                    previewModal.addEventListener('click', function (e) {
+                        if (e.target === previewModal) {
+                            closePreviewModal();
+                        }
+                    });
+                }
+            });
     </script>
 @endsection
 

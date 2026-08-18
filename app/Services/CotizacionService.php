@@ -523,6 +523,7 @@ class CotizacionService
     {
         return DB::table('moneda')
             ->select('idmoneda', 'detalle')
+            ->where('idmoneda', '!=', 4)
             ->orderBy('detalle')
             ->get()
             ->map(fn($r) => (object) ['idmoneda' => $r->idmoneda, 'label' => $r->detalle]);

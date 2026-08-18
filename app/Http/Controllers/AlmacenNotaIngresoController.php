@@ -324,10 +324,10 @@ class AlmacenNotaIngresoController extends Controller
                         return redirect()->back()->withInput()->with('error', "La fila #" . ($index + 1) . " requiere exactamente {$cantidad} IMEIs cuando se habilita la entrada manual.");
                     }
                 } else {
-                    // generar IMEIs aleatorios únicos contra BD
+                    // generar IMEIs aleatorios con prefijo GEN únicos contra BD
                     $generated = collect();
                     while ($generated->count() < $cantidad) {
-                        $candidate = (string) random_int(100000000000000, 999999999999999);
+                        $candidate = 'GEN' . (string) random_int(100000000000000, 999999999999999);
                         // verificar colisión en BD y en esta colección
                         $exists = DB::table('elementoalmacen')->where('imei', $candidate)->exists();
                         if (!$exists && !$generated->contains($candidate)) {
@@ -595,8 +595,8 @@ class AlmacenNotaIngresoController extends Controller
 
         while (count($generated) < $qty && $attempts < $maxAttempts) {
             $attempts++;
-            // Generar IMEI aleatorio de 15 dígitos
-            $imei = str_pad((string) random_int(100000000000000, 999999999999999), 15, '0', STR_PAD_LEFT);
+            // Generar IMEI aleatorio con prefijo GEN para que sea visible en UI y persistente
+            $imei = 'GEN' . str_pad((string) random_int(100000000000000, 999999999999999), 15, '0', STR_PAD_LEFT);
 
             // Evitar duplicados locales
             if (in_array($imei, $generated, true)) continue;

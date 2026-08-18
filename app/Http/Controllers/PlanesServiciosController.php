@@ -527,6 +527,7 @@ class PlanesServiciosController extends Controller
     {
         return DB::table('moneda')
             ->select(['idmoneda', DB::raw('CONCAT(detalle) as moneda_label')])
+            ->where('idmoneda', '!=', 4)
             ->orderBy('detalle')
             ->get()
             ->map(function ($row): array {

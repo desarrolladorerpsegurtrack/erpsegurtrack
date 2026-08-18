@@ -350,13 +350,13 @@
             fetchPreviewIngresoImeisForRow(row, deviceId, qty).then(found => {
                 if (!found) {
                     const arr = [];
-                    for (let i = 1; i <= qty; i++) arr.push(`AUTOMATICO-${i}`);
+                    for (let i = 1; i <= qty; i++) arr.push(`GEN${String(Math.floor(Math.random() * 900000000000000) + 100000000000000)}`);
                     if (imeisInput) imeisInput.value = arr.join('\n');
                     updatePreviewFromInput(row);
                 }
             }).catch(() => {
                 const arr = [];
-                for (let i = 1; i <= qty; i++) arr.push(`AUTOMATICO-${i}`);
+                for (let i = 1; i <= qty; i++) arr.push(`GEN${String(Math.floor(Math.random() * 900000000000000) + 100000000000000)}`);
                 if (imeisInput) imeisInput.value = arr.join('\n');
                 updatePreviewFromInput(row);
             });
@@ -422,12 +422,13 @@
             const seen = new Set();
 
             raw.forEach(imei => {
+                const isGeneratedPattern = /^GEN\d+$/.test(imei);
                 const isAutoPattern = /^AUTOMATICO-\d+$/.test(imei);
                 const isNumeric = /^\d+$/.test(imei);
                 const isCorrectLength = imei.length >= 5 && imei.length <= 20;
                 const isDuplicate = seen.has(imei);
 
-                if ((isAutoPattern || (isNumeric && isCorrectLength)) && !isDuplicate) {
+                if ((isGeneratedPattern || isAutoPattern || (isNumeric && isCorrectLength)) && !isDuplicate) {
                     validCount++;
                     seen.add(imei);
                 } else {
@@ -717,7 +718,7 @@
                 if (isLocked) qty.disabled = true;
             }
             if (manual) {
-                manual.checked = !!data.manual;
+                manual.checked = data.manual ?? true;
                 if (isLocked) manual.disabled = true;
             }
             if (imeis) {

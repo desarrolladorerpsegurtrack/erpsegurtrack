@@ -775,7 +775,7 @@
                 if (isLocked) qty.disabled = true;
             }
             if (manual) {
-                manual.checked = !!data.manual;
+                manual.checked = data.manual ?? true;
                 if (isLocked) manual.disabled = true;
             }
             if (imeis) {

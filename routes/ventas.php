@@ -27,6 +27,7 @@ Route::middleware('erp.module:ventas.cotizaciones')->group(function () {
     Route::get('/modulos/ventas/cotizaciones/grupo/{batch_id}/pdf', [CotizacionController::class, 'downloadGroupPdf'])->name('modules.ventas.cotizaciones.pdf-grupo');
     Route::get('/modulos/ventas/cotizaciones/crear', [CotizacionController::class, 'create'])->name('modules.ventas.cotizaciones.create');
     Route::get('/modulos/ventas/cotizaciones/cliente/{id}/info', [CotizacionController::class, 'clienteInfo'])->name('modules.ventas.cotizaciones.cliente-info');
+    Route::post('/modulos/ventas/cotizaciones/preview', [CotizacionController::class, 'previewPdf'])->name('modules.ventas.cotizaciones.preview');
     Route::post('/modulos/ventas/cotizaciones', [CotizacionController::class, 'store'])->name('modules.ventas.cotizaciones.store');
     Route::get('/modulos/ventas/cotizaciones/{id}/editar', [CotizacionController::class, 'edit'])->name('modules.ventas.cotizaciones.edit');
     Route::put('/modulos/ventas/cotizaciones/{id}', [CotizacionController::class, 'update'])->name('modules.ventas.cotizaciones.update');

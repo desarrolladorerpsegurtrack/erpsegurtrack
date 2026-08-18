@@ -334,6 +334,11 @@
             text-align: center;
         }
 
+        .col-igv {
+            width: 10%;
+            text-align: center;
+        }
+
         .col-punit {
             width: 17%;
             text-align: center;
@@ -430,7 +435,9 @@
         {{-- ===== TABLA DE ÍTEMS ===== --}}
         @php
             $maxRows = 5;
-            $itemsArray = collect($items);
+            $itemsArray = collect($items)->sortByDesc(function ($item) {
+                return (float) ($item->precioUnitario ?? 0);
+            });
             $chunks = $itemsArray->isEmpty() ? collect([collect([])]) : $itemsArray->chunk($maxRows);
             $showDiscountColumn = false;
             foreach ($itemsArray as $item) {
@@ -539,7 +546,7 @@
                 <table class="items-table">
                 <thead>
                     <tr class="section-head">
-                        <th colspan="{{ $showDiscountColumn ? 5 : 4 }}">{{ $section_title ?? 'EQUIPAMIENTO' }}</th>
+                        <th colspan="{{ $showDiscountColumn ? 6 : 5 }}">{{ $section_title ?? 'EQUIPAMIENTO' }}</th>
                     </tr>
                     <tr class="col-head">
                         <th class="col-cant">Cant.</th>
@@ -548,6 +555,7 @@
                         @if($showDiscountColumn)
                             <th class="col-descuento ">Desct %</th>
                         @endif
+                        <th class="col-igv">IGV</th>
                         <th class="col-total ">Total</th>
                     </tr>
                 </thead>
@@ -592,6 +600,7 @@
                             @if($showDiscountColumn)
                                 <td class="text-center">{{ $item->descuento_label }}</td>
                             @endif
+                            <td class="text-center">{{ $item->igv_label ?? '-' }}</td>
                             <td class="text-center">{{ $item->total_label }}</td>
                         </tr>
                     @endforeach
@@ -606,8 +615,17 @@
                                 <td class="text-center">&nbsp;</td>
                             @endif
                             <td class="text-center">&nbsp;</td>
+                            <td class="text-center">&nbsp;</td>
                         </tr>
                     @endfor
+
+                    @if($chunkIndex === $chunks->count() - 1 && trim((string) ($quote->comentario ?? '')) !== '')
+                        <tr>
+                            <td colspan="{{ $showDiscountColumn ? 6 : 5 }}" style="border-left: 1px solid #c0c0c0; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #c0c0c0; padding: 3px 10px 4px; height: auto; color: #6b7280; font-size: 9px; font-style: italic; text-align: left; word-wrap: break-word; overflow-wrap: break-word;">
+                                Comentario: {{ $quote->comentario }}
+                            </td>
+                        </tr>
+                    @endif
                 </tbody>
                 <tfoot>
                     <tr>

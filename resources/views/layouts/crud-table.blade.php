@@ -459,11 +459,10 @@
                                                                             $carbonDate = \Illuminate\Support\Carbon::parse($rawDate);
                                                                             $monthNames = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.'];
                                                                             $formattedDate = sprintf(
-                                                                                '%s %s %s, %s',
+                                                                                '%s %s %s',
                                                                                 $carbonDate->format('d'),
                                                                                 $monthNames[(int) $carbonDate->format('m') - 1],
-                                                                                $carbonDate->format('Y'),
-                                                                                $carbonDate->format('H:i')
+                                                                                $carbonDate->format('Y')
                                                                             );
                                                                         } catch (\Throwable $e) {
                                                                             $formattedDate = (string) $rawDate;
@@ -1295,6 +1294,10 @@
         /* Regla específica para la vista de Planes y Servicios */
         #list-table-wrapper.planes-servicios-table table td {
             max-width: 350px;
+        }
+        /* Regla específica para la vista de Planes y Servicios */
+        #list-table-wrapper.clientes-table table td {
+            max-width: 200px;
         }
 
         /* Reglas específicas para la vista de Vehículos */

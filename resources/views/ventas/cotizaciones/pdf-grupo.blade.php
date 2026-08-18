@@ -515,7 +515,9 @@
         @foreach($quotesData as $qData)
             @php
                 $quoteItem = $qData['quote'];
-                $items = $qData['items'];
+                $items = collect($qData['items'] ?? [])->sortByDesc(function ($item) {
+                    return (float) ($item->precioUnitario ?? 0);
+                });
                 $section_title = $qData['section_title'];
                 $total_general_label = $qData['total_general_label'];
 
@@ -563,6 +565,13 @@
                                 <td class="text-center">{{ $item->total_label }}</td>
                             </tr>
                         @endforeach
+                        @if(trim((string) ($quoteItem->comentario ?? '')) !== '')
+                            <tr>
+                                <td colspan="{{ $showDiscountColumn ? 6 : 5 }}" style="border-left: 1px solid #c0c0c0; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #c0c0c0; padding: 3px 10px 4px; color: #6b7280; font-size: 9px; font-style: italic; text-align: left; word-wrap: break-word; overflow-wrap: break-word;">
+                                    Comentario: {{ $quoteItem->comentario }}
+                                </td>
+                            </tr>
+                        @endif
                     </tbody>
                     <tfoot>
                         <tr>

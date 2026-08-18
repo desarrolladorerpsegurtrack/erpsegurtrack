@@ -89,6 +89,22 @@ class ClienteService
             ->leftJoin('ubigeo as u', 'dc.ubigeo_idubigeo', '=', 'u.idubigeo')
             ->leftJoin('detallegrupocliente as dgc', 'c.idcliente', '=', 'dgc.cliente_idcliente')
             ->leftJoin('grupocliente as gc', 'dgc.grupoCliente_idgrupoCliente', '=', 'gc.idgrupoCliente')
+            ->leftJoin('contacto as ct', function ($join) {
+                $join->on('c.idcliente', '=', 'ct.cliente_idcliente')
+                    ->where(function ($query) {
+                        $query->where('ct.default', 1)
+                            ->orWhere(function ($subQuery) {
+                                $subQuery->whereNull('ct.default')
+                                    ->whereRaw('ct.idcontacto = (select max(inner_ct.idcontacto) from contacto as inner_ct where inner_ct.cliente_idcliente = ct.cliente_idcliente)')
+                                    ->whereNotExists(function ($defaultQuery) {
+                                        $defaultQuery->select(DB::raw(1))
+                                            ->from('contacto as default_ct')
+                                            ->whereColumn('default_ct.cliente_idcliente', 'ct.cliente_idcliente')
+                                            ->where('default_ct.default', 1);
+                                    });
+                            });
+                    });
+            })
             ->select(
                 'c.*',
                 'ec.detalle as estadoDetalle',
@@ -97,7 +113,9 @@ class ClienteService
                 'u.departamento',
                 'u.provincia',
                 'u.distrito',
-                'gc.nombreGrupo as grupoNombre'
+                'gc.nombreGrupo as grupoNombre',
+                'ct.numero as telefono',
+                'ct.correo as correo'
             );
     }
 
@@ -111,7 +129,9 @@ class ClienteService
                     ->orWhere('c.nombreComercial', 'like', $term)
                     ->orWhere('c.rubro', 'like', $term)
                     ->orWhere('gc.nombreGrupo', 'like', $term)
-                    ->orWhere('dc.direccion', 'like', $term);
+                    ->orWhere('dc.direccion', 'like', $term)
+                    ->orWhere('ct.numero', 'like', $term)
+                    ->orWhere('ct.correo', 'like', $term);
             });
         }
         
@@ -139,6 +159,14 @@ class ClienteService
             $query->where('gc.nombreGrupo', 'like', '%' . $filters['grupo'] . '%');
         }
 
+        if ($filters['telefono'] !== '') {
+            $query->where('ct.numero', 'like', '%' . $filters['telefono'] . '%');
+        }
+
+        if ($filters['correo'] !== '') {
+            $query->where('ct.correo', 'like', '%' . $filters['correo'] . '%');
+        }
+
         return $query;
     }
 
@@ -151,6 +179,8 @@ class ClienteService
             'nombre' => trim((string) $request->input('nombre', '')),
             'rubro' => trim((string) $request->input('rubro', '')),
             'grupo' => trim((string) $request->input('grupo', '')),
+            'telefono' => trim((string) $request->input('telefono', '')),
+            'correo' => trim((string) $request->input('correo', '')),
         ];
     }
 

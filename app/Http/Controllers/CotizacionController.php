@@ -48,7 +48,7 @@ class CotizacionController extends Controller
 
         $items->through(function ($row) {
             $row->moneda_simbolo = $this->currencySymbol($row->moneda_detalle ?? null);
-            $row->total_label = $this->formatMoney(round((float) ($row->total ?? 0), 0), $row->moneda_simbolo);
+            $row->total_label = $this->formatMoney(round((float) ($row->total ?? 0), 2), $row->moneda_simbolo);
             $row->subtotal_label = $this->formatMoney($row->subtotal ?? null, $row->moneda_simbolo);
             $row->fecha_emision_label = $row->fechaHoraEmision ? date('d/m/Y H:i', strtotime($row->fechaHoraEmision)) : '-';
             // Cliente legible: respetar `cliente_label` devuelto por la consulta si existe
@@ -83,8 +83,14 @@ class CotizacionController extends Controller
 
             $row->is_vigencia_expired = $this->isCotizacionExpired($row);
             $estado = (string) ($row->estado ?? '');
-            $notEditableStates = [CotizacionService::STATE_FINALIZADO, CotizacionService::STATE_EJECUTADO_SP, CotizacionService::STATE_ANULADO];
-            $row->canEdit = !in_array($estado, $notEditableStates, true) && !$row->is_vigencia_expired;
+            $notEditableStates = [
+                CotizacionService::STATE_APROBADO_SP,
+                CotizacionService::STATE_APROBADO,
+                CotizacionService::STATE_EJECUTADO_SP,
+                CotizacionService::STATE_FINALIZADO,
+                CotizacionService::STATE_ANULADO,
+            ];
+            $row->canEdit = ($estado === CotizacionService::STATE_GENERADO) && !$row->is_vigencia_expired;
             $row->canApprove = ($estado === CotizacionService::STATE_GENERADO) && !$row->is_vigencia_expired && $row->canEdit;
             $row->approveRoute = $row->canApprove ? route('modules.ventas.cotizaciones.approve', ['id' => $row->nroCotizacion]) : null;
             $row->canDelete = !in_array($estado, [CotizacionService::STATE_FINALIZADO, CotizacionService::STATE_EJECUTADO_SP, CotizacionService::STATE_ANULADO], true);
@@ -325,8 +331,18 @@ class CotizacionController extends Controller
                     $payload['moneda_idmoneda'] = $datosCotizacion['moneda_idmoneda'] ?? $validated['moneda_idmoneda'] ?? null;
                     $payload['comentario'] = $datosCotizacion['comentario'] ?? $validated['comentario'] ?? null;
 
+                    // El subtotal se calcula desde las líneas para no depender del campo visual oculto.
+                    $detalles = $datosCotizacion['detalle'] ?? [];
+                    $computedSubtotal = 0.0;
+                    foreach ($detalles as $detalle) {
+                        $precio = (float) ($detalle['precioUnitario'] ?? 0);
+                        $cantidad = (float) ($detalle['cantidad'] ?? 0);
+                        $descuentoLinea = (float) ($detalle['descuento'] ?? 0);
+                        $computedSubtotal += round($cantidad * $precio * (1 - ($descuentoLinea / 100)), 2);
+                    }
+
                     // Sobrescribir totales por cotización
-                    $payload['subtotal'] = $datosCotizacion['subtotal'] ?? 0;
+                    $payload['subtotal'] = round($computedSubtotal, 2);
                     $payload['descuento'] = $datosCotizacion['descuento'] ?? 0;
                     $payload['igv'] = $datosCotizacion['igv'] ?? 0;
                     $payload['total'] = $datosCotizacion['total'] ?? 0;
@@ -359,7 +375,6 @@ class CotizacionController extends Controller
                         'include_image' => $includeImage,
                     ]);
 
-                    $detalles = $datosCotizacion['detalle'] ?? [];
                     $rows = [];
                     foreach ($detalles as $d) {
                         $precio = isset($d['precioUnitario']) ? (float) $d['precioUnitario'] : 0.0;
@@ -421,6 +436,15 @@ class CotizacionController extends Controller
 
         $payload['estado'] = CotizacionService::STATE_GENERADO;
         $payload['batch_id'] = $this->generateBatchId('IND');
+
+        $computedSubtotal = 0.0;
+        foreach ($request->input('detalle', []) as $detalle) {
+            $precio = (float) ($detalle['precioUnitario'] ?? 0);
+            $cantidad = (float) ($detalle['cantidad'] ?? 0);
+            $descuentoLinea = (float) ($detalle['descuento'] ?? 0);
+            $computedSubtotal += round($cantidad * $precio * (1 - ($descuentoLinea / 100)), 2);
+        }
+        $payload['subtotal'] = round($computedSubtotal, 2);
 
         $tipoId = (int) ($payload['tipoDocumento_idtipoDocumento'] ?? 0);
         if ($tipoId > 0) {
@@ -534,6 +558,7 @@ class CotizacionController extends Controller
             ->map(function ($item) use ($quote) {
                 $item->tipo_nombre = trim((string) ($item->tipo_nombre ?? ''));
                 $item->precio_label = $this->formatMoney($item->precioUnitario, $quote->moneda_simbolo);
+                $item->igv_label = $this->formatMoney(round((float) ($item->total ?? 0) * 0.18, 2), $quote->moneda_simbolo);
                 $item->total_label = $this->formatMoney($item->total, $quote->moneda_simbolo);
                 $item->descuento_label = is_numeric($item->descuento) ? number_format($item->descuento, 2, '.', ',') . '%' : '-';
                 return $item;
@@ -543,8 +568,9 @@ class CotizacionController extends Controller
         $descuentoPercent = (float) ($quote->descuento ?? 0);
         $descuentoAmount = round($importe * $descuentoPercent / 100, 2);
         $subtotalAfterDiscount = round($importe - $descuentoAmount, 2);
-        $igvAmount = round($subtotalAfterDiscount * 0.18, 2);
-        $totalGeneral = round($subtotalAfterDiscount + $igvAmount, 2);
+        // Usar el total guardado en la BD, no recalcular
+        $totalGeneral = (float) ($quote->total ?? 0);
+        $igvAmount = round($totalGeneral - $subtotalAfterDiscount, 2);
 
         $sectionTitle = 'EQUIPAMIENTO';
         foreach ($items as $item) {
@@ -650,9 +676,10 @@ class CotizacionController extends Controller
                 ->map(function ($item) use ($quote) {
                     $item->tipo_nombre = trim((string) ($item->tipo_nombre ?? ''));
                     $item->precio_label = $this->formatMoney($item->precioUnitario, $quote->moneda_simbolo);
-                    $itemTaxed = round((float) $item->total * 1.18, 2);
-                    $item->igv_label = $this->formatMoney(round((float) $item->total * 0.18, 2), $quote->moneda_simbolo);
-                    $item->total_label = $this->formatMoney($itemTaxed, $quote->moneda_simbolo);
+                    $itemSubtotal = (float) ($item->total ?? 0);
+                    $itemIgv = round($itemSubtotal * 0.18, 2);
+                    $item->igv_label = $this->formatMoney($itemIgv, $quote->moneda_simbolo);
+                    $item->total_label = $this->formatMoney($itemSubtotal, $quote->moneda_simbolo);
                     $item->descuento_label = is_numeric($item->descuento) ? number_format($item->descuento, 2, '.', ',') . '%' : '-';
                     return $item;
                 });
@@ -661,8 +688,8 @@ class CotizacionController extends Controller
             $descuentoPercent = (float) ($quote->descuento ?? 0);
             $descuentoAmount = round($importe * $descuentoPercent / 100, 2);
             $subtotalAfterDiscount = round($importe - $descuentoAmount, 2);
-            $igvAmount = round($subtotalAfterDiscount * 0.18, 0);
-            $totalGeneral = round($subtotalAfterDiscount + $igvAmount, 0);
+            $totalGeneral = $items->sum(fn ($item) => (float) ($item->total ?? 0));
+            $igvAmount = $items->sum(fn ($item) => round((float) ($item->total ?? 0) * 0.18, 2));
 
             $sectionTitle = 'EQUIPAMIENTO';
             foreach ($items as $item) {
@@ -711,6 +738,232 @@ class CotizacionController extends Controller
         return $pdf->download($this->buildQuotePdfFileName($quotes->first(), $batch_id));
     }
 
+    public function previewPdf(Request $request)
+    {
+        $clienteId = $request->input('cliente_idcliente');
+        $direccion = $request->input('direccion');
+        $telefono = $request->input('telefono');
+        $correo = $request->input('correo');
+        $tipoDocCliente = $request->input('tipoDocumentoIDCliente');
+        $personalDni = $request->input('personal_dniPersonal');
+        $fechaHoraEmision = $request->input('fechaHoraEmision') ?: now()->format('Y-m-d H:i:s');
+        $includeImage = $request->input('include_image', '1') === '1';
+
+        $cliente = DB::table('cliente')->where('idcliente', $clienteId)->first();
+        $clienteLabel = $cliente ? ($cliente->razonSocial ?: ($cliente->nombreComercial ?: $clienteId)) : 'Cliente sin nombre';
+
+        $personal = DB::table('personal')->where('dniPersonal', $personalDni)->first();
+        $personalNombre = $personal ? $personal->nombre : '';
+        $personalApellido = $personal ? $personal->apellido : '';
+
+        $parsedDate = null;
+        if ($fechaHoraEmision) {
+            try {
+                if (str_contains($fechaHoraEmision, '/')) {
+                    $parsedDate = Carbon::createFromFormat('d/m/Y H:i', $fechaHoraEmision)->format('Y-m-d H:i:s');
+                } else {
+                    $parsedDate = Carbon::parse($fechaHoraEmision)->format('Y-m-d H:i:s');
+                }
+            } catch (\Exception $e) {
+                $parsedDate = now()->format('Y-m-d H:i:s');
+            }
+        } else {
+            $parsedDate = now()->format('Y-m-d H:i:s');
+        }
+
+        $quotesData = [];
+        $cotizaciones = $request->input('cotizaciones');
+
+        if (empty($cotizaciones)) {
+            $vigenciaId = $request->input('vigenciaOferta_idvigenciaOferta');
+            $formaPagoId = $request->input('formaPago_idformaPago');
+            $monedaId = $request->input('moneda_idmoneda');
+            $comentario = $request->input('comentario');
+            $subtotal = (float)$request->input('subtotal', 0);
+            $descuento = (float)$request->input('descuento', 0);
+            $igv = (float)$request->input('igv', 0);
+            $total = (float)$request->input('total', 0);
+            $detalle = $request->input('detalle', []);
+
+            $cotizaciones = [
+                'EQUIPAMIENTO' => [
+                    'tipo_nombre' => 'EQUIPAMIENTO',
+                    'vigenciaOferta_idvigenciaOferta' => $vigenciaId,
+                    'formaPago_idformaPago' => $formaPagoId,
+                    'moneda_idmoneda' => $monedaId,
+                    'comentario' => $comentario,
+                    'subtotal' => $subtotal,
+                    'descuento' => $descuento,
+                    'igv' => $igv,
+                    'total' => $total,
+                    'detalle' => $detalle
+                ]
+            ];
+        }
+
+        $vigenciaIds = [];
+        $formaPagoIds = [];
+        $monedaIds = [];
+        $almacenIds = [];
+
+        foreach ($cotizaciones as $tipo => $datos) {
+            if (isset($datos['vigenciaOferta_idvigenciaOferta'])) $vigenciaIds[] = $datos['vigenciaOferta_idvigenciaOferta'];
+            if (isset($datos['formaPago_idformaPago'])) $formaPagoIds[] = $datos['formaPago_idformaPago'];
+            if (isset($datos['moneda_idmoneda'])) $monedaIds[] = $datos['moneda_idmoneda'];
+            
+            $detalles = $datos['detalle'] ?? [];
+            foreach ($detalles as $d) {
+                if (isset($d['almacen_idalmacen'])) $almacenIds[] = $d['almacen_idalmacen'];
+            }
+        }
+
+        $vigencias = DB::table('vigenciaoferta')->whereIn('idvigenciaOferta', array_unique($vigenciaIds))->get()->keyBy('idvigenciaOferta');
+        $formasPago = DB::table('formapago')->whereIn('idformaPago', array_unique($formaPagoIds))->get()->keyBy('idformaPago');
+        $monedas = DB::table('moneda')->whereIn('idmoneda', array_unique($monedaIds))->get()->keyBy('idmoneda');
+        $productos = DB::table('almacen as a')
+            ->leftJoin('tipoelemento as te', 'a.tipoElemento_idtipoElemento', '=', 'te.idtipoElemento')
+            ->whereIn('a.idalmacen', array_unique($almacenIds))
+            ->select(['a.idalmacen', 'a.detalle', 'a.imagen', 'a.periodo', 'te.nombre as tipo_nombre'])
+            ->get()
+            ->keyBy('idalmacen');
+
+        $tempNroIndex = 1;
+
+        foreach ($cotizaciones as $tipo => $datos) {
+            $tipoNombre = $datos['tipo_nombre'] ?? $tipo;
+            $vigenciaId = $datos['vigenciaOferta_idvigenciaOferta'] ?? null;
+            $formaPagoId = $datos['formaPago_idformaPago'] ?? null;
+            $monedaId = $datos['moneda_idmoneda'] ?? null;
+
+            $vig = $vigencias->get($vigenciaId);
+            $fp = $formasPago->get($formaPagoId);
+            $m = $monedas->get($monedaId);
+
+            $monedaDetalle = $m ? $m->detalle : 'Dolar';
+            $monedaSimbolo = $this->currencySymbol($monedaDetalle);
+
+            $detalles = $datos['detalle'] ?? [];
+            $computedSubtotal = 0.0;
+            foreach ($detalles as $detalle) {
+                $precio = (float) ($detalle['precioUnitario'] ?? 0);
+                $cantidad = (float) ($detalle['cantidad'] ?? 0);
+                $descuentoLinea = (float) ($detalle['descuento'] ?? 0);
+                $computedSubtotal += round($cantidad * $precio * (1 - ($descuentoLinea / 100)), 2);
+            }
+
+            $formaPagoDetalle = $fp ? trim((string)$fp->detalle) : '';
+            $formaPagoTiempo = $fp ? (int)$fp->tiempo : 0;
+            if ($formaPagoTiempo > 0 && !str_contains(mb_strtolower($formaPagoDetalle), 'contado')) {
+                $formaPagoDetalle .= ' (' . $formaPagoTiempo . ' días)';
+            }
+
+            $quote = new \stdClass();
+            $quote->nroCotizacion = 'TEMP-' . str_pad($tempNroIndex++, 3, '0', STR_PAD_LEFT);
+            $quote->fechaHoraEmision = $parsedDate;
+            $quote->cliente_idcliente = $clienteId;
+            $quote->cliente_label = $clienteLabel;
+            $quote->direccion = $direccion;
+            $quote->telefono = $telefono;
+            $quote->correo = $correo;
+            $quote->tipoDocumentoIDCliente = $tipoDocCliente;
+            $quote->personal_nombre = $personalNombre;
+            $quote->personal_apellido = $personalApellido;
+            $quote->vigencia_detalle = $vig ? $vig->detalle : '';
+            $quote->formaPago_detalle = $formaPagoDetalle;
+            $quote->moneda_detalle = $monedaDetalle;
+            $quote->moneda_simbolo = $monedaSimbolo;
+            $quote->subtotal = round($computedSubtotal, 2);
+            $quote->descuento = (float)($datos['descuento'] ?? 0);
+            $quote->igv = (float)($datos['igv'] ?? 0);
+            $quote->total = (float)($datos['total'] ?? 0);
+            $quote->comentario = $datos['comentario'] ?? '';
+            $quote->batch_id = 'PREVIEW';
+
+            $items = collect();
+
+            foreach ($detalles as $d) {
+                $idalmacen = $d['almacen_idalmacen'] ?? null;
+                $prod = $productos->get($idalmacen);
+
+                $precio = (float)($d['precioUnitario'] ?? 0);
+                $cantidad = (float)($d['cantidad'] ?? 0);
+                $desc = (float)($d['descuento'] ?? 0);
+                $totalItem = (float)($d['total'] ?? round($cantidad * $precio * (1 - ($desc / 100)), 2));
+
+                $itemIgv = round($totalItem * 0.18, 2);
+
+                $item = new \stdClass();
+                $item->producto = $prod ? $prod->detalle : 'Producto desconocido';
+                $item->producto_imagen = $prod ? $prod->imagen : null;
+                $item->periodo = $prod ? $prod->periodo : null;
+                $item->tipo_nombre = $prod ? $prod->tipo_nombre : '';
+                $item->precioUnitario = $precio;
+                $item->cantidad = $cantidad;
+                $item->descuento = $desc;
+                $item->total = $totalItem;
+                
+                $item->precio_label = $this->formatMoney($precio, $monedaSimbolo);
+                $item->igv_label = $this->formatMoney($itemIgv, $monedaSimbolo);
+                $item->total_label = $this->formatMoney($totalItem, $monedaSimbolo);
+                $item->descuento_label = $desc > 0 ? number_format($desc, 2, '.', ',') . '%' : '-';
+
+                $items->push($item);
+            }
+
+            $sectionTitle = 'EQUIPAMIENTO';
+            foreach ($items as $item) {
+                $tipoElement = strtoupper($item->tipo_nombre ?? '');
+                if (str_contains($tipoElement, 'SERVIC')) {
+                    $sectionTitle = 'SERVICIOS TÉCNICOS';
+                    break;
+                }
+                if (str_contains($tipoElement, 'PLAN')) {
+                    $sectionTitle = 'PLANES';
+                    break;
+                }
+            }
+
+            $quotesData[] = [
+                'quote' => $quote,
+                'items' => $items,
+                'section_title' => $sectionTitle,
+                'importe_label' => $this->formatMoney($quote->subtotal, $monedaSimbolo),
+                'descuento_amount_label' => $this->formatMoney(round($quote->subtotal * $quote->descuento / 100, 2), $monedaSimbolo),
+                'subtotal_after_discount_label' => $this->formatMoney(round($quote->subtotal * (1 - $quote->descuento / 100), 2), $monedaSimbolo),
+                'igv_amount_label' => $this->formatMoney($items->sum(fn ($item) => round((float) ($item->total ?? 0) * 0.18, 2)), $monedaSimbolo),
+                'total_general_label' => $this->formatMoney($items->sum(fn ($item) => (float) ($item->total ?? 0)), $monedaSimbolo),
+                'descuento_percent' => $quote->descuento,
+            ];
+        }
+
+        $pdf = Pdf::loadView('ventas.cotizaciones.pdf-grupo', [
+            'quotesData' => $quotesData,
+            'include_image' => $includeImage,
+            'batchId' => 'PREVIEW',
+        ]);
+
+        $pdf->render();
+        $canvas = $pdf->getDomPDF()->getCanvas();
+        $pageText = 'Página {PAGE_NUM} de {PAGE_COUNT}';
+        $font = 'helvetica';
+        $fontSize = 10;
+        $marginRight = -95;
+        $marginBottom = 28;
+        $textWidth = $canvas->get_text_width($pageText, $font, $fontSize);
+        $x = max(30, $canvas->get_width() - $textWidth - $marginRight);
+        $y = $canvas->get_height() - $marginBottom;
+        $canvas->page_text($x, $y, $pageText, $font, $fontSize, [0, 0, 0]);
+
+        $watermark = 'PREVIASUALIZACIÓN';
+        $watermarkFontSize = 40;
+        $watermarkWidth = $canvas->get_text_width($watermark, $font, $watermarkFontSize);
+        $watermarkX = ($canvas->get_width() - $watermarkWidth) / 2;
+        $watermarkY = ($canvas->get_height() / 2) + ($watermarkFontSize / 2);
+        $canvas->page_text($watermarkX, $watermarkY, $watermark, $font, $watermarkFontSize, [0.90, 0.90, 0.90], 0, 0, 20);
+
+        return $pdf->stream('preview.pdf');
+    }
+
     public function edit(string $id): View|RedirectResponse
     {
         $previous = DB::table('cotizacion as c')
@@ -725,11 +978,11 @@ class CotizacionController extends Controller
                 ->with('error', 'No se encontró el registro solicitado.');
         }
 
-        $blockedStates = [CotizacionService::STATE_FINALIZADO, CotizacionService::STATE_EJECUTADO_SP, CotizacionService::STATE_ANULADO];
-        if (in_array((string) ($previous->estado ?? ''), $blockedStates, true) || $this->isCotizacionExpired($previous)) {
+        $editableState = CotizacionService::STATE_GENERADO;
+        if ((string) ($previous->estado ?? '') !== $editableState || $this->isCotizacionExpired($previous)) {
             return redirect()
                 ->route('modules.ventas.cotizaciones.index')
-                ->with('error', 'No se puede actualizar una cotización en estado Finalizado, Ejecutado(SP) o Anulado, o con vigencia vencida.');
+                ->with('error', 'Solo se puede editar una cotización en estado Generado o con vigencia vigente.');
         }
 
         $data = $this->cotizacionService->prepareEditViewData(request(), $id);
@@ -774,11 +1027,11 @@ class CotizacionController extends Controller
                 ->with('error', 'No se encontró el registro solicitado.');
         }
 
-        $blockedStates = [CotizacionService::STATE_FINALIZADO, CotizacionService::STATE_EJECUTADO_SP, CotizacionService::STATE_ANULADO];
-        if (in_array((string) ($previous->estado ?? ''), $blockedStates, true) || $this->isCotizacionExpired($previous)) {
+        $editableState = CotizacionService::STATE_GENERADO;
+        if ((string) ($previous->estado ?? '') !== $editableState || $this->isCotizacionExpired($previous)) {
             return redirect()
                 ->route('modules.ventas.cotizaciones.index')
-                ->with('error', 'No se puede actualizar una cotización en estado Finalizado, Ejecutado(SP) o Anulado, o con vigencia vencida.');
+                ->with('error', 'Solo se puede actualizar una cotización en estado Generado o con vigencia vigente.');
         }
 
         $payload = $this->preparePayload($validated);
@@ -836,21 +1089,6 @@ class CotizacionController extends Controller
                     'total' => $rowTotal,
                 ];
             }
-        }
-
-        // Recalcular totales de la cotización a partir de las filas de detalle
-        if (!empty($detalleRows)) {
-            $descGlobal = (float) ($request->input('descuento') ?? $validated['descuento'] ?? 0);
-            $igvPercent = (float) ($request->input('igv') ?? $validated['igv'] ?? 18);
-            $descAmount = round($rawSubtotal * ($descGlobal / 100), 2);
-            $baseNeto = round($rawSubtotal - $descAmount, 2);
-            $igvAmount = round($baseNeto * ($igvPercent / 100), 2);
-            $totalNeto = round($baseNeto + $igvAmount, 2);
-
-            $payload['subtotal'] = $rawSubtotal;
-            $payload['descuento'] = $descGlobal;
-            $payload['igv'] = $igvPercent;
-            $payload['total'] = $totalNeto;
         }
 
         DB::transaction(function () use ($payload, $id, $detalleRows): void {

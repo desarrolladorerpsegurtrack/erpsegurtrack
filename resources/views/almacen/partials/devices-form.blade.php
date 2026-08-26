@@ -13,7 +13,7 @@
 
     .device-row-container {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 120px 110px minmax(0, 1fr) 44px;
+        grid-template-columns: minmax(0, 1fr) 120px 110px minmax(0, 1fr) 140px 44px;
         gap: 16px;
         align-items: center;
         padding: 5px 8px;
@@ -93,7 +93,7 @@
 
         .device-row-container {
             display: grid;
-            grid-template-columns: minmax(320px, 2fr) 120px 110px minmax(280px, 1.6fr) 44px !important;
+            grid-template-columns: minmax(320px, 2fr) 120px 110px minmax(280px, 1.6fr) 140px 44px !important;
             gap: 12px;
             align-items: center;
             padding: 5px 8px;
@@ -104,7 +104,7 @@
         }
 
         .device-table-header > div {
-            grid-template-columns: minmax(320px, 2fr) 120px 110px minmax(280px, 1.6fr) 44px !important;
+            grid-template-columns: minmax(320px, 2fr) 120px 110px minmax(280px, 1.6fr) 140px 44px !important;
             min-width: 920px;
             width: max-content;
         }
@@ -160,12 +160,13 @@
             <div class="device-table-scroll">
                 <div class="device-table-inner">
                     <div class="device-table-header border-b border-slate-200 bg-slate-50" style="padding: 12px 20px;">
-                        <div style="display:grid; grid-template-columns: minmax(0,1fr) 120px 110px minmax(0,1fr) 44px; gap:16px; align-items:center;"
+                        <div style="display:grid; grid-template-columns: minmax(0,1fr) 120px 110px minmax(0,1fr) 140px 44px; gap:16px; align-items:center;"
                             class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
                             <div style="text-align:left;">Dispositivo</div>
                             <div style="text-align:center;">Cantidad</div>
                             <div style="text-align:center;">IMEIs Manual</div>
                             <div style="text-align:left;" class="imei-header-label">IMEIs</div>
+                            <div style="text-align:center;">Estado</div>
                             <div style="text-align:center;">Quitar</div>
                         </div>
                     </div>
@@ -223,6 +224,17 @@
             <input type="text" data-device-imeis-preview readonly
                 class="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-primary focus:ring-1 focus:ring-primary {{ ($readOnly ?? false) ? 'bg-slate-50 cursor-not-allowed' : 'cursor-pointer bg-white' }}"
                 placeholder="Clic para agregar IMEIs..." {{ ($readOnly ?? false) ? 'disabled' : '' }} />
+        </div>
+
+        <div class="device-row-col device-row-col-start">
+            <label class="device-mobile-label device-mobile-label-mb">Estado</label>
+            <select data-device-status
+                class="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-primary focus:ring-1 focus:ring-primary {{ ($readOnly ?? false) ? 'bg-slate-50 cursor-not-allowed' : '' }}"
+                {{ ($readOnly ?? false) ? 'disabled' : '' }}>
+                <option value="1">Activo</option>
+                <option value="2">Comodato</option>
+                <option value="4">Migrado</option>
+            </select>
         </div>
 
         <div class="device-row-col device-row-col-end">
@@ -636,12 +648,14 @@
                 const manual = child.querySelector('[data-device-manual]');
                 const manualHidden = child.querySelector('[data-device-manual-hidden]');
                 const imeis = child.querySelector('[data-device-imeis]');
+                const status = child.querySelector('[data-device-status]');
 
                 if (hidden) hidden.name = `devices[${idx}][dispositivo_iddispositivo]`;
                 if (qty) qty.name = `devices[${idx}][cantidad]`;
                 if (manualHidden) manualHidden.name = `devices[${idx}][manual]`;
                 if (manual) manual.name = `devices[${idx}][manual]`;
                 if (imeis) imeis.name = `devices[${idx}][imeis]`;
+                if (status) status.name = `devices[${idx}][estado]`;
             });
 
             syncEmpty();
@@ -700,6 +714,7 @@
             const qty = row.querySelector('[data-device-qty]');
             const manual = row.querySelector('[data-device-manual]');
             const imeis = row.querySelector('[data-device-imeis]');
+            const status = row.querySelector('[data-device-status]');
 
             const isLocked = (<?php echo ($readOnly ?? false) ? 'true' : 'false'; ?>) && !window.crudFormEditUnlocked;
 
@@ -716,6 +731,10 @@
             if (qty) {
                 qty.value = data.cantidad ?? 1;
                 if (isLocked) qty.disabled = true;
+            }
+            if (status) {
+                status.value = String(data.estado ?? '1');
+                if (isLocked) status.disabled = true;
             }
             if (manual) {
                 manual.checked = data.manual ?? true;

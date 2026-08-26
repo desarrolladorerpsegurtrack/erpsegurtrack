@@ -46,8 +46,6 @@ class ClienteService
         return [
             'Total de Clientes' => $totalClientes,
             'Clientes Activos' => $clientesActivos,
-            'Clientes Inactivos' => max($totalClientes - $clientesActivos, 0),
-            'Total de Rubro' => $rubro,
         ];
     }
 
@@ -115,7 +113,8 @@ class ClienteService
                 'u.distrito',
                 'gc.nombreGrupo as grupoNombre',
                 'ct.numero as telefono',
-                'ct.correo as correo'
+                'ct.correo as correo',
+                'ct.nombreApellido as contacto'
             );
     }
 
@@ -219,6 +218,9 @@ class ClienteService
         $servicios = DB::table('serviciocliente as sc')
             ->leftJoin('vehiculo as v', 'v.placa', '=', 'sc.vehiculo_placa')
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'sc.almacen_idalmacen')
+            ->leftJoin('tipoelemento as te', 'te.idtipoElemento', '=', 'a.tipoElemento_idtipoElemento')
+            ->leftJoin('plataforma as p', 'p.idplataforma', '=', 'te.plataforma_idplataforma')
+            ->leftJoin('moneda as m', 'm.idmoneda', '=', 'sc.moneda_idmoneda')
             ->select([
                 'sc.idservicioCliente',
                 'sc.vehiculo_placa',
@@ -230,6 +232,9 @@ class ClienteService
                 DB::raw('COALESCE(v.marca, "") as vehiculo_marca'),
                 DB::raw('COALESCE(v.modelo, "") as vehiculo_modelo'),
                 DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
+                DB::raw('COALESCE(p.nombrePlataforma, "") as plataforma'),
+                'a.periodo as almacen_periodo',
+                DB::raw('COALESCE(m.simbolo, "") as moneda_simbolo'),
             ])
             ->where('sc.cliente_idcliente', $clienteId)
             ->orderByDesc('sc.idservicioCliente')
@@ -240,32 +245,71 @@ class ClienteService
                 'key' => 'servicio_cliente',
                 'label' => 'Servicio cliente',
                 'columns' => [
-                    ['key' => 'idservicioCliente', 'label' => 'ID'],
-                    ['key' => 'vehiculo_placa', 'label' => 'Vehículo'],
-                    ['key' => 'almacen_detalle', 'label' => 'Almacén'],
-                    ['key' => 'fechaInicio', 'label' => 'Inicio'],
-                    ['key' => 'fecheVencimiento', 'label' => 'Vencimiento'],
-                    ['key' => 'monto', 'label' => 'Monto'],
-                    ['key' => 'estado', 'label' => 'Estado'],
-                    ['key' => 'docReferencia', 'label' => 'Documento'],
+                    ['key' => 'almacen_detalle', 'label' => 'Tipo de servicio'],
+                    ['key' => 'plataforma', 'label' => 'Plataforma'],
+                    ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
                 ],
-                'records' => $servicios->map(fn ($row) => (array) $row)->all(),
+                'records' => $servicios->map(function ($row) {
+                    $periodo = $this->formatPeriodo($row->almacen_periodo ?? null);
+                    $detalle = trim((string) ($row->almacen_detalle ?? ''));
+
+                    $row->almacen_detalle = $periodo !== ''
+                        ? trim($detalle . ' - ' . $periodo)
+                        : $detalle;
+
+                    $monto = $row->monto;
+                    $row->monto = ($monto !== null && $monto !== '')
+                        ? $this->normalizeCurrencySymbol($row->moneda_simbolo ?? null) . ' ' . number_format((float) $monto, 2, '.', '')
+                        : '-';
+
+                    $record = (array) $row;
+                    $record['service_type_key'] = mb_strtolower(trim((string) ($record['almacen_detalle'] ?? '')));
+
+                    return $record;
+                })->groupBy('service_type_key')->map(function ($records) {
+                    $record = $records->first();
+                    $record['vehicle_plates'] = $records
+                        ->pluck('vehiculo_placa')
+                        ->filter(fn ($placa) => trim((string) $placa) !== '')
+                        ->map(fn ($placa) => (string) $placa)
+                        ->unique()
+                        ->values()
+                        ->all();
+
+                    return $record;
+                })->values()->all(),
             ];
         }
 
         $vehiculos = DB::table('vehiculo as v')
             ->leftJoin('tipovehiculo as tv', 'tv.idtipoVehiculo', '=', 'v.tipoUnidad_idtable1')
+            ->leftJoin('dispositivocliente as d', function ($join) {
+                $join->on('d.vehiculo_placa', '=', 'v.placa')
+                    ->whereRaw('d.iddispositivoCliente = (select max(inner_d.iddispositivoCliente) from dispositivocliente as inner_d where inner_d.vehiculo_placa = v.placa)');
+            })
+            ->leftJoin('serviciocliente as sc', function ($join) {
+                $join->on('sc.vehiculo_placa', '=', 'v.placa')
+                    ->whereRaw('sc.idservicioCliente = (select max(inner_sc.idservicioCliente) from serviciocliente as inner_sc where inner_sc.vehiculo_placa = v.placa and inner_sc.cliente_idcliente = v.cliente_idcliente)');
+            })
+            ->leftJoin('moneda as m', 'm.idmoneda', '=', 'sc.moneda_idmoneda')
             ->select([
                 'v.placa',
                 'v.tipoUnidad_idtable1',
                 'v.anio',
                 'v.color',
                 'v.marca',
-                'v.modelo',
                 'v.tracto',
+                'd.iddispositivoCliente',
+                'd.modeloDispositivo',
+                'd.fechaInstalacion',
+                'd.fechaBaja',
+                'd.estado',
                 DB::raw('COALESCE(tv.nombre, "") as tipo_vehiculo'),
-                // número activo más reciente para el vehículo (si existe)
                 DB::raw('(select n.numeroTelefonico_numeroTelefonico from detnumerosdispositivo n join dispositivocliente dc on dc.iddispositivoCliente = n.dispositivoCliente_iddispositivoCliente where dc.vehiculo_placa = v.placa order by n.fechaAsignacion desc, n.iddetNumerosDispositivo desc limit 1) as numero'),
+                DB::raw('(select ds.simCard_idsimCard from detallesimcard as ds where ds.numeroTelefonico_numeroTelefonico = (select n.numeroTelefonico_numeroTelefonico from detnumerosdispositivo as n where n.dispositivoCliente_iddispositivoCliente = d.iddispositivoCliente order by n.fechaAsignacion desc, n.iddetNumerosDispositivo desc limit 1) and ds.estado = "0" order by ds.iddetalleSimCard desc limit 1) as simcard'),
+                DB::raw('(select o.nombre from detallesimcard as ds join simcard as s on s.idsimCard = ds.simCard_idsimCard join operador as o on o.idoperador = s.operador_idoperador where ds.numeroTelefonico_numeroTelefonico = (select n.numeroTelefonico_numeroTelefonico from detnumerosdispositivo as n where n.dispositivoCliente_iddispositivoCliente = d.iddispositivoCliente order by n.fechaAsignacion desc, n.iddetNumerosDispositivo desc limit 1) and ds.estado = "0" order by ds.iddetalleSimCard desc limit 1) as operador'),
+                'sc.monto',
+                'm.simbolo as moneda_simbolo',
             ])
             ->where('v.cliente_idcliente', $clienteId)
             ->orderBy('v.placa')
@@ -277,15 +321,27 @@ class ClienteService
                 'label' => 'Vehículos',
                 'columns' => [
                     ['key' => 'placa', 'label' => 'Placa'],
+                    ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo'],
                     ['key' => 'numero', 'label' => 'Número'],
+                    ['key' => 'simcard', 'label' => 'Simcard'],
+                    ['key' => 'operador', 'label' => 'Operador'],
+                    ['key' => 'monto', 'label' => 'Precio Servicio'],
                     ['key' => 'tipo_vehiculo', 'label' => 'Tipo'],
-                    ['key' => 'anio', 'label' => 'Año'],
-                    ['key' => 'marca', 'label' => 'Marca'],
-                    ['key' => 'modelo', 'label' => 'Modelo'],
-                    ['key' => 'color', 'label' => 'Color'],
+                    ['key' => 'modeloDispositivo', 'label' => 'Modelo'],
                     ['key' => 'tracto', 'label' => 'Tracto'],
+                    ['key' => 'fechaInstalacion', 'label' => 'Fecha inicio'],
+                    ['key' => 'fechaBaja', 'label' => 'Fecha fin'],
+                    ['key' => 'estado', 'label' => 'Estado'],
+                    
                 ],
-                'records' => $vehiculos->map(fn ($row) => (array) $row)->all(),
+                'records' => $vehiculos->map(function ($row) {
+                    $monto = $row->monto;
+                    $row->monto = ($monto !== null && $monto !== '')
+                        ? $this->normalizeCurrencySymbol($row->moneda_simbolo ?? null) . ' ' . number_format((float) $monto, 2, '.', '')
+                        : '-';
+
+                    return (array) $row;
+                })->all(),
             ];
         }
 
@@ -1019,5 +1075,51 @@ class ClienteService
             ['key' => 'fechaBaja', 'label' => 'Fecha Baja Dispositivo'],
             ['key' => 'estadoDispositivo', 'label' => 'Estado Dispositivo'],
         ];
+    }
+
+    private function formatPeriodo(mixed $value): string
+    {
+        $periodo = trim((string) ($value ?? ''));
+        if ($periodo === '' || strcasecmp($periodo, 'no') === 0) {
+            return '';
+        }
+
+        if (!is_numeric($value)) {
+            return $periodo;
+        }
+
+        return match ((int) $value) {
+            30 => 'Mensual',
+            90 => '3 Meses',
+            180 => '6 Meses',
+            365 => '12 Meses',
+            730 => '24 Meses',
+            1095 => '36 Meses',
+            1460 => '48 Meses',
+            default => $periodo,
+        };
+    }
+
+    private function normalizeCurrencySymbol(?string $currency): string
+    {
+        $symbol = trim((string) ($currency ?? ''));
+        if ($symbol === '') {
+            return 'S/';
+        }
+
+        $lower = mb_strtolower($symbol, 'UTF-8');
+        if ($lower === 's/' || $lower === 's' || str_contains($lower, 'sol')) {
+            return 'S/';
+        }
+
+        if (str_contains($lower, 'dolar') || str_contains($lower, 'dólar') || str_contains($lower, '$')) {
+            return '$';
+        }
+
+        if (str_contains($lower, 'euro') || str_contains($lower, '€')) {
+            return '€';
+        }
+
+        return $symbol;
     }
 }

@@ -154,6 +154,14 @@
         .crud-field-wrapper {
             min-width: 0;
         }
+        .crud-readonly-table-scroll {
+            max-height: 15rem;
+            overflow: auto;
+        }
+        .crud-readonly-table-scroll table {
+            min-width: max-content;
+            white-space: nowrap;
+        }
         .role-cards-grid {
             display: grid;
             grid-template-columns: repeat(5, 1fr); 
@@ -2365,8 +2373,11 @@
                                                     </div>
                                                 @endif
                                             </div>
+                                            @if(!empty($field['consultButton']))
+                                                <p data-consult-error-for="{{ $field['name'] }}" class="mt-1 hidden text-sm font-semibold text-danger" role="alert"></p>
+                                            @endif
                                             @if($hasError)
-                                                <p class="mt-1 text-sm font-semibold text-red-600" style="color: #b63434;">
+                                                <p class="mt-1 text-sm font-semibold text-danger" style="color: #b63434;">
                                                     {{ $errorMessage }}
                                                 </p>
                                             @endif
@@ -2545,6 +2556,7 @@
                                                         @endphp
                                                         <option 
                                                             value="{{ $optKey }}" 
+                                                            title="{{ $optLabel }}"
                                                             @if((string) $fieldValue === (string) $optKey) selected @endif
                                                         >
                                                             {{ $optLabel }}
@@ -2589,16 +2601,24 @@
                                                 @if(($field['required'] ?? false)) <span class="text-red-500">*</span> @endif
                                             </label>
                                             @php
+                                                $isScalarSwitch = ($field['scalar'] ?? false) === true;
                                                 $optionKey = collect($field['options'] ?? [])->keys()->first() ?? '1';
-                                                $isChecked = is_array($fieldValue) && in_array((string)$optionKey, array_map('strval', $fieldValue), true);
+                                                $onValue = $field['onValue'] ?? $optionKey;
+                                                $offValue = $field['offValue'] ?? '0';
+                                                $isChecked = $isScalarSwitch
+                                                    ? (string) $fieldValue === (string) $onValue
+                                                    : (is_array($fieldValue) && in_array((string) $optionKey, array_map('strval', $fieldValue), true));
                                             @endphp
                                             <label class="inline-flex items-center gap-3 text-sm text-slate-500">
                                                 <span class="font-medium">{{ $field['switchLabels']['off'] ?? 'NO' }}</span>
                                                 <span class="permission-switch">
+                                                    @if($isScalarSwitch)
+                                                        <input type="hidden" name="{{ $field['name'] }}" value="{{ $offValue }}">
+                                                    @endif
                                                     <input
                                                         type="checkbox"
-                                                        name="{{ $field['name'] }}[]"
-                                                        value="{{ $optionKey }}"
+                                                        name="{{ $isScalarSwitch ? $field['name'] : $field['name'] . '[]' }}"
+                                                        value="{{ $isScalarSwitch ? $onValue : $optionKey }}"
                                                         class="permission-switch-input"
                                                         data-off-label="{{ $field['switchLabels']['off'] ?? 'No' }}"
                                                         data-on-label="{{ $field['switchLabels']['on'] ?? 'Sí' }}"
@@ -3357,14 +3377,14 @@
                             <div class="mt-8 mb-6">
                                 <label class="block text-sm font-semibold text-slate-700 mb-2">Clientes en este grupo</label>
                                 <div class="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
-                                    <div class="overflow-x-auto">
+                                    <div class="crud-readonly-table-scroll">
                                         <table class="w-full text-left text-sm text-slate-700">
                                             <thead class="bg-slate-50 text-slate-500">
                                                 <tr>
                                                     <th class="px-3 py-3 font-semibold">RUC/DNI</th>
                                                     <th class="px-3 py-3 font-semibold">Cliente</th>
-                                                    <th class="px-3 py-3 font-semibold">Razón social</th>
-                                                    <th class="px-3 py-3 font-semibold">Rubro</th>
+                                                    <th class="px-3 py-3 font-semibold">Numero Telefonico</th>
+                                                    <th class="px-3 py-3 font-semibold">Correo Electrónico</th>
                                                     <th class="px-3 py-3 font-semibold">Dirección</th>
                                                     <th class="px-3 py-3 font-semibold">Estado</th>
                                                 </tr>
@@ -3377,12 +3397,10 @@
                                                                 {{ $cliente->idcliente ?? 'Sin RUC/DNI' }}
                                                             </a>
                                                         </td>
-                                                        <td class="px-3 py-3">
-                                                            {{ $cliente->nombreComercial ?: 'Sin nombre comercial' }}
-                                                        </td>
-                                                        <td class="px-3 py-3 text-slate-600">{{ $cliente->razonSocial ?? 'Sin razón social' }}</td>
-                                                        <td class="px-3 py-3 text-slate-600">{{ $cliente->rubro ?? 'Sin rubro' }}</td>
-                                                        <td class="px-3 py-3 text-slate-600">{{ $cliente->direccion_completa ?: 'Sin dirección' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $cliente->razonSocial ?? '-' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $cliente->telefono ?? '-' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $cliente->email ?? '-' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $cliente->direccion_completa ?: '-' }}</td>
                                                         <td class="px-3 py-3">
                                                             @if($cliente->estadoCliente_idestadoCliente == 1)
                                                                 <div class="flex items-start justify-start gap-2 text-danger">
@@ -3405,32 +3423,32 @@
                             </div>
                         @endif
 
-                        <!-- Números de dispositivo relacionados (solo lectura) -->
-                        @if(isset($detnumerosdispositivo) && $detnumerosdispositivo->isNotEmpty())
+                        <!-- Historial del dispositivo cliente (solo lectura) -->
+                        @if(isset($historialDispositivoCliente) && $historialDispositivoCliente->isNotEmpty())
                             <div class="mt-8 mb-6">
-                                <label class="block text-sm font-semibold text-slate-700 mb-2">Números de dispositivo</label>
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">Historial de Dispositivo</label>
                                 <div class="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
-                                    <div class="overflow-x-auto">
+                                    <div style="overflow-x: auto; max-height: 200px;">
                                         <table class="w-full text-left text-sm text-slate-700">
-                                            <thead class="bg-slate-50 text-slate-500">
+                                            <thead class="bg-slate-50 text-slate-500" style="position: sticky; top: 0; z-index: 1;">
                                                 <tr>
-                                                    <th class="px-3 py-3 font-semibold">ID</th>
                                                     <th class="px-3 py-3 font-semibold">ID Dispositivo</th>
                                                     <th class="px-3 py-3 font-semibold">Vehículo</th>
                                                     <th class="px-3 py-3 font-semibold">Cliente</th>
                                                     <th class="px-3 py-3 font-semibold">Número</th>
-                                                    <th class="px-3 py-3 font-semibold">Fecha asignación</th>
+                                                    <th class="px-3 py-3 font-semibold">Fecha inicio</th>
+                                                    <th class="px-3 py-3 font-semibold">Fecha fin</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                @foreach($detnumerosdispositivo as $numero)
+                                                @foreach($historialDispositivoCliente as $historial)
                                                     <tr class="border-t border-slate-200 hover:bg-slate-50">
-                                                        <td class="px-3 py-3 font-semibold text-slate-900">{{ $numero->iddetNumerosDispositivo ?? '-' }}</td>
-                                                        <td class="px-3 py-3 text-slate-600">{{ $numero->dispositivoCliente_iddispositivoCliente ?? '-' }}</td>
-                                                        <td class="px-3 py-3 text-slate-600">{{ $numero->vehiculo_placa ?? 'Sin placa' }}</td>
-                                                        <td class="px-3 py-3 text-slate-600">{{ $numero->nombre_cliente ?? 'Sin cliente' }}</td>
-                                                        <td class="px-3 py-3 text-slate-600">{{ $numero->numeroTelefonico_numeroTelefonico ?? 'N/A' }}</td>
-                                                        <td class="px-3 py-3 text-slate-600">{{ $numero->fechaAsignacion ? \Carbon\Carbon::parse($numero->fechaAsignacion)->format('d M. Y') : 'N/A' }}</td>
+                                                        <td class="px-3 py-3 font-semibold text-slate-900">{{ $historial->dispositivoCliente_iddispositivoCliente ?? '-' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $historial->vehiculo ?? 'Sin placa' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $historial->cliente ?? 'Sin cliente' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $historial->numerotelefono ?? 'N/A' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $historial->fechainicio ? \Carbon\Carbon::parse($historial->fechainicio)->locale('es')->translatedFormat('d M. Y') : 'N/A' }}</td>
+                                                        <td class="px-3 py-3 text-slate-600">{{ $historial->fechafin ? \Carbon\Carbon::parse($historial->fechafin)->locale('es')->translatedFormat('d M. Y') : 'N/A' }}</td>
                                                     </tr>
                                                 @endforeach
                                             </tbody>
@@ -3443,30 +3461,21 @@
                         <!-- Listado de dispositivos cliente vinculados al vehículo (solo lectura) -->
                         @php
                             $maxFechaAsignacionTimestamp = null;
-                            if(isset($detnumerosdispositivo) && $detnumerosdispositivo->isNotEmpty()) {
-                                $timestamps = $detnumerosdispositivo
-                                    ->filter(fn($n) => !empty($n->fechaAsignacion))
-                                    ->map(fn($n) => strtotime($n->fechaAsignacion))
-                                    ->filter()
-                                    ->all();
-                                if(!empty($timestamps)) {
-                                    $maxFechaAsignacionTimestamp = max($timestamps);
-                                }
-                            }
                         @endphp
                         @if(isset($dispositivos) && count($dispositivos) > 0)
                             <div class="mt-8 mb-6">
                                 <label class="block text-sm font-semibold text-slate-700 mb-2">Dispositivos cliente vinculados</label>
                                 <div class="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
-                                    <div class="overflow-x-auto">
+                                    <div class="crud-readonly-table-scroll">
                                         <table class="w-full text-left text-sm text-slate-700">
                                             <thead class="bg-slate-50 text-slate-500">
                                                 <tr>
                                                     <th class="px-3 py-3 font-semibold">ID Dispositivo</th>
+                                                    <th class="px-3 py-3 font-semibold">Número</th>
                                                     <th class="px-3 py-3 font-semibold">Marca</th>
                                                     <th class="px-3 py-3 font-semibold">Modelo</th>
-                                                    <th class="px-3 py-3 font-semibold">Fecha de instalación</th>
-                                                    <th class="px-3 py-3 font-semibold">Fecha de baja</th>
+                                                    <th class="px-3 py-3 font-semibold">Fecha Inicio</th>
+                                                    <th class="px-3 py-3 font-semibold">Fecha Fin</th>
                                                     <th class="px-3 py-3 font-semibold">Estado</th>
                                                 </tr>
                                             </thead>
@@ -3491,13 +3500,14 @@
                                                                 {{ $dispositivo->iddispositivoCliente }}
                                                             </a>
                                                         </td>
-                                                        <td class="px-3 py-3 {{ $isVigente ? 'text-red-600' : 'text-slate-600' }}">{{ $dispositivo->marcaDispositivo ?? 'N/A' }}</td>
-                                                        <td class="px-3 py-3 {{ $isVigente ? 'text-red-600' : 'text-slate-600' }}">{{ $dispositivo->modeloDispositivo ?? 'N/A' }}</td>
-                                                        <td class="px-3 py-3 {{ $isVigente ? 'text-red-600' : 'text-slate-600' }}">{{ $dispositivo->fechaInstalacion ? \Carbon\Carbon::parse($dispositivo->fechaInstalacion)->format('d M. Y, H:i') : 'N/A' }}</td>
-                                                        <td class="px-3 py-3 {{ $isVigente ? 'text-red-600' : 'text-slate-600' }}">{{ $dispositivo->fechaBaja ?? 'N/A' }}</td>
+                                                        <td class="px-3 py-3">{{ $dispositivo->numeroTelefonico_numeroTelefonico ?? '-' }}</td>
+                                                        <td class="px-3 py-3">{{ $dispositivo->marcaDispositivo ?? '-' }}</td>
+                                                        <td class="px-3 py-3">{{ $dispositivo->modeloDispositivo ?? '-' }}</td>
+                                                        <td class="px-3 py-3">{{ $dispositivo->fechaInstalacion ? \Carbon\Carbon::parse($dispositivo->fechaInstalacion)->format('d M. Y') : '-' }}</td>
+                                                        <td class="px-3 py-3">{{ $dispositivo->fechaBaja ? \Carbon\Carbon::parse($dispositivo->fechaBaja)->format('d M. Y') : '-' }}</td>
                                                         <td class="px-3 py-3">
                                                             @if($dispositivo->estado == 1)
-                                                                <div class="flex items-start justify-start gap-2 {{ $isVigente ? 'text-red-600' : 'text-black' }}">
+                                                                <div class="flex items-start justify-start gap-2 text-danger">
                                                                     <i data-tw-merge data-lucide="database" class="stroke-[1] w-5 h-5"></i>
                                                                     <span class="font-medium">Activo</span>
                                                                 </div>
@@ -4678,8 +4688,8 @@
                                 <select id="quick-contacto-tipo" required aria-hidden="true" tabindex="-1" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;"></select>
                             </div>
                             <div class="mb-4">
-                                <label class="mb-4 block text-sm font-medium text-slate-700">Nombre y apellido * <span class="text-xs font-normal text-slate-500">mínimo 5 caracteres</span></label>
-                                <input type="text" id="quick-contacto-nombre" maxlength="100" minlength="5" pattern="^[A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s\.,\-&]{5,100}$" title="Nombre y apellido debe tener al menos 5 caracteres." required class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 ease-in-out focus:border-red-600 focus:ring-2 focus:ring-red-500/20">
+                                <label class="mb-4 block text-sm font-medium text-slate-700">Nombre y apellido * <span class="text-xs font-normal text-slate-500">mínimo 2 caracteres</span></label>
+                                <input type="text" id="quick-contacto-nombre" maxlength="100" minlength="2" pattern="^[A-Za-z0-9ÁÉÍÓÚáéíóúÑñ\s\.,\-&]{2,100}$" title="Nombre y apellido debe tener al menos 2 caracteres." required class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 ease-in-out focus:border-red-600 focus:ring-2 focus:ring-red-500/20">
                             </div>
                             <div class="mb-4">
                                 <label class="mb-4 block text-sm font-medium text-slate-700">Cargo <span class="text-xs font-normal text-slate-500">mínimo 2 caracteres</span></label>
@@ -7345,13 +7355,19 @@
                         return;
                     }
 
-                    const fieldInput = document.querySelector(`input[name="${fieldName}"]`);
+                    const fieldInput = document.querySelector(`[name="${fieldName}"]`);
+                    const consultError = document.querySelector(`[data-consult-error-for="${fieldName}"]`);
                     if (!fieldInput) {
                         return;
                     }
 
                     button.addEventListener('click', async () => {
                         const placa = String(fieldInput.value || '').trim();
+
+                        if (consultError) {
+                            consultError.textContent = '';
+                            consultError.classList.add('hidden');
+                        }
 
                         const consultText = button.querySelector('.consult-text');
                         const consultSpinner = button.querySelector('.consult-spinner');
@@ -7372,6 +7388,10 @@
                             const data = await response.json();
 
                             if (response.ok && data?.status === 'success' && data?.data) {
+                                if (consultError) {
+                                    consultError.textContent = '';
+                                    consultError.classList.add('hidden');
+                                }
                                 const result = data.data;
                                 targetFields.forEach((targetName) => {
                                     const targetInput = document.querySelector(`[name="${targetName}"]`);
@@ -7380,6 +7400,10 @@
                                     }
 
                                     const newValue = result[targetName] ?? result[targetName.toLowerCase()] ?? '';
+                                    const tomSelect = targetInput.tomselect || targetInput.tomSelect || targetInput._tomselect;
+                                    if (tomSelect && typeof tomSelect.setValue === 'function') {
+                                        tomSelect.setValue(String(newValue));
+                                    }
                                     targetInput.value = newValue;
                                     targetInput.dispatchEvent(new Event('input', { bubbles: true }));
                                     targetInput.dispatchEvent(new Event('change', { bubbles: true }));
@@ -7387,9 +7411,17 @@
                             } else {
                                 const message = data?.message || 'No se pudo obtener información de la placa.';
                                 console.error(message);
+                                if (consultError) {
+                                    consultError.textContent = message;
+                                    consultError.classList.remove('hidden');
+                                }
                             }
                         } catch (error) {
                             console.error('Error al consultar placa:', error);
+                            if (consultError) {
+                                consultError.textContent = 'No se pudo obtener información de la placa.';
+                                consultError.classList.remove('hidden');
+                            }
                         } finally {
                             button.disabled = false;
                             if (consultText) {

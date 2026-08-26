@@ -97,8 +97,20 @@ class CotizacionController extends Controller
             $row->canAnular = ($estado === CotizacionService::STATE_GENERADO);
             $row->anularRoute = $row->canAnular ? route('modules.ventas.cotizaciones.anular', ['id' => $row->nroCotizacion]) : null;
             $row->download_link = '<a href="' . route('modules.ventas.cotizaciones.pdf', ['id' => $row->nroCotizacion]) . '" data-download-cotizacion="' . e($row->nroCotizacion) . '" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item text-slate-600 w-full text-left" title="Descargar PDF"><i data-lucide="download" class="mr-1 h-4 w-4 stroke-[1.3]"></i>Descargar</a>';
-            $row->copyRoute = route('modules.ventas.cotizaciones.create', ['copy_from' => $row->nroCotizacion]);
             $batchId = $row->batch_id ?? null;
+            $previewUrl = $batchId !== null
+                ? route('modules.ventas.cotizaciones.pdf-grupo', [
+                    'batch_id' => $batchId,
+                    'include_image' => '1',
+                    'preview' => '1',
+                ])
+                : route('modules.ventas.cotizaciones.pdf', [
+                    'id' => $row->nroCotizacion,
+                    'include_image' => '1',
+                    'preview' => '1',
+                ]);
+            $row->nroCotizacion_preview = '<button type="button" class="font-medium text-slate-700 hover:text-primary hover:underline whitespace-nowrap" data-cotizacion-pdf-preview="' . e($previewUrl) . '" data-cotizacion-number="' . e($row->nroCotizacion) . '" title="Ver PDF">' . e($row->nroCotizacion) . '</button>';
+            $row->copyRoute = route('modules.ventas.cotizaciones.create', ['copy_from' => $row->nroCotizacion]);
             $groupText = $this->formatCotizacionGroupLabel($batchId);
             if ($batchId) {
                 $groupDownloadUrl = route('modules.ventas.cotizaciones.pdf-grupo', ['batch_id' => $batchId]);
@@ -128,7 +140,7 @@ class CotizacionController extends Controller
             'lockResource' => self::LOCK_RESOURCE,
             'showActionsColumn' => true,
             'columns' => [
-                ['key' => 'nroCotizacion', 'label' => 'Nro. Cotización', 'type' => 'text'],
+                ['key' => 'nroCotizacion_preview', 'label' => 'N° Cotiz ', 'type' => 'custom'],
                 ['key' => 'cliente_label', 'label' => 'Cliente', 'type' => 'text', 'wrap' => true],
                 ['key' => 'vigencia_detalle', 'label' => 'Vigencia Oferta', 'type' => 'text'],
                 ['key' => 'formaPago_label', 'label' => 'Formato de pago', 'type' => 'text'],
@@ -198,6 +210,7 @@ class CotizacionController extends Controller
                 'pdf' => route('modules.ventas.cotizaciones.export', ['format' => 'pdf']),
                 'xlsx' => route('modules.ventas.cotizaciones.export', ['format' => 'xlsx']),
             ],
+            'tableWrapperClass' => 'cotizacion-table',
         ]);
     }
 
@@ -516,6 +529,7 @@ class CotizacionController extends Controller
                 'c.*',
                 'td.detalle as tipoDocumento_nombre',
                 DB::raw("COALESCE(cli.razonSocial, cli.nombreComercial, c.cliente_idcliente, 'Cliente sin nombre') as cliente_label"),
+                DB::raw("(select ct.nombreApellido from contacto as ct where ct.cliente_idcliente = c.cliente_idcliente order by ct.default desc, ct.idcontacto desc limit 1) as nombreApellido"),
                 'v.detalle as vigencia_detalle',
                 'fp.detalle as formaPago_detalle',
                 'fp.tiempo as formaPago_tiempo',
@@ -564,13 +578,13 @@ class CotizacionController extends Controller
                 return $item;
             });
 
-        $importe = (float) ($quote->subtotal ?? 0);
         $descuentoPercent = (float) ($quote->descuento ?? 0);
-        $descuentoAmount = round($importe * $descuentoPercent / 100, 2);
-        $subtotalAfterDiscount = round($importe - $descuentoAmount, 2);
         // Usar el total guardado en la BD, no recalcular
         $totalGeneral = (float) ($quote->total ?? 0);
-        $igvAmount = round($totalGeneral - $subtotalAfterDiscount, 2);
+        $igvAmount = $items->sum(fn ($item) => round((float) ($item->total ?? 0) * 0.18, 2));
+        $importe = round($totalGeneral - $igvAmount, 2);
+        $descuentoAmount = round((float) ($quote->subtotal ?? 0) * $descuentoPercent / 100, 2);
+        $subtotalAfterDiscount = round((float) ($quote->subtotal ?? 0) - $descuentoAmount, 2);
 
         $sectionTitle = 'EQUIPAMIENTO';
         foreach ($items as $item) {
@@ -630,6 +644,7 @@ class CotizacionController extends Controller
                 'c.*',
                 'td.detalle as tipoDocumento_nombre',
                 DB::raw("COALESCE(cli.razonSocial, cli.nombreComercial, c.cliente_idcliente, 'Cliente sin nombre') as cliente_label"),
+                DB::raw("(select ct.nombreApellido from contacto as ct where ct.cliente_idcliente = c.cliente_idcliente order by ct.default desc, ct.idcontacto desc limit 1) as nombreApellido"),
                 'v.detalle as vigencia_detalle',
                 'fp.detalle as formaPago_detalle',
                 'fp.tiempo as formaPago_tiempo',
@@ -684,12 +699,12 @@ class CotizacionController extends Controller
                     return $item;
                 });
 
-            $importe = (float) ($quote->subtotal ?? 0);
             $descuentoPercent = (float) ($quote->descuento ?? 0);
-            $descuentoAmount = round($importe * $descuentoPercent / 100, 2);
-            $subtotalAfterDiscount = round($importe - $descuentoAmount, 2);
             $totalGeneral = $items->sum(fn ($item) => (float) ($item->total ?? 0));
             $igvAmount = $items->sum(fn ($item) => round((float) ($item->total ?? 0) * 0.18, 2));
+            $importe = round($totalGeneral - $igvAmount, 2);
+            $descuentoAmount = round((float) ($quote->subtotal ?? 0) * $descuentoPercent / 100, 2);
+            $subtotalAfterDiscount = round((float) ($quote->subtotal ?? 0) - $descuentoAmount, 2);
 
             $sectionTitle = 'EQUIPAMIENTO';
             foreach ($items as $item) {
@@ -735,7 +750,11 @@ class CotizacionController extends Controller
         $y = $canvas->get_height() - $marginBottom;
         $canvas->page_text($x, $y, $pageText, $font, $fontSize, [0, 0, 0]);
 
-        return $pdf->download($this->buildQuotePdfFileName($quotes->first(), $batch_id));
+        $filename = $this->buildQuotePdfFileName($quotes->first(), $batch_id);
+
+        return $request->boolean('preview')
+            ? $pdf->stream($filename)
+            : $pdf->download($filename);
     }
 
     public function previewPdf(Request $request)
@@ -744,6 +763,9 @@ class CotizacionController extends Controller
         $direccion = $request->input('direccion');
         $telefono = $request->input('telefono');
         $correo = $request->input('correo');
+        $vigenciaId = $request->input('vigenciaOferta_idvigenciaOferta');
+        $vigenciaGlobalId = $vigenciaId;
+        $contactoSeleccionado = $request->input('contactoSeleccionado');
         $tipoDocCliente = $request->input('tipoDocumentoIDCliente');
         $personalDni = $request->input('personal_dniPersonal');
         $fechaHoraEmision = $request->input('fechaHoraEmision') ?: now()->format('Y-m-d H:i:s');
@@ -751,6 +773,17 @@ class CotizacionController extends Controller
 
         $cliente = DB::table('cliente')->where('idcliente', $clienteId)->first();
         $clienteLabel = $cliente ? ($cliente->razonSocial ?: ($cliente->nombreComercial ?: $clienteId)) : 'Cliente sin nombre';
+
+        $contactoQuery = DB::table('contacto')
+            ->where('cliente_idcliente', $clienteId);
+        if (is_numeric($contactoSeleccionado)) {
+            $contactoQuery->where('idcontacto', (int) $contactoSeleccionado);
+        } else {
+            $contactoQuery
+                ->orderByDesc('default')
+                ->orderByDesc('idcontacto');
+        }
+        $nombreContacto = $contactoQuery->value('nombreApellido');
 
         $personal = DB::table('personal')->where('dniPersonal', $personalDni)->first();
         $personalNombre = $personal ? $personal->nombre : '';
@@ -802,6 +835,9 @@ class CotizacionController extends Controller
         }
 
         $vigenciaIds = [];
+        if ($vigenciaGlobalId !== null && $vigenciaGlobalId !== '') {
+            $vigenciaIds[] = $vigenciaGlobalId;
+        }
         $formaPagoIds = [];
         $monedaIds = [];
         $almacenIds = [];
@@ -831,7 +867,8 @@ class CotizacionController extends Controller
 
         foreach ($cotizaciones as $tipo => $datos) {
             $tipoNombre = $datos['tipo_nombre'] ?? $tipo;
-            $vigenciaId = $datos['vigenciaOferta_idvigenciaOferta'] ?? null;
+            // La previsualización usa los valores por grupo; conservar el valor global como respaldo.
+            $vigenciaId = $datos['vigenciaOferta_idvigenciaOferta'] ?? $vigenciaGlobalId;
             $formaPagoId = $datos['formaPago_idformaPago'] ?? null;
             $monedaId = $datos['moneda_idmoneda'] ?? null;
 
@@ -865,6 +902,7 @@ class CotizacionController extends Controller
             $quote->direccion = $direccion;
             $quote->telefono = $telefono;
             $quote->correo = $correo;
+            $quote->nombreApellido = $nombreContacto;
             $quote->tipoDocumentoIDCliente = $tipoDocCliente;
             $quote->personal_nombre = $personalNombre;
             $quote->personal_apellido = $personalApellido;
@@ -927,7 +965,7 @@ class CotizacionController extends Controller
                 'quote' => $quote,
                 'items' => $items,
                 'section_title' => $sectionTitle,
-                'importe_label' => $this->formatMoney($quote->subtotal, $monedaSimbolo),
+                'importe_label' => $this->formatMoney(round((float) ($quote->total ?? 0) - $items->sum(fn ($item) => round((float) ($item->total ?? 0) * 0.18, 2)), 2), $monedaSimbolo),
                 'descuento_amount_label' => $this->formatMoney(round($quote->subtotal * $quote->descuento / 100, 2), $monedaSimbolo),
                 'subtotal_after_discount_label' => $this->formatMoney(round($quote->subtotal * (1 - $quote->descuento / 100), 2), $monedaSimbolo),
                 'igv_amount_label' => $this->formatMoney($items->sum(fn ($item) => round((float) ($item->total ?? 0) * 0.18, 2)), $monedaSimbolo),

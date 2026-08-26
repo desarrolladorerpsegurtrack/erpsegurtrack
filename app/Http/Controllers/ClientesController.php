@@ -45,7 +45,8 @@ class ClientesController extends Controller
                 ['key' => 'idcliente', 'label' => 'RUC/DNI', 'type' => 'text'],
                 ['key' => 'razonSocial', 'label' => 'Razón Social', 'type' => 'text', 'wrap' => true],
                 ['key' => 'grupo_asignado', 'label' => 'Grupo Asignado', 'type' => 'text'],
-                ['key' => 'telefono', 'label' => 'Número Telefónico', 'type' => 'text'],
+                ['key' => 'contacto', 'label' => 'Contacto', 'type' => 'text'],
+                ['key' => 'telefono', 'label' => 'Telefónico', 'type' => 'text'],
                 ['key' => 'correo', 'label' => 'Correo Electrónico', 'type' => 'text'],
                 ['key' => 'estadoDetalle', 'label' => 'Estado', 'type' => 'status'],
             ],
@@ -412,7 +413,7 @@ class ClientesController extends Controller
             'nombreComercial' => ['nullable', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
             'fechaIngreso' => ['nullable', 'date'],
             'fechaBaja' => ['nullable', 'date', 'after_or_equal:fechaIngreso'],
-            'rubro' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'rubro' => ['nullable', 'string', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
             'estadoCliente_idestadoCliente' => ['required', 'integer', 'exists:estadocliente,idestadoCliente'],
             'direccionCliente_iddireccionCliente' => ['required', 'string', 'max:60', 'regex:/^(tmp-\d+|\d+)$/'],
             'grupoCliente_idgrupoCliente' => ['nullable', 'integer', 'exists:grupocliente,idgrupoCliente'],
@@ -427,7 +428,7 @@ class ClientesController extends Controller
         ], [
             'idcliente.unique' => 'El cliente ya está registrado.',
             'idcliente.digits' => 'El cliente debe tener 8 dígitos si es persona natural o 11 si es empresa.',
-            'rubro.max' => 'El rubro no debe tener más de 50 caracteres.',
+            'rubro.max' => 'El rubro no debe tener más de 200 caracteres.',
             'direccionCliente_iddireccionCliente' => 'La dirección seleccionada no es válida.',
             'direc'
         ]);
@@ -929,7 +930,7 @@ class ClientesController extends Controller
             'nombreComercial' => ['nullable', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
             'fechaIngreso' => ['nullable', 'date'],
             'fechaBaja' => ['nullable', 'date', 'after_or_equal:fechaIngreso'],
-            'rubro' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'rubro' => ['nullable', 'string', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
             'estadoCliente_idestadoCliente' => ['required', 'integer', 'exists:estadocliente,idestadoCliente'],
             'direccionCliente_iddireccionCliente' => ['required', 'string', 'max:60', 'regex:/^(tmp-\d+|\d+)$/'],
             'grupoCliente_idgrupoCliente' => ['nullable', 'integer', 'exists:grupocliente,idgrupoCliente'],
@@ -944,7 +945,7 @@ class ClientesController extends Controller
         ], [
             'idcliente.unique' => 'El cliente ya está registrado.',
             'idcliente.digits' => 'El cliente debe tener 8 dígitos si es persona natural o 11 si es empresa.',
-            'rubro.max' => 'El rubro no debe tener más de 50 caracteres.',
+            'rubro.max' => 'El rubro no debe tener más de 200 caracteres.',
         ]);
 
         if (!$request->filled('contactoSeleccionado')) {

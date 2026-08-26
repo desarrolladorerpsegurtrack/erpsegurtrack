@@ -82,11 +82,12 @@
                                 if (is_object($items) && method_exists($items, 'items')) {
                                     $itemRows = $items->items();
                                 }
-                                $canShowActionHeader = collect($itemRows)->contains(function ($row) use ($hasDownloadColumn, $canApproveAction, $canAnularAction) {
+                                $canShowActionHeader = collect($itemRows)->contains(function ($row) use ($hasDownloadColumn, $canApproveAction, $canAnularAction, $canView) {
                                     return ($canApproveAction && isset($row->canApprove) && $row->canApprove && !empty($row->approveRoute))
                                         || ($canAnularAction && isset($row->canAnular) && $row->canAnular && !empty($row->anularRoute))
                                         || (!empty($row->copyRoute))
-                                        || (!$hasDownloadColumn && !empty($row->download_link));
+                                    || (!$hasDownloadColumn && !empty($row->download_link))
+                                    || ($canView && (collect(data_get($row, 'history', []))->isNotEmpty() || collect(data_get($row, 'relation_groups', []))->isNotEmpty()));
                                 });
                             }
                             $createButtonLabel = $createButtonLabel ?? null;
@@ -223,11 +224,16 @@
                                 </ul>
                             </div>
                         @endif
+                        @php
+                            $resultCount = $items instanceof \Illuminate\Contracts\Pagination\LengthAwarePaginator
+                                ? $items->total()
+                                : collect($items ?? [])->count();
+                            $resultsLabel = $resultsLabel ?? trim((string) preg_replace('/^Módulo\s+/u', '', $title ?? 'Registros'));
+                        @endphp
                         <!-- ESTADÍSTICAS -->
-                        @if($stats)
                            <div class="box box--stacked flex flex-col p-5 {{ $statsWrapperClass ?? '' }}">
                                 <div class="grid grid-cols-4 gap-5">
-                                    @foreach($stats as $key => $stat)
+                                    @foreach($stats ?? [] as $key => $stat)
                                         @php
                                             $label = is_array($stat) && array_key_exists('label', $stat) ? $stat['label'] : (is_string($key) ? $key : '');
                                             $value = is_array($stat) && array_key_exists('value', $stat) ? $stat['value'] : $stat;
@@ -239,9 +245,12 @@
                                             <div class="mt-1.5 text-2xl font-medium">{{ $value }}</div>
                                         </div>
                                     @endforeach
+                                    <div class="box col-span-4 rounded-[0.6rem] border border-dashed border-slate-300/80 bg-white p-5 shadow-sm md:col-span-2 xl:col-span-1">
+                                        <div class="text-base text-slate-500">{{ $resultsLabel }} encontrados</div>
+                                        <div class="mt-1.5 text-2xl font-medium" data-list-result-stat>{{ number_format($resultCount, 0, ',', '.') }}</div>
+                                    </div>
                                 </div>
                             </div>
-                        @endif
 
                         <!-- TABLA -->
                         <div id="list-table-wrapper" class="box box--stacked flex w-full flex-col {{ $tableWrapperClass ?? '' }}">
@@ -254,10 +263,12 @@
                                         return $name !== '' && request()->has($name) && request($name) !== '';
                                     })
                                     ->count();
+                                $hasListSearchOrFilter = trim((string) request('q', '')) !== '' || $activeFilters > 0;
                             @endphp
                             <div class="flex flex-col gap-y-2 p-5 sm:flex-row sm:items-center">
                                 <form id="list-filter-form" method="GET" action="{{ url()->current() }}" class="flex w-full flex-col gap-y-2 sm:flex-row sm:items-center">
-                                    <div>
+                                    <div data-list-search-summary class="flex flex-col gap-y-2 sm:flex-row sm:items-center">
+                                        <div>
                                         <div class="relative">
                                             <i data-tw-merge="" data-lucide="search" class="absolute inset-y-0 left-0 z-10 my-auto ml-3 h-4 w-4 stroke-[1.3] text-slate-500"></i>
                                             <input data-tw-merge="" type="text" name="q" autocomplete="off" value="{{ request('q') }}" placeholder="Buscar..." class="disabled:bg-slate-100 disabled:cursor-not-allowed dark:disabled:bg-darkmode-800/50 dark:disabled:border-transparent [&[readonly]]:bg-slate-100 [&[readonly]]:cursor-not-allowed [&[readonly]]:dark:bg-darkmode-800/50 [&[readonly]]:dark:border-transparent transition duration-200 ease-in-out w-full pr-10 text-sm border-slate-200 shadow-sm placeholder:text-slate-400/90 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 dark:placeholder:text-slate-500/80 [&[type='file']]:border file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:border-r-[1px] file:border-slate-100/10 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-500/70 hover:file:bg-200 group-[.form-inline]:flex-1 group-[.input-group]:rounded-none group-[.input-group]:[&:not(:first-child)]:border-l-transparent group-[.input-group]:first:rounded-l group-[.input-group]:last:rounded-r group-[.input-group]:z-10 rounded-[0.5rem] pl-9 sm:w-64">
@@ -265,12 +276,13 @@
                                                 <i data-tw-merge="" data-lucide="x" class="h-4 w-4 stroke-[1.3]"></i>
                                             </button>
                                         </div>
+                                        </div>
                                     </div>
                                     @php $exportMode = $exportMode ?? 'dropdown'; @endphp
                                     <div class="flex flex-col gap-x-3 gap-y-2 sm:ml-auto sm:flex-row">
                                         @if(!empty($exportRoutes) && $canExport)
                                             @if($exportMode === 'buttons')
-                                                <a href="{{ $exportRoutes['xlsx'] ?? '#' }}" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 [&:hover:not(:disabled)]:dark:bg-darkmode-100/10 w-full sm:w-auto">
+                                                <a href="{{ $exportRoutes['xlsx'] ?? '#' }}" data-export-link="true" data-export-base="{{ $exportRoutes['xlsx'] ?? '#' }}" data-export-format="xlsx" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 [&:hover:not(:disabled)]:dark:bg-darkmode-100/10 w-full sm:w-auto">
                                                     <i data-tw-merge="" data-lucide="file-bar-chart" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
                                                     XLSX
                                                 </a>
@@ -301,11 +313,9 @@
                                                 <button type="button" data-tw-merge="" data-local-dropdown-toggle="true" aria-expanded="false" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 [&:hover:not(:disabled)]:dark:bg-darkmode-100/10 w-full sm:w-auto">
                                                     <i data-tw-merge="" data-lucide="arrow-down-wide-narrow" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
                                                     Filtro
-                                                    @if($activeFilters)
-                                                        <span class="ml-2 flex h-5 items-center justify-center rounded-full border bg-slate-100 px-1.5 text-xs font-medium">
-                                                            {{ $activeFilters }}
-                                                        </span>
-                                                    @endif
+                                                    <span data-list-filter-count class="ml-2 {{ $activeFilters ? 'flex' : 'hidden' }} h-5 items-center justify-center rounded-full border bg-slate-100 px-1.5 text-xs font-medium">
+                                                        {{ $activeFilters }}
+                                                    </span>
                                                 </button>
                                                 <div class="dropdown-menu absolute right-0 top-full z-[9999] mt-2 origin-top-right invisible opacity-0 pointer-events-none hidden">
                                                     <div data-tw-merge="" class="dropdown-content rounded-xl border border-slate-200/80 bg-white p-4 shadow-xl shadow-slate-200/70 dark:border-transparent dark:bg-darkmode-600">
@@ -323,6 +333,7 @@
                                                                     <input
                                                                         type="text"
                                                                         name="{{ $filterName }}"
+                                                                            data-list-filter-field="true"
                                                                         value="{{ request($filterName) }}"
                                                                         placeholder="{{ $filterPlaceholder }}"
                                                                         class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20"
@@ -335,7 +346,7 @@
                                                                         class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20"
                                                                     >
                                                                 @else
-                                                                    <select name="{{ $filterName }}" class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20">
+                                                                    <select name="{{ $filterName }}" data-list-filter-field="true" class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20">
                                                                         <option value="">{{ $filterPlaceholder }}</option>
                                                                         @foreach($filterOptions as $option)
                                                                             <option value="{{ $option['value'] }}" @selected((string) request($filterName) === (string) $option['value'])>
@@ -544,6 +555,7 @@
                                                                     $value = data_get($row, $column['key']);
                                                                     $isActive = false;
                                                                     $label = '';
+                                                                    $statusTone = 'inactive';
                                                                     // Permitir valores tipo texto o numérico
                                                                     if (is_numeric($value)) {
                                                                         $isActive = (string)($value ?? '1') === '1';
@@ -552,10 +564,24 @@
                                                                         $label = trim((string)($value ?? ''));
                                                                         $isActive = stripos($label, 'activo') !== false && stripos($label, 'inactivo') === false;
                                                                     }
+
+                                                                    if (stripos($label, 'comodato') !== false) {
+                                                                        $statusTone = 'orange';
+                                                                    } elseif (stripos($label, 'migrado') !== false) {
+                                                                        $statusTone = 'green';
+                                                                    } elseif ($isActive || stripos($label, 'venta') !== false) {
+                                                                        $statusTone = 'red';
+                                                                    }
+                                                                    $statusColorClass = match ($statusTone) {
+                                                                        'orange' => 'text-orange-500',
+                                                                        'green' => 'text-green-600',
+                                                                        'red' => 'text-danger',
+                                                                        default => 'text-slate-400',
+                                                                    };
                                                                 @endphp
                                                                 <div class="flex items-center justify-center">
-                                                                    <i data-tw-merge="" data-lucide="database" class="h-3.5 w-3.5 stroke-[1.7] {{ $isActive ? 'text-danger' : 'text-slate-400' }}"></i>
-                                                                    <span class="ml-1.5 whitespace-nowrap font-medium {{ $isActive ? 'text-danger' : 'text-slate-500' }}">
+                                                                    <i data-tw-merge="" data-lucide="database" class="h-3.5 w-3.5 stroke-[1.7] {{ $statusColorClass }}"></i>
+                                                                    <span class="ml-1.5 whitespace-nowrap font-medium {{ $statusColorClass }}">
                                                                         {{ $label }}
                                                                     </span>
                                                                 </div>
@@ -600,7 +626,7 @@
                                                         @endif
                                                     </td>
                                                 @endif
-                                                @if(($showActionsColumn ?? true) && ($canPerformActions || (isset($row->canAnular) && $row->canAnular && !empty($row->anularRoute)) || (isset($row->copyRoute) && !empty($row->copyRoute)) || (!$hasDownloadColumn && isset($row->download_link) && !empty($row->download_link))))
+                                                @if(($showActionsColumn ?? true) && ($canPerformActions || ($canView && $hasExpandableRelations) || (isset($row->canAnular) && $row->canAnular && !empty($row->anularRoute)) || (isset($row->copyRoute) && !empty($row->copyRoute)) || (!$hasDownloadColumn && isset($row->download_link) && !empty($row->download_link))))
                                                     <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 relative border-dashed py-4 dark:bg-darkmode-600">
                                                         <div class="flex items-center justify-center h-full">
                                                             @php
@@ -1291,6 +1317,10 @@
         #list-table-wrapper table td { 
             max-width: 150px; 
         }
+
+        #list-table-wrapper.cotizacion-table table td { 
+            max-width: 145px; 
+        }
         /* Regla específica para la vista de Planes y Servicios */
         #list-table-wrapper.planes-servicios-table table td {
             max-width: 350px;
@@ -1357,6 +1387,24 @@
             const getSearchInput = () => form ? form.querySelector('[name="q"]') : null;
 
             const getPageSizeElement = () => wrapper ? wrapper.querySelector('[name="perPage"]') : null;
+
+            const updateFilterCount = () => {
+                if (!form || !wrapper) {
+                    return;
+                }
+
+                const activeCount = Array.from(form.querySelectorAll('[data-list-filter-field="true"]'))
+                    .filter((field) => String(field.value || '').trim() !== '')
+                    .length;
+                const countBadge = wrapper.querySelector('[data-list-filter-count]');
+                if (!countBadge) {
+                    return;
+                }
+
+                countBadge.textContent = String(activeCount);
+                countBadge.classList.toggle('hidden', activeCount === 0);
+                countBadge.classList.toggle('flex', activeCount > 0);
+            };
 
             const updateBulkActionState = () => {
                 if (!selectAllCheckbox || !rowCheckboxes.length) {
@@ -1796,15 +1844,24 @@
             const positionMenu = (menu, toggle) => {
                 const rect = toggle.getBoundingClientRect();
                 const menuWidth = menu.offsetWidth;
+                const menuHeight = menu.offsetHeight;
+                const viewportHeight = window.visualViewport?.height || window.innerHeight;
+                const viewportMargin = 12;
+                const gap = 8;
                 let left = rect.right - menuWidth;
 
-                const viewportMargin = 12; // px
                 if (left + menuWidth > window.innerWidth - viewportMargin) {
                     left = Math.max(viewportMargin, window.innerWidth - menuWidth - viewportMargin);
                 }
                 if (left < viewportMargin) left = viewportMargin;
 
-                const top = rect.bottom + 8;
+                const spaceBelow = viewportHeight - rect.bottom - viewportMargin;
+                const spaceAbove = rect.top - viewportMargin;
+                const shouldOpenAbove = spaceBelow < menuHeight + gap && spaceAbove >= menuHeight + gap;
+                let top = shouldOpenAbove ? rect.top - menuHeight - gap : rect.bottom + gap;
+
+                // If neither side has enough room, keep the complete menu inside the viewport.
+                top = Math.max(viewportMargin, Math.min(top, viewportHeight - menuHeight - viewportMargin));
                 menu.style.left = `${Math.round(left)}px`;
                 menu.style.top = `${Math.round(top)}px`;
             };
@@ -2087,7 +2144,29 @@
                 if (!nextWrapper) {
                     return;
                 }
-                wrapper.innerHTML = nextWrapper.innerHTML;
+
+                const currentTableContainer = wrapper.querySelector('table')?.parentElement;
+                const nextTableContainer = nextWrapper.querySelector('table')?.parentElement;
+                if (currentTableContainer && nextTableContainer) {
+                    currentTableContainer.replaceWith(nextTableContainer);
+                }
+
+                const currentPagination = wrapper.querySelector('nav')?.closest('.flex-reverse');
+                const nextPagination = nextWrapper.querySelector('nav')?.closest('.flex-reverse');
+                if (currentPagination && nextPagination) {
+                    currentPagination.replaceWith(nextPagination);
+                } else if (currentPagination && !nextPagination) {
+                    currentPagination.remove();
+                } else if (!currentPagination && nextPagination) {
+                    wrapper.querySelector('table')?.closest('.box')?.appendChild(nextPagination);
+                }
+
+                const currentResultStat = document.querySelector('[data-list-result-stat]');
+                const nextResultStat = doc.querySelector('[data-list-result-stat]');
+                if (currentResultStat && nextResultStat) {
+                    currentResultStat.textContent = nextResultStat.textContent;
+                }
+
                 restoreIcons();
                 initDropdowns();
                 if (window.initLitepickers && typeof window.initLitepickers === 'function') {
@@ -2097,9 +2176,6 @@
             };
 
             const fetchList = async (url, options = {}) => {
-                const shouldRestoreSearchFocus = Boolean(options.preserveSearchFocus && searchInput && document.activeElement === searchInput);
-                const caretStart = shouldRestoreSearchFocus ? searchInput.selectionStart : null;
-                const caretEnd = shouldRestoreSearchFocus ? searchInput.selectionEnd : null;
                 const requestId = ++fetchRequestId;
 
                 if (fetchController) {
@@ -2124,13 +2200,6 @@
                         return;
                     }
                     await replaceWrapper(html);
-
-                    if (shouldRestoreSearchFocus && searchInput) {
-                        searchInput.focus({ preventScroll: true });
-                        if (caretStart !== null && caretEnd !== null && typeof searchInput.setSelectionRange === 'function') {
-                            searchInput.setSelectionRange(caretStart, caretEnd);
-                        }
-                    }
                 } catch (error) {
                     if (error && error.name === 'AbortError') {
                         return;
@@ -2145,6 +2214,7 @@
 
             const handleSubmit = (event) => {
                 event.preventDefault();
+                updateFilterCount();
                 const url = buildUrl();
                 updateExportLinks();
                 fetchList(url);
@@ -2171,6 +2241,7 @@
             const handleClear = (event) => {
                 event.preventDefault();
                 clearFilterInputs();
+                updateFilterCount();
                 const url = new URL(form.action, window.location.origin).toString();
                 updateExportLinks();
                 fetchList(url);
@@ -3725,6 +3796,7 @@
                 }
 
                 updateSearchClearVisibility();
+                updateFilterCount();
 
                 updateExportLinks();
 

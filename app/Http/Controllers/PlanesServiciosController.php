@@ -134,7 +134,7 @@ class PlanesServiciosController extends Controller
         $rows = $this->baseQuery($request)->orderByDesc('a.idalmacen')->get();
 
         $rows->transform(function ($row) {
-            $row->renovacion = $this->formatYesNo($row->renovacion ?? null);
+            $this->formatExportRow($row);
             return $row;
         });
 
@@ -143,15 +143,19 @@ class PlanesServiciosController extends Controller
             ['key' => 'empresa_label', 'label' => 'Empresa'],
             ['key' => 'detalle', 'label' => 'Detalle'],
             ['key' => 'tipo_elemento_label', 'label' => 'Tipo elemento'],
-            ['key' => 'precio', 'label' => 'Precio'],
-            ['key' => 'renovacion', 'label' => 'Renovación'],
-            ['key' => 'periodo', 'label' => 'Periodo'],
+            ['key' => 'precio_label', 'label' => 'Precio'],
+            ['key' => 'renovacion_label', 'label' => 'Renovación'],
+            ['key' => 'periodo_label', 'label' => 'Periodo'],
         ];
 
         $filename = 'planes_servicios_export_' . now()->format('Ymd_His') . '.' . $format;
 
         if (!empty($selectedIds) && is_array($selectedIds)) {
             $rows = $this->baseQuery($request)->whereIn('a.idalmacen', array_values($selectedIds))->orderBy('a.idalmacen')->get();
+            $rows->transform(function ($row) {
+                $this->formatExportRow($row);
+                return $row;
+            });
 
             if ($format === 'xlsx') {
                 return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -165,6 +169,13 @@ class PlanesServiciosController extends Controller
         }
 
         return $this->exportPdfResponse($rows, $columns, 'Planes y servicios', $filename);
+    }
+
+    private function formatExportRow($row): void
+    {
+        $row->precio_label = $this->formatMoney($row->precio ?? null, $row->moneda_simbolo ?? null);
+        $row->renovacion_label = $this->formatYesNo($row->renovacion ?? null);
+        $row->periodo_label = $this->formatPeriodo($row->periodo ?? null);
     }
 
     public function create(): View
@@ -355,7 +366,31 @@ class PlanesServiciosController extends Controller
 
         $periodoSearch = trim((string) $request->input('periodo_search', ''));
         if ($periodoSearch !== '') {
-            $query->where('a.periodo', 'like', '%' . $periodoSearch . '%');
+            $normalizedPeriodoSearch = mb_strtolower((string) preg_replace('/\s+/u', ' ', $periodoSearch), 'UTF-8');
+            $periodoDays = [
+                'mensual' => 30,
+                '3 meses' => 90,
+                '6 meses' => 180,
+                '12 meses' => 365,
+                '24 meses' => 730,
+                '36 meses' => 1095,
+                '48 meses' => 1460,
+            ];
+
+            $query->where(function ($builder) use ($normalizedPeriodoSearch, $periodoDays, $periodoSearch) {
+                if (array_key_exists($normalizedPeriodoSearch, $periodoDays)) {
+                    $builder->where('a.periodo', $periodoDays[$normalizedPeriodoSearch]);
+                    return;
+                }
+
+                if ($normalizedPeriodoSearch === 'no') {
+                    $builder->whereNull('a.periodo')
+                        ->orWhere('a.periodo', 'like', '%No%');
+                    return;
+                }
+
+                $builder->where('a.periodo', 'like', '%' . $periodoSearch . '%');
+            });
         }
 
         $precioSearch = trim((string) $request->input('precio_search', ''));

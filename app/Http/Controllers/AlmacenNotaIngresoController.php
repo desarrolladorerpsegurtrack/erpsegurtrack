@@ -284,6 +284,7 @@ class AlmacenNotaIngresoController extends Controller
                 'devices' => ['required', 'array', 'min:1'],
                 'devices.*.dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
                 'devices.*.cantidad' => ['required', 'integer', 'min:1'],
+                'devices.*.estado' => ['required', 'integer', 'in:1,2,4'],
                 'devices.*.manual' => ['nullable', Rule::in(['0', '1', 0, 1, true, false])],
                 'devices.*.imeis' => ['nullable'],
             ]);
@@ -303,6 +304,7 @@ class AlmacenNotaIngresoController extends Controller
             foreach ($devices as $index => $row) {
                 $deviceId = (int) $row['dispositivo_iddispositivo'];
                 $cantidad = (int) $row['cantidad'];
+                $estado = (int) $row['estado'];
                 $manual = isset($row['manual']) && ((string) $row['manual'] === '1' || $row['manual'] === 1 || $row['manual'] === true);
 
                 $collectedImeis = collect();
@@ -339,6 +341,7 @@ class AlmacenNotaIngresoController extends Controller
 
                 $imeisPerDevice[] = [
                     'dispositivo_iddispositivo' => $deviceId,
+                    'estado' => $estado,
                     'imeis' => $collectedImeis->all(),
                 ];
 
@@ -371,7 +374,7 @@ class AlmacenNotaIngresoController extends Controller
                             'imei' => $imei,
                             'dispositivo_iddispositivo' => $group['dispositivo_iddispositivo'],
                             'fechaIngreso' => $fecha,
-                            'estado' => 1,
+                            'estado' => $group['estado'],
                         ]);
 
                         DB::table('detallemovalmacen')->insert([

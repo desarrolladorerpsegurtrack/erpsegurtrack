@@ -10,6 +10,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
@@ -27,7 +28,7 @@ class VehiculosController extends Controller
     {
         $query = $this->applyIndexFilters($request, $this->baseQuery());
 
-        $items = $query->orderBy('v.placa', 'desc')
+        $items = $query->orderBy('c.nombreComercial')
             ->paginate($this->resolvePerPage($request, 25))
             ->withQueryString();
 
@@ -101,13 +102,14 @@ class VehiculosController extends Controller
             return $items;
         }
 
-        $grouped = $this->loadVehiculoDeviceGroups($placas);
-        if (empty($grouped)) {
+        $deviceGroups = $this->loadVehiculoDeviceGroups($placas);
+        $serviceGroups = $this->loadVehiculoServiceGroups($placas);
+        if (empty($deviceGroups) && empty($serviceGroups)) {
             return $items;
         }
 
-        $newCollection = $items->getCollection()->map(function ($row) use ($grouped) {
-            return $this->attachRelationGroupsToVehiculoRow($row, $grouped);
+        $newCollection = $items->getCollection()->map(function ($row) use ($deviceGroups, $serviceGroups) {
+            return $this->attachRelationGroupsToVehiculoRow($row, $deviceGroups, $serviceGroups);
         });
 
         $items->setCollection($newCollection);
@@ -129,19 +131,34 @@ class VehiculosController extends Controller
             $numbersMap = DB::table('detnumerosdispositivo as n')
                 ->whereIn('n.dispositivoCliente_iddispositivoCliente', $deviceIds)
                 ->select(['n.dispositivoCliente_iddispositivoCliente', 'n.numeroTelefonico_numeroTelefonico'])
+                ->addSelect([
+                    'operador' => DB::table('detallesimcard as ds')
+                        ->leftJoin('simcard as s', 's.idsimCard', '=', 'ds.simCard_idsimCard')
+                        ->leftJoin('operador as o', 'o.idoperador', '=', 's.operador_idoperador')
+                        ->select('o.nombre')
+                        ->whereColumn('ds.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico_numeroTelefonico')
+                        ->where('ds.estado', '0')
+                        ->orderByDesc('ds.iddetalleSimCard')
+                        ->limit(1),
+                ])
                 ->orderByDesc('n.fechaAsignacion')
                 ->orderByDesc('n.iddetNumerosDispositivo')
                 ->get()
                 ->groupBy('dispositivoCliente_iddispositivoCliente')
                 ->map(function ($group) {
                     $first = $group->first();
-                    return $first ? ($first->numeroTelefonico_numeroTelefonico ?? '-') : '-';
+                    return [
+                        'numero' => $first->numeroTelefonico_numeroTelefonico ?? '-',
+                        'operador' => $first->operador ?? '-',
+                    ];
                 })->all();
         }
 
         return $dispositivosRows->map(function ($d) use ($numbersMap) {
             $arr = (array) $d;
-            $arr['numero'] = $numbersMap[$arr['iddispositivoCliente']] ?? '-';
+            $numberData = $numbersMap[$arr['iddispositivoCliente']] ?? [];
+            $arr['numero'] = $numberData['numero'] ?? '-';
+            $arr['operador'] = $numberData['operador'] ?? '-';
             return $arr;
         })->groupBy('vehiculo_placa')->map(function ($group) {
             return $group->map(function ($d) {
@@ -150,10 +167,100 @@ class VehiculosController extends Controller
         })->all();
     }
 
-    private function attachRelationGroupsToVehiculoRow($row, array $grouped)
+    private function loadVehiculoServiceGroups(array $placas): array
+    {
+        return DB::table('serviciocliente as sc')
+            ->leftJoin('almacen as a', 'a.idalmacen', '=', 'sc.almacen_idalmacen')
+            ->leftJoin('tipoelemento as te', 'te.idtipoElemento', '=', 'a.tipoElemento_idtipoElemento')
+            ->leftJoin('plataforma as p', 'p.idplataforma', '=', 'te.plataforma_idplataforma')
+            ->leftJoin('moneda as m', 'm.idmoneda', '=', 'sc.moneda_idmoneda')
+            ->select([
+                'sc.idservicioCliente',
+                'sc.vehiculo_placa',
+                'sc.fechaInicio',
+                'sc.fecheVencimiento',
+                'sc.monto',
+                'sc.estado',
+                'sc.docReferencia',
+                DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
+                DB::raw('COALESCE(p.nombrePlataforma, "") as plataforma'),
+                'a.periodo as almacen_periodo',
+                DB::raw('COALESCE(m.simbolo, "") as moneda_simbolo'),
+            ])
+            ->whereIn('sc.vehiculo_placa', $placas)
+            ->orderByDesc('sc.idservicioCliente')
+            ->get()
+            ->map(function ($service) {
+                $periodo = $this->formatPeriodo($service->almacen_periodo ?? null);
+                $detalle = trim((string) ($service->almacen_detalle ?? ''));
+
+                $service->almacen_detalle = $periodo !== ''
+                    ? trim($detalle . ' - ' . $periodo)
+                    : $detalle;
+
+                $monto = $service->monto;
+                $service->monto = ($monto !== null && $monto !== '')
+                    ? $this->normalizeCurrencySymbol($service->moneda_simbolo ?? null) . ' ' . number_format((float) $monto, 2, '.', '')
+                    : '-';
+
+                return (array) $service;
+            })
+            ->groupBy('vehiculo_placa')
+            ->map(fn ($group) => $group->values()->all())
+            ->all();
+    }
+
+    private function formatPeriodo(mixed $value): string
+    {
+        $periodo = trim((string) ($value ?? ''));
+        if ($periodo === '' || strcasecmp($periodo, 'no') === 0) {
+            return '';
+        }
+
+        if (!is_numeric($value)) {
+            return $periodo;
+        }
+
+        return match ((int) $value) {
+            30 => 'Mensual',
+            90 => '3 Meses',
+            180 => '6 Meses',
+            365 => '12 Meses',
+            730 => '24 Meses',
+            1095 => '36 Meses',
+            1460 => '48 Meses',
+            default => $periodo,
+        };
+    }
+
+    private function normalizeCurrencySymbol(?string $currency): string
+    {
+        $symbol = trim((string) ($currency ?? ''));
+        if ($symbol === '') {
+            return 'S/';
+        }
+
+        $lower = mb_strtolower($symbol, 'UTF-8');
+        if ($lower === 's/' || $lower === 's' || str_contains($lower, 'sol')) {
+            return 'S/';
+        }
+
+        if (str_contains($lower, 'dolar') || str_contains($lower, 'dólar') || str_contains($lower, '$')) {
+            return '$';
+        }
+
+        if (str_contains($lower, 'euro') || str_contains($lower, '€')) {
+            return '€';
+        }
+
+        return $symbol;
+    }
+
+    private function attachRelationGroupsToVehiculoRow($row, array $deviceGroups, array $serviceGroups)
     {
         $placa = data_get($row, 'placa');
-        $devices = $grouped[$placa] ?? [];
+        $devices = $deviceGroups[$placa] ?? [];
+        $services = $serviceGroups[$placa] ?? [];
 
         $relationGroups = [
             [
@@ -162,6 +269,7 @@ class VehiculosController extends Controller
                 'columns' => [
                     ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo', 'type' => 'text'],
                     ['key' => 'numero', 'label' => 'Número', 'type' => 'text'],
+                    ['key' => 'operador', 'label' => 'Operador', 'type' => 'text'],
                     ['key' => 'marcaDispositivo', 'label' => 'Marca', 'type' => 'text'],
                     ['key' => 'modeloDispositivo', 'label' => 'Modelo', 'type' => 'text'],
                     ['key' => 'fechaInstalacion', 'label' => 'Fecha de instalación', 'type' => 'date'],
@@ -170,12 +278,30 @@ class VehiculosController extends Controller
                 ],
                 'records' => $devices,
             ],
+            [
+                'key' => 'servicio_cliente',
+                'label' => 'Servicios Cliente',
+                'columns' => [
+                    ['key' => 'idservicioCliente', 'label' => 'ID', 'type' => 'text'],
+                    ['key' => 'vehiculo_placa', 'label' => 'Vehículo', 'type' => 'text'],
+                    ['key' => 'almacen_detalle', 'label' => 'Servicio', 'type' => 'text'],
+                    ['key' => 'plataforma', 'label' => 'Plataforma', 'type' => 'text'],
+                    ['key' => 'fechaInicio', 'label' => 'Fecha Inicio', 'type' => 'date'],
+                    ['key' => 'fecheVencimiento', 'label' => 'Fecha Fin', 'type' => 'date'],
+                    ['key' => 'monto', 'label' => 'Monto', 'type' => 'text'],
+                    ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
+                    ['key' => 'docReferencia', 'label' => 'Documento', 'type' => 'text'],
+                ],
+                'records' => $services,
+            ],
         ];
 
         $rowArr = (array) $row;
         $rowArr['numero'] = '-';
+        $rowArr['operador'] = '-';
         if (!empty($devices) && is_array($devices) && isset($devices[0]['numero'])) {
             $rowArr['numero'] = $devices[0]['numero'] ?? '-';
+            $rowArr['operador'] = $devices[0]['operador'] ?? '-';
         }
         $rowArr['relation_groups'] = $relationGroups;
 
@@ -195,6 +321,7 @@ class VehiculosController extends Controller
             'columns' => [
                 ['key' => 'placa', 'label' => 'Placa', 'type' => 'text'],
                 ['key' => 'numero', 'label' => 'Número', 'type' => 'text'],
+                ['key' => 'operador', 'label' => 'Operador', 'type' => 'text'],
                 ['key' => 'cliente_nombre', 'label' => 'Cliente', 'type' => 'text'],
                 ['key' => 'tipo_vehiculo', 'label' => 'Tipo', 'type' => 'text'],
                 ['key' => 'anio', 'label' => 'Año', 'type' => 'text'],
@@ -241,8 +368,12 @@ class VehiculosController extends Controller
                 [
                     'name' => 'tracto',
                     'label' => 'Tracto',
-                    'type' => 'text',
-                    'placeholder' => 'Filtrar por tracto',
+                    'type' => 'select',
+                    'options' => [
+                        ['value' => 'Si', 'label' => 'Sí'],
+                        ['value' => 'No', 'label' => 'No'],
+                    ],
+                    'placeholder' => 'Todos',
                 ],
             ],
             'createRoute' => route('modules.vehiculos.create'),
@@ -282,7 +413,10 @@ class VehiculosController extends Controller
         $filename = 'vehiculos_export_' . now()->format('Ymd_His') . '.' . $format;
 
         if (!empty($selectedIds) && is_array($selectedIds)) {
-            $rows = $this->baseQuery()->whereIn('v.placa', array_values($selectedIds))->orderBy('v.placa')->get();
+            $rows = $this->applyIndexFilters($request, $this->baseQuery())
+                ->whereIn('v.placa', array_values($selectedIds))
+                ->orderBy('v.placa')
+                ->get();
 
             if ($format === 'xlsx') {
                 return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -291,7 +425,9 @@ class VehiculosController extends Controller
             return $this->exportPdfResponse($rows, $columns, 'Listado de Vehículos', $filename);
         }
 
-        $rows = $this->baseQuery()->orderBy('v.placa')->get();
+        $rows = $this->applyIndexFilters($request, $this->baseQuery())
+            ->orderBy('v.placa')
+            ->get();
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
@@ -313,7 +449,7 @@ class VehiculosController extends Controller
                     'consultButton' => true,
                     'consultButtonLabel' => 'Consultar',
                     'consultButtonUrl' => route('api.consultar.placa'),
-                    'consultTargetFields' => ['anio', 'color', 'marca', 'modelo'],
+                    'consultTargetFields' => ['anio', 'marca', 'modelo', 'tipoUnidad_idtable1'],
                 ],
                 [
                     'name' => 'cliente_idcliente',
@@ -353,9 +489,8 @@ class VehiculosController extends Controller
                     'name' => 'color',
                     'type' => 'text',
                     'label' => 'Color',
-                    'required' => true,
+                    'required' => false,
                     'maxlength' => 20,
-                    'minlength' => 2,
                     'helpText' => 'Selecciona o escribe un color.',
                     'placeholder' => 'Selecciona o escribe un color',
                     'datalistOptions' => VehiculoData::getColors(),
@@ -375,21 +510,21 @@ class VehiculosController extends Controller
                     'name' => 'modelo',
                     'type' => 'text',
                     'label' => 'Modelo',
-                    'required' => true,
+                    'required' => false,
                     'maxlength' => 50,
-                    'minlength' => 2,
                     'helpText' => 'Selecciona o escribe un modelo.',
                     'placeholder' => 'Selecciona o escribe un modelo',
                     'datalistOptions' => VehiculoData::getModels(),
                 ],
                 [
                     'name' => 'tracto',
-                    'type' => 'text',
+                    'type' => 'switch',
                     'label' => 'Tracto',
-                    'required' => true,
-                    'maxlength' => 20,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
+                    'scalar' => true,
+                    'required' => false,
+                    'offValue' => 'No',
+                    'onValue' => 'Si',
+                    'switchLabels' => ['off' => 'No', 'on' => 'Si'],
                 ],
             ];
 
@@ -412,10 +547,10 @@ class VehiculosController extends Controller
             'cliente_idcliente' => ['required', 'exists:cliente,idcliente'],
             'tipoUnidad_idtable1' => ['required', 'exists:tipovehiculo,idtipoVehiculo'],
             'anio' => ['required', 'integer', 'digits:4', 'min:1900', 'max:' . ((int) date('Y') + 1)],
-            'color' => ['required', 'string', 'min:2', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX],
+            'color' => ['nullable', 'string', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX],
             'marca' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
-            'modelo' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
-            'tracto' => ['required', 'string', 'min:2', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX],
+            'modelo' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'tracto' => ['nullable', 'in:Si,No'],
         ], [
             'placa.unique' => 'La placa ya existe en otro vehículo.',
             'placa.regex' => 'La placa contiene caracteres inválidos.',
@@ -431,7 +566,7 @@ class VehiculosController extends Controller
             ->with('success', 'Vehículo creado correctamente.');
     }
 
-    public function edit(string $placa): View|RedirectResponse
+    public function edit(Request $request, string $placa): View|RedirectResponse
     {
         $record = $this->baseQuery()->where('v.placa', $placa)->first();
         if (!$record) {
@@ -448,7 +583,10 @@ class VehiculosController extends Controller
             'moduleTitle' => 'Módulo Vehículos',
             'mode' => 'edit',
             'formAction' => route('modules.vehiculos.update', $record->placa),
-            'backRoute' => route('modules.vehiculos'),
+            'backRoute' => $request->query('return_route') === 'modules.clientes'
+                ? route('modules.clientes')
+                : route('modules.vehiculos'),
+            'return_route' => $request->query('return_route'),
             'record' => $record,
             'readOnly' => true,
             'fields' => [
@@ -463,7 +601,7 @@ class VehiculosController extends Controller
                     'consultButton' => true,
                     'consultButtonLabel' => 'Consultar',
                     'consultButtonUrl' => route('api.consultar.placa'),
-                    'consultTargetFields' => ['anio', 'color', 'marca', 'modelo'],
+                    'consultTargetFields' => ['anio', 'marca', 'modelo', 'tipoUnidad_idtable1'],
                 ],
                 [
                     'name' => 'cliente_idcliente',
@@ -503,9 +641,8 @@ class VehiculosController extends Controller
                     'name' => 'color',
                     'type' => 'text',
                     'label' => 'Color',
-                    'required' => true,
+                    'required' => false,
                     'maxlength' => 20,
-                    'minlength' => 2,
                     'helpText' => 'Selecciona o escribe un color.',
                     'placeholder' => 'Selecciona o escribe un color',
                     'datalistOptions' => VehiculoData::getColors(),
@@ -525,21 +662,21 @@ class VehiculosController extends Controller
                     'name' => 'modelo',
                     'type' => 'text',
                     'label' => 'Modelo',
-                    'required' => true,
+                    'required' => false,
                     'maxlength' => 50,
-                    'minlength' => 2,
                     'helpText' => 'Selecciona o escribe un modelo.',
                     'placeholder' => 'Selecciona o escribe un modelo',
                     'datalistOptions' => VehiculoData::getModels(),
                 ],
                 [
                     'name' => 'tracto',
-                    'type' => 'text',
+                    'type' => 'switch',
                     'label' => 'Tracto',
-                    'required' => true,
-                    'maxlength' => 20,
-                    'minlength' => 2,
-                    'helpText' => 'Mínimo 2 caracteres.',
+                    'scalar' => true,
+                    'required' => false,
+                    'offValue' => 'No',
+                    'onValue' => 'Si',
+                    'switchLabels' => ['off' => 'No', 'on' => 'Si'],
                 ],
             ],
             'dispositivos' => $dispositivos,
@@ -561,10 +698,10 @@ class VehiculosController extends Controller
             'cliente_idcliente' => ['required', 'exists:cliente,idcliente'],
             'tipoUnidad_idtable1' => ['required', 'exists:tipovehiculo,idtipoVehiculo'],
             'anio' => ['required', 'integer', 'digits:4', 'min:1900', 'max:' . ((int) date('Y') + 1)],
-            'color' => ['required', 'string', 'min:2', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX],
+            'color' => ['nullable', 'string', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX],
             'marca' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
-            'modelo' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
-            'tracto' => ['required', 'string', 'min:2', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX],
+            'modelo' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'tracto' => ['nullable', 'in:Si,No'],
         ]);
 
         DB::table('vehiculo')->where('placa', $placa)->update($validated);
@@ -602,11 +739,78 @@ class VehiculosController extends Controller
             ], 422);
         }
 
+        $token = (string) env('SEGURTRACK_TOKEN', '');
+        if ($token === '') {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'El token de consulta de vehículos no está configurado en el servidor.',
+            ], 500);
+        }
+
+        try {
+            $response = Http::timeout(15)->get('https://tools.segurtrack.com/STKsearch/apiSUNARP_JTI.php', [
+                'placa' => $placa,
+                'token' => $token,
+            ]);
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'No se pudo conectar con el servicio de consulta de vehículos.',
+            ], 502);
+        }
+
+        if (!$response->successful()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'No se pudo obtener información de la placa.',
+            ], 502);
+        }
+
+        $payload = $response->json();
+        $apiData = is_array($payload['data'] ?? null)
+            ? $payload['data']
+            : (is_array($payload) ? $payload : []);
+        $clase = trim((string) ($apiData['clase'] ?? ''));
+        $tipoId = $this->resolveTipoVehiculoId($clase);
+
+        if (!is_array($apiData) || ($clase === '' && empty($apiData['marca']) && empty($apiData['modelo']) && empty($apiData['anioFabricacion']))) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'No se encontraron datos para la placa indicada.',
+            ], 404);
+        }
+
         return response()->json([
-            'status' => 'error',
-            'message' => 'La consulta de placa aún no está implementada. Cuando la API esté lista, esta ruta devolverá año, color, marca y modelo.',
-            'data' => null,
-        ], 501);
+            'status' => 'success',
+            'data' => [
+                'marca' => $apiData['marca'] ?? '',
+                'modelo' => $apiData['modelo'] ?? '',
+                'anio' => $apiData['anioFabricacion'] ?? '',
+                'tipoUnidad_idtable1' => $tipoId,
+            ],
+            'message' => $tipoId === null && $clase !== ''
+                ? 'Se obtuvieron los datos, pero la clase no coincide con un tipo de vehículo registrado.'
+                : null,
+        ]);
+    }
+
+    private function resolveTipoVehiculoId(string $clase): ?string
+    {
+        if ($clase === '') {
+            return null;
+        }
+
+        $normalizedClase = Str::lower(Str::ascii(trim($clase)));
+        $tipo = DB::table('tipovehiculo')
+            ->select('idtipoVehiculo', 'nombre')
+            ->get()
+            ->first(function ($item) use ($normalizedClase) {
+                return Str::lower(Str::ascii(trim((string) $item->nombre))) === $normalizedClase;
+            });
+
+        return $tipo ? (string) $tipo->idtipoVehiculo : null;
     }
 
     public function lockStatus(string $placa): JsonResponse

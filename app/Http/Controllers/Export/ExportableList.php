@@ -70,7 +70,7 @@ trait ExportableList
                 if (isset($column['value']) && is_callable($column['value'])) {
                     $value = $column['value']($row);
                 } else {
-                    $value = data_get($row, $column['key']);
+                    $value = $this->resolveExportValue($row, $column['key'] ?? null);
                 }
 
                 $value = is_string($value) ? trim(strip_tags($value)) : $value;
@@ -116,6 +116,25 @@ trait ExportableList
         $writer->save($tempFile);
 
         return response()->download($tempFile, $filename)->deleteFileAfterSend(true);
+    }
+
+    protected function resolveExportValue($row, ?string $key)
+    {
+        if ($key === null || $key === '') {
+            return null;
+        }
+
+        $displayValue = data_get($row, $key . '_label');
+        if ($displayValue !== null) {
+            return $displayValue;
+        }
+
+        $displayValue = data_get($row, $key . '_display');
+        if ($displayValue !== null) {
+            return $displayValue;
+        }
+
+        return data_get($row, $key);
     }
 
     /**

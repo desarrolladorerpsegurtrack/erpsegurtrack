@@ -75,6 +75,21 @@
 				plugins: { ...settings.plugins, dropdown_header: { title: $(this).data("header") } }
 			});
 
+			if ($(this).attr("name") === "cliente_idcliente") {
+				settings.searchField = ["text", "document"];
+			}
+
+			settings.render = {
+				option: function(data, escape) {
+					const title = data.title || (data.$option && data.$option.getAttribute("title")) || data.text || "";
+					return '<div title="' + escape(title) + '">' + escape(data.text || "") + '</div>';
+				},
+				item: function(data, escape) {
+					const title = data.title || (data.$option && data.$option.getAttribute("title")) || data.text || "";
+					return '<div title="' + escape(title) + '">' + escape(data.text || "") + '</div>';
+				}
+			};
+
 			const instance = new TomSelect(this, settings);
 
 			instance.on("dropdown_open", () => {

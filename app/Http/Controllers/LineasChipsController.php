@@ -97,7 +97,7 @@ class LineasChipsController extends Controller
         });
 
         return view('lineaschip.numerotelefonico', [
-            'title' => 'Lineas y Chips: Número telefónico',
+            'title' => 'Número telefónico',
             'singularTitle' => 'Número telefónico',
             'items' => $items,
             'columns' => [
@@ -153,7 +153,7 @@ class LineasChipsController extends Controller
     {
         return view('lineaschip.numerotelefonico-form', [
             'title' => 'Nuevo Número telefónico',
-            'moduleTitle' => 'Lineas y Chips: Número telefónico',
+            'moduleTitle' => 'Número telefónico',
             'mode' => 'create',
             'formAction' => route('modules.lineas-chips.numeros-telefonico.store'),
             'backRoute' => route('modules.lineas-chips.numeros-telefonico.index'),
@@ -312,7 +312,7 @@ class LineasChipsController extends Controller
 
         return view('lineaschip.numerotelefonico-form', [
             'title' => 'Editar Número telefónico',
-            'moduleTitle' => 'Lineas y Chips: Número telefónico',
+            'moduleTitle' => 'Número telefónico',
             'mode' => 'edit',
             'formAction' => route('modules.lineas-chips.numeros-telefonico.update', $id),
             'backRoute' => route('modules.lineas-chips.numeros-telefonico.index'),
@@ -575,7 +575,7 @@ class LineasChipsController extends Controller
                 return $redirect;
             }
 
-            if ($this->countNumeroHistorialSinRelacionActual($id) > 1) {
+            if ($this->countNumeroHistorialSinRelacionActual($id) > 0) {
                 return redirect()
                     ->route('modules.lineas-chips.numeros-telefonico.index')
                     ->with('error', 'No se puede eliminar el número ' . $id . ' porque tiene más de 1 historial previo.');
@@ -771,7 +771,7 @@ class LineasChipsController extends Controller
         });
 
         return view('lineaschip.simcard', [
-            'title' => 'Lineas y Chips: SimCard',
+            'title' => 'SimCard',
             'singularTitle' => 'SimCard',
             'items' => $items,
             'columns' => [
@@ -788,7 +788,6 @@ class LineasChipsController extends Controller
                 ['label' => 'Total de simcards', 'value' => (clone $baseQuery)->count()],
                 ['label' => 'SimCards activas', 'value' => (clone $baseQuery)->where('s.estado', '1')->count()],
                 ['label' => 'SimCards inactivas', 'value' => (clone $baseQuery)->where('s.estado', '0')->count()],
-                ['label' => 'Total de operadores', 'value' => (clone $baseQuery)->distinct('s.operador_idoperador')->count('s.operador_idoperador')],
             ],
             'filters' => [
                 [
@@ -833,7 +832,7 @@ class LineasChipsController extends Controller
     {
         return view('lineaschip.simcard-form', [
             'title' => 'Nueva SimCard',
-            'moduleTitle' => 'Lineas y Chips: SimCard',
+            'moduleTitle' => 'SimCard',
             'mode' => 'create',
             'formAction' => route('modules.lineas-chips.simcard.store'),
             'backRoute' => route('modules.lineas-chips.simcard.index'),
@@ -991,7 +990,7 @@ class LineasChipsController extends Controller
 
         return view('lineaschip.simcard-form', [
             'title' => 'Editar SimCard',
-            'moduleTitle' => 'Lineas y Chips: SimCard',
+            'moduleTitle' => 'SimCard',
             'mode' => 'edit',
             'formAction' => route('modules.lineas-chips.simcard.update', $id),
             'backRoute' => route('modules.lineas-chips.simcard.index'),
@@ -1409,7 +1408,7 @@ class LineasChipsController extends Controller
         }));
 
         return view('lineaschip.detallesimcard', [
-            'title' => 'Lineas y Chips: Asignacion SimCard',
+            'title' => 'Asignacion SimCard',
             'singularTitle' => 'Asignacion SimCard',
             'items' => $items,
             'columns' => [
@@ -1479,7 +1478,7 @@ class LineasChipsController extends Controller
     {
         return view('lineaschip.detallesimcard-form', [
             'title' => 'Nueva Asignacion SimCard',
-            'moduleTitle' => 'Lineas y Chips: Asignacion SimCard',
+            'moduleTitle' => 'Asignacion SimCard',
             'mode' => 'create',
             'formAction' => route('modules.lineas-chips.detallesimcard.store'),
             'backRoute' => route('modules.lineas-chips.detallesimcard.index'),
@@ -1879,15 +1878,14 @@ class LineasChipsController extends Controller
         }));
 
         return view('lineaschip.numerosdispositivo', [
-            'title' => 'Lineas y Chips: Números de dispositivo',
+            'title' => 'Números de dispositivo',
             'singularTitle' => 'Número de dispositivo',
             'items' => $items,
             'columns' => [
-                ['key' => 'iddetNumerosDispositivo', 'label' => 'ID', 'type' => 'text'],
                 ['key' => 'dispositivoCliente_iddispositivoCliente', 'label' => 'Dispositivo', 'type' => 'text'],
                 ['key' => 'vehiculo_placa', 'label' => 'Vehículo', 'type' => 'text'],
-                ['key' => 'nombre_cliente', 'label' => 'Cliente'],
                 ['key' => 'numeroTelefonico_numeroTelefonico', 'label' => 'Número telefónico', 'type' => 'text'],
+                ['key' => 'nombre_cliente', 'label' => 'Cliente'],
                 ['key' => 'fechaAsignacion', 'label' => 'Fecha de asignación', 'type' => 'text'],
             ],
             'exportRoutes' => [
@@ -1936,7 +1934,6 @@ class LineasChipsController extends Controller
                     'type' => 'date',
                 ],
             ],
-            'createRoute' => route('modules.lineas-chips.numeros-dispositivo.create'),
             'destroyRoute' => 'modules.lineas-chips.numeros-dispositivo.destroy',
             'bulkDestroyRoute' => route('modules.lineas-chips.numeros-dispositivo.bulk-destroy'),
             'identifierKey' => 'iddetNumerosDispositivo',
@@ -1948,7 +1945,7 @@ class LineasChipsController extends Controller
     {
         return view('lineaschip.numerosdispositivo-form', [
             'title' => 'Nuevo Número de dispositivo',
-            'moduleTitle' => 'Lineas y Chips: Números de dispositivo',
+            'moduleTitle' => 'Números de dispositivo',
             'mode' => 'create',
             'formAction' => route('modules.lineas-chips.numeros-dispositivo.store'),
             'backRoute' => route('modules.lineas-chips.numeros-dispositivo.index'),
@@ -2886,19 +2883,20 @@ class LineasChipsController extends Controller
 
     private function countNumeroHistorialSinRelacionActual(string $numeroTelefonico): int
     {
-        // Solo se considera historial pasado para bloquear la edición: estado '1' en detallesimcard.
-        return DB::table('detallesimcard')
+        $hasSimcardRelation = DB::table('detallesimcard')
             ->where('numeroTelefonico_numeroTelefonico', $numeroTelefonico)
-            ->where('estado', '1')
-            ->count();
+            ->exists();
+        $hasDeviceRelation = DB::table('detnumerosdispositivo')
+            ->where('numeroTelefonico_numeroTelefonico', $numeroTelefonico)
+            ->exists();
+
+        return ($hasSimcardRelation || $hasDeviceRelation) ? 1 : 0;
     }
 
     private function countSimCardHistorialSinRelacionActual(string $simCardId): int
     {
-        // Solo se considera historial pasado para bloquear la edición: estado '1' en detallesimcard.
         return DB::table('detallesimcard')
             ->where('simCard_idsimCard', $simCardId)
-            ->where('estado', '1')
             ->count();
     }
 
@@ -3044,15 +3042,14 @@ class LineasChipsController extends Controller
     private function dispositivoClienteOptionsForNumeroDispositivo(?string $currentId = null, ?int $ignoreId = null): array
     {
         return DB::table('dispositivocliente')
-            ->select('iddispositivoCliente', 'vehiculo_placa', 'marcaDispositivo', 'modeloDispositivo')
+            ->select('iddispositivoCliente', 'vehiculo_placa')
             ->orderBy('iddispositivoCliente')
             ->get()
             ->mapWithKeys(function ($row) use ($currentId): array {
                 $id = (string) ($row->iddispositivoCliente ?? '');
                 $placa = trim((string) ($row->vehiculo_placa ?? ''));
-                $marca = trim((string) ($row->marcaDispositivo ?? ''));
-                $modelo = trim((string) ($row->modeloDispositivo ?? ''));
-                $suffix = trim(implode(' ', array_filter([$placa, $marca, $modelo])));
+    
+                $suffix = trim(implode(' ', array_filter([$placa])));
 
                 if ($currentId !== null && $id === $currentId) {
                     $suffix = $suffix !== '' ? $suffix . ' (actual)' : 'actual';
@@ -3071,6 +3068,16 @@ class LineasChipsController extends Controller
         return DB::table('numerotelefonico')
             ->select('numeroTelefonico', 'estado')
             ->where('estado', '1')
+            ->whereNotExists(function ($query) {
+                $query->select(DB::raw(1))
+                    ->from('detnumerosdispositivo as dn')
+                    ->whereColumn('dn.numeroTelefonico_numeroTelefonico', 'numerotelefonico.numeroTelefonico');
+            })
+            ->whereNotExists(function ($query) {
+                $query->select(DB::raw(1))
+                    ->from('detallesimcard as ds')
+                    ->whereColumn('ds.numeroTelefonico_numeroTelefonico', 'numerotelefonico.numeroTelefonico');
+            })
             ->orderBy('numeroTelefonico')
             ->get()
             ->mapWithKeys(function ($row) use ($currentNumero): array {

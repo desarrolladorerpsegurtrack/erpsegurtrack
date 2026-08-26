@@ -23,9 +23,18 @@ class DispositivoClienteController extends Controller
 
     public function index(Request $request): View
     {
+        $latestService = DB::table('serviciocliente')
+            ->select('vehiculo_placa', DB::raw('MAX(idservicioCliente) as idservicioCliente'))
+            ->groupBy('vehiculo_placa');
+
         $query = DB::table('dispositivocliente as d')
             ->leftJoin('vehiculo as v', 'v.placa', '=', 'd.vehiculo_placa')
             ->leftJoin('cliente as c', 'c.idcliente', '=', 'v.cliente_idcliente')
+            ->leftJoinSub($latestService, 'latest_sc', function ($join) {
+                $join->on('latest_sc.vehiculo_placa', '=', 'd.vehiculo_placa');
+            })
+            ->leftJoin('serviciocliente as sc', 'sc.idservicioCliente', '=', 'latest_sc.idservicioCliente')
+            ->leftJoin('almacen as sa', 'sa.idalmacen', '=', 'sc.almacen_idalmacen')
             ->select([
                 'd.iddispositivoCliente',
                 'd.vehiculo_placa',
@@ -33,6 +42,7 @@ class DispositivoClienteController extends Controller
                 DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as nombre_cliente'),
                 'd.marcaDispositivo',
                 'd.modeloDispositivo',
+                DB::raw("CONCAT(COALESCE(sa.detalle, ''), CASE COALESCE(sa.periodo, 0) WHEN 30 THEN ' - Mensual' WHEN 90 THEN ' - 3 Meses' WHEN 180 THEN ' - 6 Meses' WHEN 365 THEN ' - 12 Meses' WHEN 730 THEN ' - 24 Meses' WHEN 1095 THEN ' - 36 Meses' WHEN 1460 THEN ' - 48 Meses' ELSE '' END) as servicio"),
                 'd.fechaInstalacion',
                 'd.fechaBaja',
                 'd.estado',
@@ -44,6 +54,12 @@ class DispositivoClienteController extends Controller
                 $query
                     ->where('d.iddispositivoCliente', 'like', $term)
                     ->orWhere('d.vehiculo_placa', 'like', $term)
+                    ->orWhereExists(function ($numberQuery) use ($term) {
+                        $numberQuery->select(DB::raw(1))
+                            ->from('detnumerosdispositivo as n')
+                            ->whereColumn('n.dispositivoCliente_iddispositivoCliente', 'd.iddispositivoCliente')
+                            ->where('n.numeroTelefonico_numeroTelefonico', 'like', $term);
+                    })
                     ->orWhere('v.placa', 'like', $term)
                     ->orWhere('c.nombreComercial', 'like', $term)
                     ->orWhere('d.marcaDispositivo', 'like', $term)
@@ -57,6 +73,15 @@ class DispositivoClienteController extends Controller
             $query->where('d.iddispositivoCliente', 'like', "%{$id}%");
         }
 
+        if ($numero = trim((string) $request->query('numero', ''))) {
+            $query->whereExists(function ($numberQuery) use ($numero) {
+                $numberQuery->select(DB::raw(1))
+                    ->from('detnumerosdispositivo as n')
+                    ->whereColumn('n.dispositivoCliente_iddispositivoCliente', 'd.iddispositivoCliente')
+                    ->where('n.numeroTelefonico_numeroTelefonico', 'like', "%{$numero}%");
+            });
+        }
+
         if ($placa = trim((string) $request->query('vehiculo_placa', ''))) {
             $query->where('d.vehiculo_placa', 'like', "%{$placa}%");
         }
@@ -65,15 +90,8 @@ class DispositivoClienteController extends Controller
             $query->where('c.nombreComercial', 'like', "%{$cliente}%");
         }
 
-        if ($marca = trim((string) $request->query('marcaDispositivo', ''))) {
-            $query->where('d.marcaDispositivo', 'like', "%{$marca}%");
-        }
-
-        if ($modelo = trim((string) $request->query('modeloDispositivo', ''))) {
-            $query->where('d.modeloDispositivo', 'like', "%{$modelo}%");
-        }
-
-        if ($estado = trim((string) $request->query('estado', ''))) {
+        $estado = trim((string) $request->query('estado', ''));
+        if ($estado !== '') {
             $query->where('d.estado', $estado);
         }
 
@@ -90,40 +108,38 @@ class DispositivoClienteController extends Controller
                 $relationGroups = [];
 
                 if (!empty($deviceId)) {
-                    $numbers = DB::table('detnumerosdispositivo as n')
-                        ->leftJoin('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'n.dispositivoCliente_iddispositivoCliente')
-                        ->leftJoin('vehiculo as v', 'v.placa', '=', 'dc.vehiculo_placa')
-                        ->leftJoin('cliente as c', 'c.idcliente', '=', 'v.cliente_idcliente')
+                    $numbers = DB::table('historial_dispositivocliente as h')
                         ->select([
-                            'n.iddetNumerosDispositivo',
-                            'n.dispositivoCliente_iddispositivoCliente',
-                            DB::raw('COALESCE(v.placa, dc.vehiculo_placa, "") as vehiculo_placa'),
-                            DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as nombre_cliente'),
-                            'n.numeroTelefonico_numeroTelefonico',
-                            'n.fechaAsignacion',
+                            'h.idhistorial_dispositivocliente',
+                            'h.dispositivoCliente_iddispositivoCliente',
+                            'h.vehiculo as vehiculo_placa',
+                            'h.cliente as nombre_cliente',
+                            'h.numerotelefono as numeroTelefonico_numeroTelefonico',
+                            'h.fechainicio',
+                            'h.fechafin',
                         ])
-                        ->where('n.dispositivoCliente_iddispositivoCliente', $deviceId)
-                        ->orderByDesc('n.fechaAsignacion')
-                        ->orderByDesc('n.iddetNumerosDispositivo')
+                        ->where('h.dispositivoCliente_iddispositivoCliente', $deviceId)
+                        ->orderByDesc('h.fechafin')
+                        ->orderByDesc('h.idhistorial_dispositivocliente')
                         ->get();
 
                     if ($numbers->isNotEmpty()) {
                         $relationGroups[] = [
-                            'key' => 'detnumerosdispositivo',
-                            'label' => 'Números de dispositivo',
+                            'key' => 'historial_dispositivocliente',
+                            'label' => 'Historial de Dispositivo',
                             'columns' => [
-                                ['key' => 'iddetNumerosDispositivo', 'label' => 'ID'],
                                 ['key' => 'dispositivoCliente_iddispositivoCliente', 'label' => 'ID Dispositivo'],
                                 ['key' => 'vehiculo_placa', 'label' => 'Vehículo'],
-                                ['key' => 'nombre_cliente', 'label' => 'Cliente'],
                                 ['key' => 'numeroTelefonico_numeroTelefonico', 'label' => 'Número'],
-                                ['key' => 'fechaAsignacion', 'label' => 'Fecha asignación'],
+                                ['key' => 'nombre_cliente', 'label' => 'Cliente'],
+                                ['key' => 'fechainicio', 'label' => 'Fecha Inicio'],
+                                ['key' => 'fechafin', 'label' => 'Fecha Fin'],
                             ],
                             'records' => $numbers->map(function ($r) {
                                 $row = (array) $r;
-                                $raw = $row['fechaAsignacion'] ?? null;
+                                $raw = $row['fechainicio'] ?? null;
                                 $formatted = '-';
-                                if (!empty($raw) && $raw !== '0000-00-00 00:00:00') {
+                                if (!empty($raw) && $raw !== '0000-00-00') {
                                     try {
                                         $dt = Carbon::parse($raw);
                                         $months = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.'];
@@ -132,24 +148,30 @@ class DispositivoClienteController extends Controller
                                         $formatted = (string) $raw;
                                     }
                                 }
-                                $row['fechaAsignacion'] = $formatted;
+                                $row['fechainicio'] = $formatted;
+                                $rawEnd = $row['fechafin'] ?? null;
+                                if (!empty($rawEnd) && $rawEnd !== '0000-00-00') {
+                                    try {
+                                        $dt = Carbon::parse($rawEnd);
+                                        $row['fechafin'] = sprintf('%s %s %s', $dt->format('d'), $months[$dt->month - 1], $dt->format('Y'));
+                                    } catch (\Throwable $e) {
+                                        $row['fechafin'] = (string) $rawEnd;
+                                    }
+                                } else {
+                                    $row['fechafin'] = '-';
+                                }
                                 return $row;
                             })->all(),
                         ];
                     }
                 }
 
-                // Determinar número activo (el más reciente) y anexar relation_groups al row para que el layout lo consuma
-                $activeNumber = '-';
-                if (!empty($relationGroups)) {
-                    $firstGroup = $relationGroups[0];
-                    if (!empty($firstGroup['records']) && is_array($firstGroup['records'])) {
-                        $firstRecord = $firstGroup['records'][0] ?? null;
-                        if (!empty($firstRecord) && !empty($firstRecord['numeroTelefonico_numeroTelefonico'])) {
-                            $activeNumber = $firstRecord['numeroTelefonico_numeroTelefonico'];
-                        }
-                    }
-                }
+                // El número de la fila principal sigue siendo el número actual, no una baja histórica.
+                $activeNumber = DB::table('detnumerosdispositivo')
+                    ->where('dispositivoCliente_iddispositivoCliente', $deviceId)
+                    ->orderByDesc('fechaAsignacion')
+                    ->orderByDesc('iddetNumerosDispositivo')
+                    ->value('numeroTelefonico_numeroTelefonico') ?? '-';
 
                 $row->numero = $activeNumber;
                 $row->relation_groups = $relationGroups;
@@ -160,6 +182,7 @@ class DispositivoClienteController extends Controller
         return view('dispositivocliente.dispositivo-cliente', [
             'title' => 'Módulo Dispositivo cliente',
             'singularTitle' => 'Dispositivo cliente',
+            'resultsLabel' => 'Dispositivos',
             'items' => $items,
             'stats' => [
                 ['label' => 'Total de Dispositivos', 'value' => (clone $query)->count()],
@@ -171,10 +194,10 @@ class DispositivoClienteController extends Controller
                 ['key' => 'vehiculo_placa', 'label' => 'Vehículo', 'type' => 'text'],
                 ['key' => 'numero', 'label' => 'Número', 'type' => 'text'],
                 ['key' => 'nombre_cliente', 'label' => 'Cliente', 'type' => 'text'],
-                ['key' => 'marcaDispositivo', 'label' => 'Marca', 'type' => 'text'],
+                ['key' => 'servicio', 'label' => 'Servicio', 'type' => 'text'],
                 ['key' => 'modeloDispositivo', 'label' => 'Modelo', 'type' => 'text'],
-                ['key' => 'fechaInstalacion', 'label' => 'Fecha de instalación', 'type' => 'date'],
-                ['key' => 'fechaBaja', 'label' => 'Fecha de baja', 'type' => 'date'],
+                ['key' => 'fechaInstalacion', 'label' => 'Fecha Inicio', 'type' => 'date'],
+                ['key' => 'fechaBaja', 'label' => 'Fecha Fin', 'type' => 'date'],
                 ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
             ],
             'filters' => [
@@ -191,22 +214,16 @@ class DispositivoClienteController extends Controller
                     'placeholder' => 'Buscar placa',
                 ],
                 [
+                    'name' => 'numero',
+                    'label' => 'Número',
+                    'type' => 'text',
+                    'placeholder' => 'Buscar número',
+                ],
+                [
                     'name' => 'nombreComercial',
                     'label' => 'Cliente',
                     'type' => 'text',
                     'placeholder' => 'Buscar cliente',
-                ],
-                [
-                    'name' => 'marcaDispositivo',
-                    'label' => 'Marca',
-                    'type' => 'text',
-                    'placeholder' => 'Buscar marca',
-                ],
-                [
-                    'name' => 'modeloDispositivo',
-                    'label' => 'Modelo',
-                    'type' => 'text',
-                    'placeholder' => 'Buscar modelo',
                 ],
                 [
                     'name' => 'estado',
@@ -219,7 +236,6 @@ class DispositivoClienteController extends Controller
                     'placeholder' => 'Todos los estados',
                 ],
             ],
-            'createRoute' => route('modules.dispositivo-cliente.create'),
             'editRoute' => 'modules.dispositivo-cliente.edit',
             'showRoute' => 'modules.dispositivo-cliente.edit',
             'destroyRoute' => 'modules.dispositivo-cliente.destroy',
@@ -322,6 +338,7 @@ class DispositivoClienteController extends Controller
                     'type' => 'select',
                     'label' => 'Estado',
                     'required' => true,
+                    'value' => '1',
                     'options' => [
                         ['value' => '1', 'label' => 'Activo'],
                         ['value' => '0', 'label' => 'Inactivo'],
@@ -353,28 +370,27 @@ class DispositivoClienteController extends Controller
         return redirect()->route('modules.dispositivo-cliente')->with('success', 'Dispositivo cliente creado correctamente.');
     }
 
-    public function edit(string $id): View|RedirectResponse
+    public function edit(Request $request, string $id): View|RedirectResponse
     {
         $record = $this->findRecord($id);
         if (!$record) {
             return redirect()->route('modules.dispositivo-cliente')->with('error', 'No se encontró el dispositivo solicitado.');
         }
 
-        $detnumerosdispositivo = DB::table('detnumerosdispositivo as n')
-            ->leftJoin('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'n.dispositivoCliente_iddispositivoCliente')
-            ->leftJoin('vehiculo as v', 'v.placa', '=', 'dc.vehiculo_placa')
-            ->leftJoin('cliente as c', 'c.idcliente', '=', 'v.cliente_idcliente')
-            ->where('n.dispositivoCliente_iddispositivoCliente', $id)
+        $historialDispositivoCliente = DB::table('historial_dispositivocliente as h')
             ->select([
-                'n.iddetNumerosDispositivo',
-                'n.dispositivoCliente_iddispositivoCliente',
-                DB::raw('COALESCE(v.placa, dc.vehiculo_placa, "") as vehiculo_placa'),
-                DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as nombre_cliente'),
-                'n.numeroTelefonico_numeroTelefonico',
-                'n.fechaAsignacion',
+                'h.idhistorial_dispositivocliente',
+                'h.dispositivoCliente_iddispositivoCliente',
+                'h.detNumerosDispositivo_iddetNumerosDispositivo',
+                'h.vehiculo',
+                'h.cliente',
+                'h.numerotelefono',
+                'h.fechainicio',
+                'h.fechafin',
             ])
-            ->orderByDesc('n.fechaAsignacion')
-            ->orderByDesc('n.iddetNumerosDispositivo')
+            ->where('h.dispositivoCliente_iddispositivoCliente', $id)
+            ->orderByDesc('h.fechafin')
+            ->orderByDesc('h.idhistorial_dispositivocliente')
             ->get();
 
         return view('dispositivocliente.dispositivo-cliente-form', [
@@ -383,7 +399,10 @@ class DispositivoClienteController extends Controller
             'mode' => 'edit',
             'readOnly' => true,
             'formAction' => route('modules.dispositivo-cliente.update', $record->iddispositivoCliente),
-            'backRoute' => route('modules.dispositivo-cliente'),
+            'backRoute' => $request->query('return_route') === 'modules.clientes'
+                ? route('modules.clientes')
+                : route('modules.dispositivo-cliente'),
+            'return_route' => $request->query('return_route'),
             'record' => $record,
             'fields' => [
                 [
@@ -443,13 +462,14 @@ class DispositivoClienteController extends Controller
                     'placeholder' => 'Selecciona estado',
                 ],
             ],
-            'detnumerosdispositivo' => $detnumerosdispositivo,
+            'historialDispositivoCliente' => $historialDispositivoCliente,
             
         ] + $this->prepareLockViewData(self::LOCK_RESOURCE, $record->iddispositivoCliente));
     }
 
     public function update(Request $request, string $id): RedirectResponse
     {
+        
         $recordExists = DB::table('dispositivocliente')->where('iddispositivoCliente', $id)->exists();
         if (!$recordExists) {
             return redirect()->route('modules.dispositivo-cliente')->with('error', 'No se encontró el dispositivo solicitado.');
@@ -471,7 +491,40 @@ class DispositivoClienteController extends Controller
         $validated['fechaInstalacion'] = $this->normalizeDateInput($validated['fechaInstalacion'] ?? null);
         $validated['fechaBaja'] = $this->normalizeDateInput($validated['fechaBaja'] ?? null);
 
-        DB::table('dispositivocliente')->where('iddispositivoCliente', $id)->update($validated);
+        DB::transaction(function () use ($id, $validated) {
+            $current = DB::table('dispositivocliente')
+                ->where('iddispositivoCliente', $id)
+                ->first();
+
+            if ($current && (string) $current->estado === '1' && (string) $validated['estado'] === '0') {
+                $vehicle = DB::table('vehiculo')
+                    ->where('placa', $validated['vehiculo_placa'])
+                    ->first(['placa', 'cliente_idcliente']);
+                $clientName = $vehicle ? DB::table('cliente')
+                    ->where('idcliente', $vehicle->cliente_idcliente)
+                    ->selectRaw('COALESCE(nombreComercial, razonSocial, idcliente) as nombre_cliente')
+                    ->value('nombre_cliente') : null;
+                $latestNumber = DB::table('detnumerosdispositivo')
+                    ->where('dispositivoCliente_iddispositivoCliente', $id)
+                    ->orderByDesc('fechaAsignacion')
+                    ->orderByDesc('iddetNumerosDispositivo')
+                    ->first(['iddetNumerosDispositivo', 'numeroTelefonico_numeroTelefonico']);
+
+                if ($latestNumber) {
+                    DB::table('historial_dispositivocliente')->insert([
+                        'dispositivoCliente_iddispositivoCliente' => $id,
+                        'detNumerosDispositivo_iddetNumerosDispositivo' => $latestNumber->iddetNumerosDispositivo,
+                        'cliente' => $clientName,
+                        'vehiculo' => $vehicle?->placa,
+                        'numerotelefono' => $latestNumber->numeroTelefonico_numeroTelefonico,
+                        'fechainicio' => $validated['fechaInstalacion'],
+                        'fechafin' => $validated['fechaBaja'],
+                    ]);
+                }
+            }
+
+            DB::table('dispositivocliente')->where('iddispositivoCliente', $id)->update($validated);
+        });
         $this->publishResourceEvent(self::LOCK_RESOURCE, $id, 'updated');
         $this->releaseLockIfOwned($request, self::LOCK_RESOURCE, $id);
 
@@ -557,28 +610,94 @@ class DispositivoClienteController extends Controller
 
     private function getExportRows(Request $request): array
     {
-        return DB::table('dispositivocliente as d')
+        $query = DB::table('dispositivocliente as d')
             ->leftJoin('vehiculo as v', 'v.placa', '=', 'd.vehiculo_placa')
+            ->leftJoin('cliente as c', 'c.idcliente', '=', 'v.cliente_idcliente')
+            ->leftJoinSub(
+                DB::table('serviciocliente')
+                    ->select('vehiculo_placa', DB::raw('MAX(idservicioCliente) as idservicioCliente'))
+                    ->groupBy('vehiculo_placa'),
+                'latest_sc',
+                function ($join) {
+                    $join->on('latest_sc.vehiculo_placa', '=', 'd.vehiculo_placa');
+                }
+            )
+            ->leftJoin('serviciocliente as sc', 'sc.idservicioCliente', '=', 'latest_sc.idservicioCliente')
+            ->leftJoin('almacen as sa', 'sa.idalmacen', '=', 'sc.almacen_idalmacen')
             ->select([
                 'd.iddispositivoCliente',
                 'd.vehiculo_placa',
+                DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as nombre_cliente'),
                 // Obtener número activo (última asignación) mediante subconsulta
                 DB::raw('(select n.numeroTelefonico_numeroTelefonico from detnumerosdispositivo n where n.dispositivoCliente_iddispositivoCliente = d.iddispositivoCliente order by n.fechaAsignacion desc, n.iddetNumerosDispositivo desc limit 1) as numero'),
                 'd.marcaDispositivo',
                 'd.modeloDispositivo',
+                DB::raw("CONCAT(COALESCE(sa.detalle, ''), CASE COALESCE(sa.periodo, 0) WHEN 30 THEN ' - Mensual' WHEN 90 THEN ' - 3 Meses' WHEN 180 THEN ' - 6 Meses' WHEN 365 THEN ' - 12 Meses' WHEN 730 THEN ' - 24 Meses' WHEN 1095 THEN ' - 36 Meses' WHEN 1460 THEN ' - 48 Meses' ELSE '' END) as servicio"),
                 'd.fechaInstalacion',
                 'd.fechaBaja',
                 'd.estado',
-            ])
-            ->orderBy('d.iddispositivoCliente')
-            ->get()
+            ]);
+
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $query->where(function ($builder) use ($term) {
+                $builder
+                    ->where('d.iddispositivoCliente', 'like', $term)
+                    ->orWhere('d.vehiculo_placa', 'like', $term)
+                    ->orWhere('v.placa', 'like', $term)
+                    ->orWhere('c.nombreComercial', 'like', $term)
+                    ->orWhere('d.marcaDispositivo', 'like', $term)
+                    ->orWhere('d.modeloDispositivo', 'like', $term)
+                    ->orWhereExists(function ($numberQuery) use ($term) {
+                        $numberQuery->select(DB::raw(1))
+                            ->from('detnumerosdispositivo as n')
+                            ->whereColumn('n.dispositivoCliente_iddispositivoCliente', 'd.iddispositivoCliente')
+                            ->where('n.numeroTelefonico_numeroTelefonico', 'like', $term);
+                    });
+            });
+        }
+
+        $id = trim((string) $request->input('iddispositivoCliente', ''));
+        if ($id !== '') {
+            $query->where('d.iddispositivoCliente', 'like', "%{$id}%");
+        }
+
+        $numero = trim((string) $request->input('numero', ''));
+        if ($numero !== '') {
+            $query->whereExists(function ($numberQuery) use ($numero) {
+                $numberQuery->select(DB::raw(1))
+                    ->from('detnumerosdispositivo as n')
+                    ->whereColumn('n.dispositivoCliente_iddispositivoCliente', 'd.iddispositivoCliente')
+                    ->where('n.numeroTelefonico_numeroTelefonico', 'like', "%{$numero}%");
+            });
+        }
+
+        $placa = trim((string) $request->input('vehiculo_placa', ''));
+        if ($placa !== '') {
+            $query->where('d.vehiculo_placa', 'like', "%{$placa}%");
+        }
+
+        $cliente = trim((string) $request->input('nombreComercial', ''));
+        if ($cliente !== '') {
+            $query->where('c.nombreComercial', 'like', "%{$cliente}%");
+        }
+
+        $estado = trim((string) $request->input('estado', ''));
+        if ($estado !== '') {
+            $query->where('d.estado', $estado);
+        }
+
+        return $query->orderBy('d.iddispositivoCliente')->get()
             ->map(function ($item) {
                 return [
                     'iddispositivoCliente' => $item->iddispositivoCliente,
                     'vehiculo_placa' => $item->vehiculo_placa,
+                    'nombre_cliente' => $item->nombre_cliente,
                     'numero' => $item->numero ?? '-',
                     'marcaDispositivo' => $item->marcaDispositivo,
                     'modeloDispositivo' => $item->modeloDispositivo,
+                    'servicio' => $item->servicio ?: '-',
                     'fechaInstalacion' => $item->fechaInstalacion,
                     'fechaBaja' => $item->fechaBaja,
                     'estado' => ((string) $item->estado === '1') ? 'Activo' : 'Inactivo',
@@ -595,6 +714,7 @@ class DispositivoClienteController extends Controller
             ['key' => 'numero', 'label' => 'Número'],
             ['key' => 'marcaDispositivo', 'label' => 'Marca'],
             ['key' => 'modeloDispositivo', 'label' => 'Modelo'],
+            ['key' => 'servicio', 'label' => 'Servicio'],
             ['key' => 'fechaInstalacion', 'label' => 'Fecha instalación'],
             ['key' => 'fechaBaja', 'label' => 'Fecha baja'],
             ['key' => 'estado', 'label' => 'Estado'],

@@ -481,7 +481,7 @@ class CotizacionService
             ->get()
             ->map(function ($c) {
                 $label = trim((string) ($c->razonSocial ?? '')) ?: trim((string) ($c->nombreComercial ?? '')) ?: trim((string) ($c->idcliente ?? ''));
-                return (object) ['idcliente' => $c->idcliente, 'label' => $label];
+                return (object) ['idcliente' => $c->idcliente, 'label' => $label, 'document' => $c->idcliente];
             });
     }
 

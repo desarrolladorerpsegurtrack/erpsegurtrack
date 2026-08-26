@@ -27,7 +27,7 @@ class ElementoAlmacenController extends Controller
                 'e.idAuxiliar',
                 DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
                 DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
-                DB::raw('CASE WHEN e.estado = 1 THEN "Activo" ELSE "Inactivo" END as estado_label'),
+                DB::raw('CASE e.estado WHEN 1 THEN "Activo" WHEN 0 THEN "Inactivo" WHEN 2 THEN "Comodato" WHEN 3 THEN "Comodato venta" WHEN 4 THEN "Migrado" WHEN 5 THEN "Migrado venta" WHEN 6 THEN "Ventas" ELSE "Inactivo" END as estado'),
             ]);
 
         $search = trim((string) $request->input('q', ''));
@@ -122,6 +122,11 @@ class ElementoAlmacenController extends Controller
                     'options' => [
                         ['value' => '1', 'label' => 'Activo'],
                         ['value' => '0', 'label' => 'Inactivo'],
+                        ['value' => '2', 'label' => 'Comodato'],
+                        ['value' => '3', 'label' => 'Comodato venta'],
+                        ['value' => '4', 'label' => 'Migrado'],
+                        ['value' => '5', 'label' => 'Migrado venta'],
+                        ['value' => '6', 'label' => 'Ventas'],
                     ],
                     'placeholder' => 'Todos los estados',
                 ],
@@ -161,9 +166,7 @@ class ElementoAlmacenController extends Controller
                     'required' => true,
                     'maxlength' => 30,
                     'minlength' => 1,
-                    'pattern' => '^[0-9]+$',
-                    'inputmode' => 'numeric',
-                    'helpText' => 'Solo números, hasta 30 caracteres.',
+                    'helpText' => 'Hasta 30 caracteres.',
                 ],
                 [
                     'name' => 'dispositivo_iddispositivo',
@@ -181,10 +184,16 @@ class ElementoAlmacenController extends Controller
                     'type' => 'select',
                     'label' => 'Estado',
                     'required' => true,
+                    'value' => '1',
                     'placeholder' => 'Selecciona un estado',
                     'options' => [
                         '1' => 'Activo',
-                        '0' => 'Inactivo',                  
+                        '0' => 'Inactivo',
+                        '2' => 'Comodato',
+                        '3' => 'Comodato venta',
+                        '4' => 'Migrado',
+                        '5' => 'Migrado venta',
+                        '6' => 'Ventas',
                     ],
                 ],
                 [
@@ -203,10 +212,10 @@ class ElementoAlmacenController extends Controller
     public function elementoAlmacenStore(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'imei' => ['required', 'string', 'max:30', 'regex:/^[0-9]+$/'],
+            'imei' => ['required', 'string', 'max:30'],
             'dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
             'fechaIngreso' => ['nullable', 'date'],
-            'estado' => ['nullable', 'integer', 'in:0,1'],
+            'estado' => ['nullable', 'integer', 'in:0,1,2,3,4,5,6'],
             'idAuxiliar' => ['nullable', 'string', 'max:30'],
         ]);
 
@@ -246,9 +255,7 @@ class ElementoAlmacenController extends Controller
                     'required' => true,
                     'maxlength' => 30,
                     'minlength' => 1,
-                    'pattern' => '^[0-9]+$',
-                    'inputmode' => 'numeric',
-                    'helpText' => 'Solo números, hasta 30 caracteres.',
+                    'helpText' => 'Hasta 30 caracteres.',
                 ],
                 [
                     'name' => 'dispositivo_iddispositivo',
@@ -268,8 +275,13 @@ class ElementoAlmacenController extends Controller
                     'required' => false,
                     'placeholder' => 'Selecciona un estado',
                     'options' => [
-                        '0' => 'Inactivo',
                         '1' => 'Activo',
+                        '0' => 'Inactivo',
+                        '2' => 'Comodato',
+                        '3' => 'Comodato venta',
+                        '4' => 'Migrado',
+                        '5' => 'Migrado venta',
+                        '6' => 'Ventas',
                     ],
                 ],
                 [
@@ -299,10 +311,10 @@ class ElementoAlmacenController extends Controller
         }
 
         $validated = $request->validate([
-            'imei' => ['required', 'string', 'max:30', 'regex:/^[0-9]+$/'],
+            'imei' => ['required', 'string', 'max:30'],
             'dispositivo_iddispositivo' => ['required', 'integer', 'exists:almacen,idalmacen'],
             'fechaIngreso' => ['nullable', 'date'],
-            'estado' => ['nullable', 'integer', 'in:0,1'],
+            'estado' => ['nullable', 'integer', 'in:0,1,2,3,4,5,6'],
             'idAuxiliar' => ['nullable', 'string', 'max:30'],
         ]);
 
@@ -359,7 +371,7 @@ class ElementoAlmacenController extends Controller
                 'e.estado',
                 'e.idAuxiliar',
                 DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
-                DB::raw('CASE WHEN e.estado = 1 THEN "Activo" ELSE "Inactivo" END as estado_label'),
+                DB::raw('CASE e.estado WHEN 1 THEN "Activo" WHEN 0 THEN "Inactivo" WHEN 2 THEN "Comodato" WHEN 3 THEN "Comodato venta" WHEN 4 THEN "Migrado" WHEN 5 THEN "Migrado venta" WHEN 6 THEN "Ventas" ELSE "Inactivo" END as estado'),
                 DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
             ]);
 
@@ -406,7 +418,7 @@ class ElementoAlmacenController extends Controller
             ['key' => 'imei', 'label' => 'IMEI'],
             ['key' => 'almacen_label', 'label' => 'Almacén'],
             ['key' => 'fechaIngreso', 'label' => 'Fecha ingreso'],
-            ['key' => 'estado_label', 'label' => 'Estado'],
+            ['key' => 'estado', 'label' => 'Estado'],
             ['key' => 'idAuxiliar', 'label' => 'ID Auxiliar'],
         ];
 

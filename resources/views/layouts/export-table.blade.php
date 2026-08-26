@@ -89,7 +89,13 @@
                             if (isset($column['value']) && is_callable($column['value'])) {
                                 $value = $column['value']($row);
                             } else {
-                                $value = data_get($row, $column['key']);
+                                $value = data_get($row, ($column['key'] ?? '') . '_label');
+                                if ($value === null) {
+                                    $value = data_get($row, ($column['key'] ?? '') . '_display');
+                                }
+                                if ($value === null) {
+                                    $value = data_get($row, $column['key']);
+                                }
                             }
                         @endphp
                         <td>{!! $value !!}</td>

@@ -1,9 +1,9 @@
 <div class="overflow-hidden rounded-xl border border-black bg-white shadow-sm">
-    <div class="border-b border-black px-4 py-3 text-sm font-semibold text-slate-800 bg-slate-200">
+    <div class="border-b border-black px-2 py-2 text-sm font-semibold text-slate-800 bg-slate-200">
         Clientes del Grupo
     </div>
 
-    <div class="">
+    <div style="max-height: 200px; overflow-x: auto; overflow-y: auto;">
         @php
             $groups = collect($relationGroups ?? [])->values();
         @endphp
@@ -13,12 +13,11 @@
         @else
             @foreach($groups as $group)
                 <div class="">
-                    <div class="overflow-x-auto">
                         <table class="w-full text-left text-sm border-collapse border border-black">
-                            <thead class="bg-slate-300 text-slate-800">
+                            <thead class="sticky top-0 z-10 bg-slate-300 text-slate-800">
                                 <tr>
                                     @foreach(($group['columns'] ?? []) as $col)
-                                        <th class="px-4 py-3 whitespace-nowrap font-semibold border-b border-black">
+                                        <th title="{{ $col['label'] ?? '' }}" class="px-4 py-3 whitespace-nowrap font-semibold border-b border-black bg-slate-300">
                                             {{ $col['label'] ?? '' }}
                                         </th>
                                     @endforeach
@@ -37,7 +36,7 @@
 
                                                     \Illuminate\Support\Facades\Route::has('modules.clientes.edit') && !empty(data_get($record, 'idcliente'));
                                             @endphp
-                                            <td
+                                            <td title="{{ (string) $val }}"
                                                 class="px-4 py-3 align-middle border-b border-black {{ $type === 'status' ? 'text-center' : '' }}">
                                                 @if($type === 'status')
                                                     @php
@@ -66,7 +65,6 @@
                                 @endforeach
                             </tbody>
                         </table>
-                    </div>
                 </div>
             @endforeach
         @endif

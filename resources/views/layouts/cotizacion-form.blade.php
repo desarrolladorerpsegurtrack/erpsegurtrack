@@ -1813,10 +1813,12 @@
                                                         @php
                                                             $optKey = data_get($option, $field['optionKey'] ?? 'id');
                                                             $optLabel = data_get($option, $field['optionLabel'] ?? 'name');
+                                                            $optDocument = data_get($option, 'document', $optKey);
                                                         @endphp
                                                         <option 
                                                             value="{{ $optKey }}" 
                                                             title="{{ $optLabel }}"
+                                                            @if(($field['name'] ?? '') === 'cliente_idcliente') data-document="{{ $optDocument }}" @endif
                                                             @if((string) $fieldValue === (string) $optKey) selected @endif
                                                         >
                                                             {{ $optLabel }}
@@ -2236,7 +2238,7 @@
                                 </div>
 
                                 <div class="flex-1 overflow-y-auto px-4 py-4 bg-slate-50/50">
-                                    <div id="modal-inputs-container" class="flex flex-col md:flex-row gap-4 mb-6 items-end bg-white p-4 rounded-md border border-slate-200 shadow-sm">
+                                    <div id="modal-inputs-container" class="flex flex-col md:flex-row gap-4 mb-6 items-end bg-white p-3 rounded-md border border-slate-200 shadow-sm">
                                         <div class="flex-1 w-full relative product-col">
                                             <label class="block text-xs font-semibold text-slate-600 mb-1">Producto / Servicio</label>
                                             <select id="modal-product-select" class="form-control w-full" data-placeholder="Buscar producto o servicio...">
@@ -2253,7 +2255,7 @@
                                             <label class="block text-xs font-semibold text-slate-600 mb-1">Cant.</label>
                                             <input type="number" id="modal-qty" value="1" min="1" step="1" class="form-control text-sm w-full text-center">
                                         </div>
-                                        <div class="w-20 modal-input-col">
+                                        <div class="w-24 modal-input-col">
                                             <label class="block text-xs font-semibold text-slate-600 mb-1">
                                                 Precio Unit.
                                             </label>
@@ -2418,6 +2420,14 @@
                                     formasPago: @json($f_fp['optionsData'] ?? []),
                                     monedas: @json($f_mon['optionsData'] ?? []),
                                 };
+                                const globalVigenciaSelect = document.querySelector('select[name="vigenciaOferta_idvigenciaOferta"]');
+                                const syncGlobalVigenciaToGroups = () => {
+                                    if (!globalVigenciaSelect) return;
+                                    document.querySelectorAll('select[name$="[vigenciaOferta_idvigenciaOferta]"]').forEach((select) => {
+                                        select.value = globalVigenciaSelect.value;
+                                    });
+                                };
+                                globalVigenciaSelect?.addEventListener('change', syncGlobalVigenciaToGroups);
                                 
                                 if (isEditMode) {
                                     btnSave.textContent = 'Agregar Items';
@@ -2577,7 +2587,11 @@
                                     const defaultFormaPago = '1';  // Contado
                                     const defaultMoneda = isEquipamiento ? '2' : '1'; // Dolar para equipo, Sol para planes/servicios
 
-                                    const selectedVigencia = getGroupFieldValue(safeTipo, 'vigenciaOferta_idvigenciaOferta', '');
+                                    const selectedVigencia = getGroupFieldValue(
+                                        safeTipo,
+                                        'vigenciaOferta_idvigenciaOferta',
+                                        globalVigenciaSelect?.value || '1'
+                                    );
                                     const selectedFormaPago = getGroupFieldValue(safeTipo, 'formaPago_idformaPago', defaultFormaPago);
                                     const selectedMoneda = getGroupFieldValue(safeTipo, 'moneda_idmoneda', defaultMoneda);
                                     const comentario = getGroupFieldValue(safeTipo, 'comentario', '');
@@ -3096,6 +3110,7 @@
                                         ${renderGroupGeneralFields(safeTipo)}
                                     `;
                                     container.appendChild(wrapper);
+                                    syncGlobalVigenciaToGroups();
                                     if (datosGeneralesPlaceholder) {
                                         datosGeneralesPlaceholder.classList.add('hidden');
                                     }

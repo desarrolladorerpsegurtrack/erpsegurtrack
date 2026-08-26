@@ -42,9 +42,10 @@
                 'columns' => [
                     ['key' => 'idservicioCliente', 'label' => 'ID'],
                     ['key' => 'vehiculo_placa', 'label' => 'Vehículo'],
-                    ['key' => 'almacen_detalle', 'label' => 'Almacén'],
-                    ['key' => 'fechaInicio', 'label' => 'Inicio'],
-                    ['key' => 'fecheVencimiento', 'label' => 'Vencimiento'],
+                    ['key' => 'almacen_detalle', 'label' => 'Servicio'],
+                    ['key' => 'plataforma', 'label' => 'Plataforma'],
+                    ['key' => 'fechaInicio', 'label' => 'Fecha Inicio'],
+                    ['key' => 'fechaVencimiento', 'label' => 'Fecha Fin'],
                     ['key' => 'monto', 'label' => 'Monto'],
                     ['key' => 'estado', 'label' => 'Estado'],
                     ['key' => 'docReferencia', 'label' => 'Documento'],
@@ -86,23 +87,30 @@
 
             $hasServices = !empty($serviceGroup['records']);
             $hasVehicles = !empty($vehicleGroup['records']);
-            $hasDevices = !empty($deviceGroup['records']);
+            $serviceTypeCount = collect($serviceGroup['records'] ?? [])->count();
+            $serviceVehicleCount = collect($serviceGroup['records'] ?? [])
+                ->flatMap(function ($service) {
+                    $plates = $service['vehicle_plates'] ?? [];
+                    return !empty($plates) ? $plates : [data_get($service, 'vehiculo_placa')];
+                })
+                ->filter(fn ($plate) => trim((string) $plate) !== '')
+                ->unique()
+                ->count();
 
             // Determinar el nivel inicial en el que arrancará
             $startLevel = 1;
             if (!$hasServices) {
-                $startLevel = $hasVehicles ? 2 : ($hasDevices ? 3 : 1);
+                $startLevel = $hasVehicles ? 2 : 1;
             }
         @endphp
 
-        @if($isClienteModule && ($hasServices || $hasVehicles || $hasDevices))
+        @if($isClienteModule && ($hasServices || $hasVehicles))
             <!-- CONTENEDOR ACORDEÓN INTERACTIVO DE 3 NIVELES -->
             <div id="relation-panel-{{ $row->idcliente ?? 'generic' }}" class="flex flex-col gap-3 relation-panel-accordion"
                 data-client-id="{{ $row->idcliente ?? '' }}"
                 data-start-level="{{ $startLevel }}"
                 data-has-services="{{ $hasServices ? 'true' : 'false' }}"
-                data-has-vehicles="{{ $hasVehicles ? 'true' : 'false' }}"
-                data-has-devices="{{ $hasDevices ? 'true' : 'false' }}">
+                data-has-vehicles="{{ $hasVehicles ? 'true' : 'false' }}">
 
                 <!-- Cabecera / Breadcrumbs de navegación -->
                 <div
@@ -119,10 +127,6 @@
                                 data-level="2">Vehículos</span>
                         @endif
 
-                        @if($hasDevices || $hasVehicles || $hasServices)
-                            <span class="bc-separator sep-2 text-slate-400 hidden">/</span>
-                            <span class="bc-item bc-3 text-slate-500 hidden" data-level="3">Dispositivos</span>
-                        @endif
                     </div>
                 </div>
 
@@ -132,10 +136,16 @@
                         <div class="overflow-hidden rounded-md border border-black bg-white shadow-sm">
                             <div
                                 class="border-b border-black px-4 py-3 text-sm font-semibold text-slate-800 bg-slate-200 flex justify-between items-center gap-4">
-                                <span>Servicios Cliente</span>
-                                <span class="text-xs text-slate-200 font-normal">Haz clic en una fila para ver sus vehículos</span>
+                                <div class="flex items-center gap-4">
+                                    <span>Servicios Cliente</span>
+                                    <span class="text-xs font-normal text-slate-600">Haz clic en una fila para ver sus vehículos</span>
+                                </div>
+                                <div class="ml-auto flex shrink-0 items-center gap-4 text-sm font-semibold text-slate-800">
+                                    <span>N° Tipo Servicios: {{ $serviceTypeCount }}</span>
+                                    <span>N° Vehículos: {{  $serviceVehicleCount }}</span>
+                                </div>
                             </div>
-                            <div class="overflow-x-auto">
+                            <div style="max-height: 200px; overflow-x: auto; overflow-y: auto;">
                                 @php
                                     $serviceMaxTs = null;
                                     $serviceTimestamps = [];
@@ -148,15 +158,21 @@
                                     }
                                     if (!empty($serviceTimestamps)) $serviceMaxTs = max($serviceTimestamps);
                                 @endphp
-                                <table class="w-full text-left text-sm border-collapse border border-black">
+                                <table class="w-full table-fixed text-left text-sm border-collapse border border-black">
+                                    <colgroup>
+                                        <col style="width: 60%;">
+                                        <col style="width: 21%;">
+                                        <col style="width: 14%;">
+                                        <col style="width: 5%;">
+                                    </colgroup>
                                     <thead class="bg-slate-300 text-slate-800">
                                         <tr>
                                             @foreach(($serviceGroup['columns'] ?? []) as $col)
-                                                <th class="px-4 py-3 whitespace-nowrap font-semibold border-b border-black">
+                                                <th title="{{ $col['label'] ?? '' }}" class="sticky top-0 z-10 bg-slate-300 px-4 py-3 whitespace-nowrap font-normal border-b border-black">
                                                     {{ $col['label'] ?? '' }}
                                                 </th>
                                             @endforeach
-                                            <th class="w-10 border-b border-black"></th>
+                                            <th class="sticky top-0 z-10 bg-slate-300 w-10 border-b border-black"></th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -174,7 +190,8 @@
                                                 }
                                             @endphp
                                             <tr style="{{ $recVigenteStyle }}" class="bg-slate-100 border-b border-black hover:bg-slate-200 cursor-pointer transition-colors service-row-clickable"
-                                                data-vehicle-placa="{{ $record['vehiculo_placa'] ?? '' }}"
+                                                data-service-type="{{ $record['almacen_detalle'] ?? '' }}"
+                                                data-service-plates='@json($record['vehicle_plates'] ?? [])'
                                                 data-service-id="{{ $record['idservicioCliente'] ?? '' }}">
                                                 @foreach(($serviceGroup['columns'] ?? []) as $columnIndex => $column)
                                                     @php
@@ -182,12 +199,9 @@
                                                         $relationKey = (string) ($column['key'] ?? '');
                                                         $relationType = $column['type'] ?? 'text';
                                                         $isFirstColumn = $columnIndex === 0;
-                                                        $canEditRow = $isFirstColumn
-                                                            && $editConfig
-                                                            && !empty($editValue)
-                                                            && \Illuminate\Support\Facades\Route::has($editConfig['route']);
+                                                        $canEditRow = false;
                                                     @endphp
-                                                    <td
+                                                    <td title="{{ (string) $relationValue }}"
                                                         class="px-4 py-3 align-middle border-b border-black {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
                                                         @if($relationType === 'status' || $relationKey === 'estado')
                                                             @php
@@ -211,16 +225,16 @@
                                                         @elseif($relationType === 'date' || str_starts_with($relationKey, 'fecha'))
                                                             @php
                                                                 $formattedRelationDate = '-';
-                                                                if (!empty($relationValue) && $relationValue !== '0000-00-00 00:00:00') {
+                                                                if (!empty($relationValue) && $relationValue !== '0000-00-00 ') {
                                                                     try {
                                                                         $relationDate = \Illuminate\Support\Carbon::parse($relationValue);
                                                                         $relationMonths = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.'];
                                                                         $formattedRelationDate = sprintf(
-                                                                            '%s %s %s, %s',
+                                                                            '%s %s %s',
                                                                             $relationDate->format('d'),
                                                                             $relationMonths[(int) $relationDate->format('m') - 1],
                                                                             $relationDate->format('Y'),
-                                                                            $relationDate->format('H:i')
+
                                                                         );
                                                                     } catch (\Throwable $throwable) {
                                                                         $formattedRelationDate = (string) $relationValue;
@@ -228,7 +242,7 @@
                                                                 }
                                                             @endphp
                                                             @if($isFirstColumn && $canEditRow)
-                                                                <a href="{{ route($editConfig['route'], $editValue) }}"
+                                                                <a href="{{ route($editConfig['route'], [$editValue, 'return_route' => 'modules.clientes']) }}"
                                                                     class="font-medium text-slate-700 hover:text-primary hover:underline">
                                                                     <span>{{ $formattedRelationDate }}</span>
                                                                 </a>
@@ -237,7 +251,7 @@
                                                             @endif
                                                         @else
                                                             @if($isFirstColumn && $canEditRow)
-                                                                <a href="{{ route($editConfig['route'], $editValue) }}"
+                                                                <a href="{{ route($editConfig['route'], [$editValue, 'return_route' => 'modules.clientes']) }}"
                                                                     class="font-medium text-slate-700 hover:text-primary hover:underline">
                                                                     <span class="whitespace-nowrap">{{ $relationValue }}</span>
                                                                 </a>
@@ -263,12 +277,16 @@
                 @if($hasVehicles || $hasServices)
                     <div class="level-container level-2-container hidden">
                         <div class="overflow-hidden rounded-md border border-black bg-white shadow-sm">
-                            <div
-                                class="border-b border-black px-4 py-3 text-sm font-semibold text-slate-800 bg-slate-200 flex justify-between items-center gap-4">
-                                <span class="lvl2-title-label">Vehículos del Cliente</span>
-                                <span class="text-xs text-slate-200 font-normal">Haz clic en una fila para ver sus dispositivos</span>
+                            <div class="border-b border-black px-4 py-3 text-sm font-normal text-slate-800 bg-slate-200 flex justify-between items-center gap-4">
+                                <div class="flex items-center gap-4">   
+                                    <span class="lvl2-title-label">Vehículos del Cliente</span>
+                                </div>
+                                <div class="ml-auto flex shrink-0 items-center gap-4 text-sm font-semibold text-slate-800">
+                                    <span>N° Tipo Servicios: {{ $serviceTypeCount }}</span>
+                                    <span>N° Vehículos: {{ $serviceVehicleCount }}</span>
+                                </div>
                             </div>
-                            <div class="overflow-x-auto">
+                            <div style="max-width: 100%; max-height: 200px; overflow-x: auto; overflow-y: auto;">
                                 @php
                                     $vehicleMaxTs = null;
                                     $vehicleTimestamps = [];
@@ -281,15 +299,14 @@
                                     }
                                     if (!empty($vehicleTimestamps)) $vehicleMaxTs = max($vehicleTimestamps);
                                 @endphp
-                                <table class="w-full text-left text-sm border-collapse border border-black">
+                                <table class="w-full text-left text-sm border-collapse border border-black" style="width: 100%; min-width: 1200px; table-layout: auto;">
                                     <thead class="bg-slate-300 text-slate-800">
                                         <tr>
                                             @foreach(($vehicleGroup['columns'] ?? []) as $col)
-                                                <th class="px-4 py-3 whitespace-nowrap font-semibold border-b border-black">
+                                                <th title="{{ $col['label'] ?? '' }}" style="{{ $loop->first ? 'min-width: 110px;' : '' }}" class="sticky top-0 z-10 bg-slate-300 px-4 py-3 whitespace-nowrap font-normal border-b border-black">
                                                     {{ $col['label'] ?? '' }}
                                                 </th>
                                             @endforeach
-                                            <th class="w-10 border-b border-black"></th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -306,7 +323,7 @@
                                                     }
                                                 }
                                             @endphp
-                                            <tr style="{{ $recVigenteStyle }}" class="bg-slate-100 border-b border-black hover:bg-slate-200 cursor-pointer transition-colors vehicle-row-clickable"
+                                            <tr style="{{ $recVigenteStyle }}; width: 100%;" class="bg-slate-100 border-b border-black hover:bg-slate-200 transition-colors vehicle-row-clickable"
                                                 data-placa="{{ $record['placa'] ?? '' }}">
                                                 @foreach(($vehicleGroup['columns'] ?? []) as $columnIndex => $column)
                                                     @php
@@ -319,8 +336,8 @@
                                                             && !empty($editValue)
                                                             && \Illuminate\Support\Facades\Route::has($editConfig['route']);
                                                     @endphp
-                                                    <td
-                                                        class="px-4 py-3 align-middle border-b border-black {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
+                                                    <td title="{{ (string) $relationValue }}" style="{{ $isFirstColumn ? 'min-width: 110px;' : '' }}"
+                                                        class="px-4 py-3 align-middle whitespace-nowrap border-b border-black {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
                                                         @if($relationType === 'status' || $relationKey === 'estado')
                                                             @php
                                                                 $isActive = false;
@@ -343,16 +360,15 @@
                                                         @elseif($relationType === 'date' || str_starts_with($relationKey, 'fecha'))
                                                             @php
                                                                 $formattedRelationDate = '-';
-                                                                if (!empty($relationValue) && $relationValue !== '0000-00-00 00:00:00') {
+                                                                if (!empty($relationValue) && $relationValue !== '0000-00-00') {
                                                                     try {
                                                                         $relationDate = \Illuminate\Support\Carbon::parse($relationValue);
                                                                         $relationMonths = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.'];
                                                                         $formattedRelationDate = sprintf(
-                                                                            '%s %s %s, %s',
+                                                                            '%s %s %s',
                                                                             $relationDate->format('d'),
                                                                             $relationMonths[(int) $relationDate->format('m') - 1],
-                                                                            $relationDate->format('Y'),
-                                                                            $relationDate->format('H:i')
+                                                                            $relationDate->format('Y')
                                                                         );
                                                                     } catch (\Throwable $throwable) {
                                                                         $formattedRelationDate = (string) $relationValue;
@@ -360,7 +376,7 @@
                                                                 }
                                                             @endphp
                                                             @if($isFirstColumn && $canEditRow)
-                                                                <a href="{{ route($editConfig['route'], $editValue) }}"
+                                                                <a href="{{ route($editConfig['route'], [$editValue, 'return_route' => 'modules.clientes']) }}"
                                                                     class="font-medium text-slate-700 hover:text-primary hover:underline">
                                                                     <span>{{ $formattedRelationDate }}</span>
                                                                 </a>
@@ -369,7 +385,7 @@
                                                             @endif
                                                         @else
                                                             @if($isFirstColumn && $canEditRow)
-                                                                <a href="{{ route($editConfig['route'], $editValue) }}"
+                                                                <a href="{{ route($editConfig['route'], [$editValue, 'return_route' => 'modules.clientes']) }}"
                                                                     class="font-medium text-slate-700 hover:text-primary hover:underline">
                                                                     <span class="whitespace-nowrap">{{ $relationValue }}</span>
                                                                 </a>
@@ -379,14 +395,11 @@
                                                         @endif
                                                     </td>
                                                 @endforeach
-                                                <td class="px-3 py-3 align-middle text-right text-slate-400 border-b border-black">
-                                                    <i data-lucide="chevron-right" class="h-4 w-4 stroke-[2]"></i>
-                                                </td>
                                             </tr>
                                         @endforeach
                                         <!-- Fila en caso de que no haya vehículos asociados al servicio -->
                                         <tr class="no-records-row hidden">
-                                            <td colspan="{{ count($vehicleGroup['columns']) + 1 }}"
+                                            <td colspan="{{ count($vehicleGroup['columns']) }}"
                                                 class="px-4 py-8 text-center text-slate-400 bg-slate-50/50">
                                                 No hay vehículos asociados a este servicio.
                                             </td>
@@ -398,140 +411,7 @@
                     </div>
                 @endif
 
-                <!-- NIVEL 3: DISPOSITIVOS -->
-                @if($hasDevices || $hasVehicles || $hasServices)
-                    <div class="level-container level-3-container hidden">
-                        <div class="overflow-hidden rounded-md border border-black bg-white shadow-sm">
-                            <div
-                                class="border-b border-black px-4 py-3 text-sm font-semibold text-slate-800 bg-slate-200 flex justify-between items-center gap-4">
-                                <span class="lvl3-title-label">Dispositivos del Vehículo</span>
-                                <span class="text-xs text-slate-200 font-normal">Detalle de Dispositivos</span>
-                            </div>
-                            <div class="overflow-x-auto">
-                                @php
-                                    $deviceMaxTs = null;
-                                    $deviceTimestamps = [];
-                                    foreach ((array) ($deviceGroup['records'] ?? []) as $r) {
-                                        $f = data_get($r, 'fechaAsignacion') ?? data_get($r, 'fecha_asignacion') ?? null;
-                                        if (!empty($f)) {
-                                            $ts = @strtotime($f);
-                                            if ($ts !== false && $ts !== null) $deviceTimestamps[] = $ts;
-                                        }
-                                    }
-                                    if (!empty($deviceTimestamps)) $deviceMaxTs = max($deviceTimestamps);
-                                @endphp
-                                <table class="w-full text-left text-sm border-collapse border border-black">
-                                    <thead class="bg-slate-300 text-slate-800">
-                                        <tr>
-                                            @foreach(($deviceGroup['columns'] ?? []) as $col)
-                                                <th class="px-4 py-3 whitespace-nowrap font-semibold border-b border-black">
-                                                    {{ $col['label'] ?? '' }}
-                                                </th>
-                                            @endforeach
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach(($deviceGroup['records'] ?? []) as $record)
-                                            @php
-                                                $editConfig = $relationEditRoutes['dispositivo_cliente'] ?? null;
-                                                $editValue = $editConfig ? data_get($record, $editConfig['key']) : null;
-                                                $recFecha = data_get($record, 'fechaAsignacion') ?? data_get($record, 'fecha_asignacion') ?? null;
-                                                $recVigenteStyle = '';
-                                                if (!empty($recFecha) && !empty($deviceMaxTs)) {
-                                                    $recTs = @strtotime($recFecha);
-                                                    if ($recTs !== false && $recTs === $deviceMaxTs) {
-                                                        $recVigenteStyle = 'color: #dc2626 !important;';
-                                                    }
-                                                }
-                                            @endphp
-                                            <tr style="{{ $recVigenteStyle }}" class="bg-slate-100 border-b border-black hover:bg-slate-200 device-row"
-                                                data-vehicle-placa="{{ $record['vehiculo_placa'] ?? '' }}">
-                                                @foreach(($deviceGroup['columns'] ?? []) as $columnIndex => $column)
-                                                    @php
-                                                        $relationValue = data_get($record, $column['key'] ?? '') ?? '-';
-                                                        $relationKey = (string) ($column['key'] ?? '');
-                                                        $relationType = $column['type'] ?? 'text';
-                                                        $isFirstColumn = $columnIndex === 0;
-                                                        $canEditRow = $isFirstColumn
-                                                            && $editConfig
-                                                            && !empty($editValue)
-                                                            && \Illuminate\Support\Facades\Route::has($editConfig['route']);
-                                                    @endphp
-                                                    <td
-                                                        class="px-4 py-3 align-middle border-b border-black {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
-                                                        @if($relationType === 'status' || $relationKey === 'estado')
-                                                            @php
-                                                                $isActive = false;
-                                                                $label = '';
-                                                                if (is_numeric($relationValue)) {
-                                                                    $isActive = (string) $relationValue === '1';
-                                                                    $label = $isActive ? 'Activo' : 'Inactivo';
-                                                                } else {
-                                                                    $label = trim((string) $relationValue);
-                                                                    $isActive = stripos($label, 'activo') !== false && stripos($label, 'inactivo') === false;
-                                                                }
-                                                            @endphp
-                                                            <div
-                                                                class="flex items-center gap-1.5 {{ $isFirstColumn && $canEditRow ? 'text-primary' : '' }}">
-                                                                <i data-lucide="database"
-                                                                    class="h-3.5 w-3.5 stroke-[1.7] {{ $isActive ? 'text-danger' : 'text-slate-400' }}"></i>
-                                                                <span
-                                                                    class="whitespace-nowrap font-medium {{ $isActive ? 'text-danger' : 'text-slate-500' }}">{{ $label }}</span>
-                                                            </div>
-                                                        @elseif($relationType === 'date' || str_starts_with($relationKey, 'fecha'))
-                                                            @php
-                                                                $formattedRelationDate = '-';
-                                                                if (!empty($relationValue) && $relationValue !== '0000-00-00 00:00:00') {
-                                                                    try {
-                                                                        $relationDate = \Illuminate\Support\Carbon::parse($relationValue);
-                                                                        $relationMonths = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.'];
-                                                                        $formattedRelationDate = sprintf(
-                                                                            '%s %s %s, %s',
-                                                                            $relationDate->format('d'),
-                                                                            $relationMonths[(int) $relationDate->format('m') - 1],
-                                                                            $relationDate->format('Y'),
-                                                                            $relationDate->format('H:i')
-                                                                        );
-                                                                    } catch (\Throwable $throwable) {
-                                                                        $formattedRelationDate = (string) $relationValue;
-                                                                    }
-                                                                }
-                                                            @endphp
-                                                            @if($isFirstColumn && $canEditRow)
-                                                                <a href="{{ route($editConfig['route'], $editValue) }}"
-                                                                    class="font-medium text-slate-700 hover:text-primary hover:underline">
-                                                                    <span>{{ $formattedRelationDate }}</span>
-                                                                </a>
-                                                            @else
-                                                                <span class="whitespace-nowrap">{{ $formattedRelationDate }}</span>
-                                                            @endif
-                                                        @else
-                                                            @if($isFirstColumn && $canEditRow)
-                                                                <a href="{{ route($editConfig['route'], $editValue) }}"
-                                                                    class="font-medium text-slate-700 hover:text-primary hover:underline">
-                                                                    <span class="whitespace-nowrap">{{ $relationValue }}</span>
-                                                                </a>
-                                                            @else
-                                                                <span class="whitespace-nowrap">{{ $relationValue }}</span>
-                                                            @endif
-                                                        @endif
-                                                    </td>
-                                                @endforeach
-                                            </tr>
-                                        @endforeach
-                                        <!-- Fila en caso de que no haya dispositivos asociados al vehículo -->
-                                        <tr class="no-devices-row hidden">
-                                            <td colspan="{{ count($deviceGroup['columns']) }}"
-                                                class="px-4 py-8 text-center text-slate-400 bg-slate-50/50">
-                                                No hay dispositivos instalados en este vehículo.
-                                            </td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                @endif
+                
 
                 <!-- SCRIPT GLOBAL REMOVIDO HACIA relation-panel-script.blade.php -->
             </div>
@@ -543,17 +423,17 @@
                     $editConfig = $relationEditRoutes[$groupKey] ?? null;
                 @endphp
 
-                <div class="overflow-hidden rounded-md border border-black bg-white shadow-sm">
-                    <div class="border-b border-black px-4 py-3 text-sm font-semibold text-slate-800 bg-slate-200">
+                <div class="overflow-hidden rounded-md border border-black bg-white shadow-sm" >
+                    <div class="border-b border-black px-2 py-2 text-sm font-semibold text-slate-800 bg-slate-200">
                         {{ $relationGroup['label'] ?? 'Relación' }}
                     </div>
 
-                    <div class="overflow-x-auto">
+                    <div style="max-height: 130px; overflow-x: auto; overflow-y: auto;">
                         <table class="w-full text-left text-sm border-collapse border border-black">
                             <thead class="bg-slate-300 text-slate-800">
                                 <tr>
                                     @foreach(($relationGroup['columns'] ?? []) as $relationColumn)
-                                        <th class="px-4 py-3 whitespace-nowrap font-semibold border-b border-black">
+                                        <th title="{{ $relationColumn['label'] ?? '' }}" class="sticky top-0 z-10 bg-slate-300 px-4 py-3 whitespace-nowrap font-semibold border-b border-black">
                                             {{ $relationColumn['label'] ?? '' }}
                                         </th>
                                     @endforeach
@@ -577,7 +457,7 @@
                                                     && \Illuminate\Support\Facades\Route::has($editConfig['route']);
                                             @endphp
 
-                                            <td
+                                            <td title="{{ (string) $relationValue }}"
                                                 class="px-4 py-3 align-middle border-b border-black {{ $isFirstColumn ? 'font-semibold text-slate-800' : 'text-slate-700' }}">
                                                 @if($relationType === 'status' || $relationKey === 'estado')
                                                     @php
@@ -601,16 +481,15 @@
                                                 @elseif($relationType === 'date' || str_starts_with($relationKey, 'fecha'))
                                                     @php
                                                         $formattedRelationDate = '-';
-                                                        if (!empty($relationValue) && $relationValue !== '0000-00-00 00:00:00') {
+                                                        if (!empty($relationValue) && $relationValue !== '0000-00-00') {
                                                             try {
                                                                 $relationDate = \Illuminate\Support\Carbon::parse($relationValue);
                                                                 $relationMonths = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.'];
                                                                 $formattedRelationDate = sprintf(
-                                                                    '%s %s %s, %s',
+                                                                    '%s %s %s',
                                                                     $relationDate->format('d'),
                                                                     $relationMonths[(int) $relationDate->format('m') - 1],
                                                                     $relationDate->format('Y'),
-                                                                    $relationDate->format('H:i')
                                                                 );
                                                             } catch (\Throwable $throwable) {
                                                                 $formattedRelationDate = (string) $relationValue;
@@ -618,7 +497,7 @@
                                                         }
                                                     @endphp
                                                     @if($isFirstColumn && $canEditRow)
-                                                        <a href="{{ route($editConfig['route'], $editValue) }}"
+                                                        <a href="{{ route($editConfig['route'], [$editValue, 'return_route' => 'modules.clientes']) }}"
                                                             class="font-medium text-slate-700 hover:text-primary hover:underline">
                                                             <span>{{ $formattedRelationDate }}</span>
                                                         </a>
@@ -627,7 +506,7 @@
                                                     @endif
                                                 @else
                                                     @if($isFirstColumn && $canEditRow)
-                                                        <a href="{{ route($editConfig['route'], $editValue) }}"
+                                                        <a href="{{ route($editConfig['route'], [$editValue, 'return_route' => 'modules.clientes']) }}"
                                                             class="font-medium text-slate-700 hover:text-primary hover:underline">
                                                             <span class="whitespace-nowrap">{{ $relationValue }}</span>
                                                         </a>

@@ -60,7 +60,7 @@
 
         body {
             font-family: 'Roboto', sans-serif;
-            color: #2c3e50;
+            color: #000000;
             font-size: 11px;
             line-height: 1.4;
             margin: 0;
@@ -181,7 +181,7 @@
             padding: 3px 0;
             border: none !important;
             vertical-align: top;
-            font-size: 11px;
+            font-size: 10px;
             word-wrap: break-word;
             word-break: break-word;
         }
@@ -230,7 +230,7 @@
         .items-table thead tr.section-head th {
             background-color: #444444;
             color: #ffffff;
-            font-size: 15px;
+            font-size: 12px;
             font-weight: 700;
             text-transform: uppercase;
             padding: 0px 15px;
@@ -242,7 +242,7 @@
         .items-table thead tr.col-head th {
             background-color: #b9b9b9ff;
             color: #000000;
-            font-size: 13px;
+            font-size: 10px;
             font-weight: 700;
             padding: 0px 10px;
             border-bottom: none;
@@ -298,7 +298,15 @@
             background-color: #f0f0f0;
             color: #000000;
             font-weight: 700;
-            font-size: 15px;
+            font-size: 14px;
+            padding: 0px 0px;
+            border: 1px solid #c0c0c0;
+        }
+
+        .items-table tfoot tr td.import-amount {
+            background-color: #f0f0f0;
+            color: #000000;
+            font-size: 12px;
             padding: 0px 0px;
             border: 1px solid #c0c0c0;
         }
@@ -394,6 +402,7 @@
             padding-left: 15px;
             font-size: 12px;
             list-style-type: decimal;
+            color:  #000000;
         }
 
         .terms-list li {
@@ -468,7 +477,7 @@
                 <td class="col-half-left">
                     <table class="inner-data-table">
                         <tr>
-                            <td class="lbl-field-left">NOMBRE:</td>
+                            <td class="lbl-field-left">EMPRESA:</td>
                             <td class="val-field">{{ $quote->cliente_label ?? '-' }}</td>
                         </tr>
                         @if(in_array($documentType, ['RUC', '6'], true))
@@ -500,6 +509,10 @@
                             <td class="val-field">{{ $quote->correo ?? '-' }}</td>
                         </tr>
                         <tr>
+                            <td class="lbl-field-right">NOMBRE:</td>
+                            <td class="val-field">{{ $quote->nombreApellido ?? '-' }}</td>
+                        </tr>
+                        <tr>
                             <td class="lbl-field-right">Nº CONTACTO:</td>
                             <td class="val-field">{{ $quote->telefono ?? '-' }}</td>
                         </tr>
@@ -525,6 +538,10 @@
                 return (float) ($item->precioUnitario ?? 0);
             });
             $chunks = $itemsArray->isEmpty() ? collect([collect([])]) : $itemsArray->chunk($maxRows);
+            $igvColumnTotal = $itemsArray->sum(function ($item) {
+                return round((float) ($item->total ?? 0) * 0.18, 2);
+            });
+            $igvColumnTotalLabel = trim((string) ($quote->moneda_simbolo ?? 'S/')) . ' ' . number_format($igvColumnTotal, 2, '.', ',');
             $showDiscountColumn = false;
             foreach ($itemsArray as $item) {
                 if (isset($item->descuento) && is_numeric($item->descuento) && (float) $item->descuento > 0) {
@@ -532,6 +549,7 @@
                     break;
                 }
             }
+            $showGlobalDiscountRow = (float) ($quote->descuento ?? 0) > 0;
         @endphp
 
         @foreach($chunks as $chunkIndex => $chunk)
@@ -558,20 +576,20 @@
                     <tbody>
                         @foreach($chunk as $index => $item)
                             <tr>
-                                <td class="text-center">{{ number_format($item->cantidad) }}</td>
-                                <td class="text-left" style="vertical-align: middle;">
+                                <td class="text-center" style="font-size: 6pt; ">{{ number_format($item->cantidad) }}</td>
+                                <td class="text-left" style="vertical-align: middle; font-size: 6pt;">
                                     @php
                                         $periodo = $formatPeriodoPdf($item->periodo ?? '');
                                     @endphp
                                     {{ $item->producto ?? '-' }}@if($periodo !== '') <span
-                                    style="color: red; font-weight: bold;">- {{ mb_strtoupper($periodo) }}</span>@endif
+                                    style="color: red; font-weight: bold; font-size: 6pt;">- {{ mb_strtoupper($periodo) }}</span>@endif
                                 </td>
-                                <td class="text-center">{{ $item->precio_label }}</td>
+                                <td class="text-center" style="font-size: 7pt;">{{ $item->precio_label }}</td>
                                 @if($showDiscountColumn)
-                                    <td class="text-center">{{ $item->descuento_label }}</td>
+                                    <td class="text-center" style="font-size: 7pt;">{{ $item->descuento_label }}</td>
                                 @endif
-                                <td class="text-center">{{ $item->igv_label ?? '-' }}</td>
-                                <td class="text-center">{{ $item->total_label }}</td>
+                                <td class="text-center" style="font-size: 7pt;">{{ $item->igv_label ?? '-' }}</td>
+                                <td class="text-center" style="font-size: 7pt;">{{ $item->total_label }}</td>
                             </tr>
                         @endforeach
 
@@ -589,33 +607,26 @@
                             </tr>
                         @endfor
 
-                        @if($chunkIndex === $chunks->count() - 1 && trim((string) ($quote->comentario ?? '')) !== '')
-                            <tr>
-                                <td colspan="{{ $showDiscountColumn ? 6 : 5 }}" style="border-left: 1px solid #c0c0c0; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #c0c0c0; padding: 3px 10px 4px; height: auto; color: #7d8491; font-size: 9px; font-style: italic; text-align: left; word-wrap: break-word; overflow-wrap: break-word;">
-                                    Comentario: {{ $quote->comentario }}
-                                </td>
-                            </tr>
-                        @endif
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td rowspan="{{ $showDiscountColumn ? 5 : 3 }}" colspan="{{ $showDiscountColumn ? 4 : 3 }}" style="border: none; background: transparent;"></td>
-                            <th class="text-center">Importe</th>
-                            <td class="text-center total-amount">{{ $importe_label }}</td>
+                            <td rowspan="{{ $showGlobalDiscountRow ? 4 : 3 }}" colspan="{{ $showDiscountColumn ? 4 : 3 }}" style="border: {{ trim((string) ($quote->comentario ?? '')) !== '' ? '1px solid #c0c0c0' : 'none' }}; background: transparent; padding: 3px 10px 4px; height: auto; color: #7d8491; font-size: 9px; font-style: italic; text-align: left; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word;">
+                                @if(trim((string) ($quote->comentario ?? '')) !== '')
+                                    Comentario: {{ $quote->comentario }}
+                                @endif
+                            </td>
+                            <th class="text-center">SubTotal</th>
+                            <td class="text-center import-amount">{{ $importe_label }}</td>
                         </tr>
-                        @if($showDiscountColumn)
+                        @if($showGlobalDiscountRow)
                             <tr>
                                 <th class="text-center">Descuento</th>
-                                <td class="text-center total-amount">{{ $descuento_amount_label }}</td>
-                            </tr>
-                            <tr>
-                                <th class="text-center">SubTotal</th>
-                                <td class="text-center total-amount">{{ $subtotal_after_discount_label }}</td>
+                                <td class="text-center import-amount">{{ $descuento_amount_label }}</td>
                             </tr>
                         @endif
                         <tr>
                             <th class="text-center">IGV(18%)</th>
-                            <td class="text-center total-amount">{{ $igv_amount_label }}</td>
+                            <td class="text-center import-amount">{{ $igvColumnTotalLabel }}</td>
                         </tr>
                         <tr>
                             <th class="text-center">Total</th>

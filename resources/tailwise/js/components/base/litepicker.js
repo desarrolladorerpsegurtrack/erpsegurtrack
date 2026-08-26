@@ -81,6 +81,7 @@ const initLitepickers = (root = document) => {
 		}
 
 		const picker = new Litepicker(Object.assign({element: inputEl}, e));
+		inputEl.__litepicker = picker;
 
 		const syncHiddenFromDisplay = (val) => {
 				if (!hiddenEl) return;

@@ -42,6 +42,10 @@
 		$activeFilters = collect($filters)
 			->filter(fn ($filter) => !empty($filter['name']) && request()->filled($filter['name']))
 			->count();
+		$resultCount = $items instanceof \Illuminate\Contracts\Pagination\LengthAwarePaginator
+			? $items->total()
+			: collect($items ?? [])->count();
+		$resultsLabel = $resultsLabel ?? trim((string) preg_replace('/^Módulo\s+/u', '', $title ?? 'Registros'));
 	@endphp
 
 	<div class="grid w-full grid-cols-12 gap-x-6 gap-y-10">
@@ -110,18 +114,20 @@
 					@endif
 				</div>
 				<!-- ESTADÍSTICAS -->
-				@if(!empty($stats))
 					<div class="box box--stacked almacen-stats-white flex flex-col p-3">
 						<div class="grid grid-cols-4 gap-5">
-							@foreach($stats as $stat)
+							@foreach($stats ?? [] as $stat)
 								<div class="box col-span-4 rounded-none border border-dashed border-slate-300/80 bg-white p-5 shadow-none md:col-span-2 xl:col-span-1">
 									<div class="text-base text-slate-500">{{ $stat['label'] }}</div>
 									<div class="mt-1.5 text-2xl font-medium stat-value">{{ $stat['value'] }}</div>
 								</div>
 							@endforeach
+							<div class="box col-span-4 rounded-none border border-dashed border-slate-300/80 bg-white p-5 shadow-none md:col-span-2 xl:col-span-1">
+								<div class="text-base text-slate-500">{{ $resultsLabel }} encontrados</div>
+								<div class="mt-1.5 text-2xl font-medium stat-value" data-list-result-stat>{{ number_format($resultCount, 0, ',', '.') }}</div>
+							</div>
 						</div>
 					</div>
-				@endif
 				<!-- TABLA -->
 				<div id="list-table-wrapper" class="box box--stacked almacen-table-white flex w-full flex-col">
 					<div class="p-5">
@@ -823,6 +829,11 @@
 				const nextWrapper = doc.getElementById(listWrapperId);
 				if (!nextWrapper) {
 					return;
+				}
+				const currentResultStat = document.querySelector('[data-list-result-stat]');
+				const nextResultStat = doc.querySelector('[data-list-result-stat]');
+				if (currentResultStat && nextResultStat) {
+					currentResultStat.textContent = nextResultStat.textContent;
 				}
 				// remove any TomSelect portal dropdowns created by previous instances
 				try { cleanupTomSelectPortals(); } catch (e) {}

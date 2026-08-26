@@ -9,6 +9,9 @@ Route::middleware('erp.module:servicio_cliente')->group(function () {
     Route::get('/modulos/servicio-cliente/export/{format}', [ServicioClienteController::class, 'export'])->name('modules.servicio-cliente.export')->where('format', 'pdf|xlsx');
     Route::post('/modulos/servicio-cliente/export/{format}', [ServicioClienteController::class, 'export'])->name('modules.servicio-cliente.export.post')->where('format', 'pdf|xlsx');
     Route::get('/modulos/servicio-cliente/crear', [ServicioClienteController::class, 'create'])->name('modules.servicio-cliente.create');
+    Route::get('/modulos/servicio-cliente/vehiculos', [ServicioClienteController::class, 'vehiculos'])->name('modules.servicio-cliente.vehiculos');
+    Route::get('/modulos/servicio-cliente/dispositivos', [ServicioClienteController::class, 'dispositivos'])->name('modules.servicio-cliente.dispositivos');
+    Route::get('/modulos/servicio-cliente/servicios', [ServicioClienteController::class, 'servicios'])->name('modules.servicio-cliente.servicios');
     Route::post('/modulos/servicio-cliente', [ServicioClienteController::class, 'store'])->name('modules.servicio-cliente.store');
     Route::get('/modulos/servicio-cliente/{id}/editar', [ServicioClienteController::class, 'edit'])->name('modules.servicio-cliente.edit');
     Route::get('/modulos/servicio-cliente/{id}/lock-status', [ServicioClienteController::class, 'lockStatus'])->name('modules.servicio-cliente.lock-status');

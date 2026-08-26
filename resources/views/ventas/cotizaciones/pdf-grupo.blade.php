@@ -44,13 +44,12 @@
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
         
         @page {
-            margin: 50px 30px 30px 30px;
-            /* El tercer valor (60px) le da espacio al footer abajo */
+            margin: 50px 30px 25px 30px;
         }
 
         body {
             font-family: 'Roboto', sans-serif;
-            color: #2c3e50;
+            color: #000000;
             font-size: 11px;
             line-height: 1.4;
             margin: 0;
@@ -62,7 +61,7 @@
         .header-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 25px;
+            margin-bottom: 10px;
         }
 
         .header-table td {
@@ -96,7 +95,7 @@
         .document-title {
             font-size: 48px;
             font-weight: normal;
-            color: #2c3e50;
+            color: #000000;
             letter-spacing: -1px;
             line-height: 1;
             margin-bottom: 4px;
@@ -134,13 +133,13 @@
             color: #000000;
             letter-spacing: 0.5px;
             margin-bottom: 5px;
-            margin-top: 15px;
+            margin-top: 10px;
         }
 
         .customer-data-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
             text-transform: uppercase;
             table-layout: fixed;
             margin-top: -8px;
@@ -171,7 +170,7 @@
             padding: 3px 0;
             border: none !important;
             vertical-align: top;
-            font-size: 11px;
+            font-size: 10px;
             word-wrap: break-word;
             word-break: break-word;
         }
@@ -210,15 +209,19 @@
         }
 
         .items-section {
-            margin-bottom: 20px;
+            margin-bottom: 12px;
             page-break-inside: avoid;
+        }
+
+        .items-section--large {
+            page-break-inside: auto;
         }
 
         /* Encabezado de sección sobre la tabla */
         .items-table thead tr.section-head th {
             background-color: #444444;
             color: #ffffff;
-            font-size: 15px;
+            font-size: 12px;
             font-weight: 700;
             text-transform: uppercase;
             padding: 0px 15px;
@@ -236,7 +239,7 @@
         .items-table thead tr.col-head th {
             background-color: transparent;
             color: #000000;
-            font-size: 13px;
+            font-size: 10px;
             font-weight: 700;
             padding: 0px 10px;
             border-bottom: none;
@@ -266,6 +269,10 @@
             text-transform: uppercase;
         }
 
+        .items-table .nowrap {
+            white-space: nowrap;
+        }
+
         .items-table tbody td:first-child {
             border-left: 1px solid #c0c0c0;
             /* Borde izquierdo externo */
@@ -286,7 +293,7 @@
             background-color: #444444;
             color: #ffffff;
             font-weight: 700;
-            font-size: 15px;
+            font-size: 11px;
             border: 1px solid #c0c0c0;
             text-align: center;
         }
@@ -295,7 +302,7 @@
             background-color: #f0f0f0;
             color: #000000;
             font-weight: 700;
-            font-size: 15px;
+            font-size: 11px;
             border: 1px solid #c0c0c0;
         }
 
@@ -390,6 +397,7 @@
             padding-left: 15px;
             font-size: 12px;
             list-style-type: decimal;
+            color: #000000;
         }
 
         .terms-list li {
@@ -469,7 +477,7 @@
                 <td class="col-half-left">
                     <table class="inner-data-table">
                         <tr>
-                            <td class="lbl-field-left">NOMBRE:</td>
+                            <td class="lbl-field-left">EMPRESA:</td>
                             <td class="val-field">{{ $quote->cliente_label ?? '-' }}</td>
                         </tr>
                         @if(in_array($documentType, ['RUC', '6'], true))
@@ -487,6 +495,10 @@
                             <td class="lbl-field-left">DIRECCION:</td>
                             <td class="val-field">{{ $quote->direccion ?? '-' }}</td>
                         </tr>
+                        <tr>
+                            <td class="lbl-field-left">VIGENCIA:</td>
+                            <td class="val-field">{{ $quote->vigencia_detalle ?? '-' }}</td>
+                        </tr>
                     </table>
                 </td>
 
@@ -497,12 +509,12 @@
                             <td class="val-field">{{ $quote->correo ?? '-' }}</td>
                         </tr>
                         <tr>
-                            <td class="lbl-field-right">Nº CONTACTO:</td>
-                            <td class="val-field">{{ $quote->telefono ?? '-' }}</td>
+                            <td class="lbl-field-right">NOMBRE:</td>
+                            <td class="val-field">{{ $quote->nombreApellido ?? '-' }}</td>
                         </tr>
                         <tr>
-                            <td class="lbl-field-left">VIGENCIA:</td>
-                            <td class="val-field">{{ $quote->vigencia_detalle ?? '-' }}</td>
+                            <td class="lbl-field-right">Nº CONTACTO:</td>
+                            <td class="val-field">{{ $quote->telefono ?? '-' }}</td>
                         </tr>
                     </table>
                 </td>
@@ -511,79 +523,78 @@
 
         <div class="divider-line"></div>
 
-        {{-- ===== TABLA DE ÍTEMS (Una por cada cotización del grupo) ===== --}}
+        {{-- ===== TABLAS DE ÍTEMS ===== --}}
         @foreach($quotesData as $qData)
             @php
-                $quoteItem = $qData['quote'];
-                $items = collect($qData['items'] ?? [])->sortByDesc(function ($item) {
+                $groupItems = collect($qData['items'] ?? [])->sortByDesc(function ($item) {
                     return (float) ($item->precioUnitario ?? 0);
                 });
+                $showDiscountColumn = $groupItems->contains(function ($item) {
+                    return isset($item->descuento)
+                        && is_numeric($item->descuento)
+                        && (float) $item->descuento > 0;
+                });
+                $quoteItem = $qData['quote'];
                 $section_title = $qData['section_title'];
                 $total_general_label = $qData['total_general_label'];
-
-                $showDiscountColumn = false;
-                foreach ($items as $item) {
-                    if (isset($item->descuento) && is_numeric($item->descuento) && (float) $item->descuento > 0) {
-                        $showDiscountColumn = true;
-                        break;
-                    }
-                }
+                $isLargeItemsSection = $groupItems->count() > 8;
             @endphp
-            <div class="items-section">
-                <table
-                    class="items-table {{ ($section_title ?? '') === 'PLANES' ? 'items-table--dark' : 'items-table--light' }}">
-                    <thead>
-                        <tr class="section-head {{ ($section_title ?? '') === 'PLANES' ? '' : 'section-head--light' }}">
-                        <th colspan="{{ $showDiscountColumn ? 6 : 5 }}">{{ ($section_title ?? 'EQUIPAMIENTO') }} &nbsp;&nbsp;{{ $quoteItem->nroCotizacion ?? '' }}</th></tr>
-                        <tr class="col-head">
-                            <th class="col-cant">Cant.</th>
-                            <th class="col-prod ">Descripción</th>
-                            <th class="col-punit ">P. Unitario</th>
-                            @if($showDiscountColumn)
-                                <th class="col-descuento ">Desct %</th>
-                            @endif
-                            <th class="col-igv">IGV</th>
-                            <th class="col-total ">Total</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach($items as $index => $item)
-                            <tr>
-                                <td class="text-center">{{ number_format($item->cantidad) }}</td>
-                                <td class="text-left" style="vertical-align: middle;">
-                                    @php
-                                        $periodo = $formatPeriodoPdf($item->periodo ?? '');
-                                    @endphp
-                                    {{ $item->producto ?? '-' }}@if($periodo !== '') <span
-                                    style="color: red; font-weight: bold;">- {{ mb_strtoupper($periodo) }}</span>@endif
-                                </td>
-                                <td class="text-center">{{ $item->precio_label }}</td>
+            <div class="items-section {{ $isLargeItemsSection ? 'items-section--large' : '' }}">
+                    <table
+                        class="items-table {{ ($section_title ?? '') === 'PLANES' ? 'items-table--dark' : 'items-table--light' }}">
+                        <thead>
+                            <tr class="section-head {{ ($section_title ?? '') === 'PLANES' ? '' : 'section-head--light' }}">
+                            <th colspan="{{ $showDiscountColumn ? 6 : 5 }}">{{ ($section_title ?? 'EQUIPAMIENTO') }} &nbsp;&nbsp;{{ $quoteItem->nroCotizacion ?? '' }}</th></tr>
+                            <tr class="col-head">
+                                <th class="col-cant">Cant.</th>
+                                <th class="col-prod">Descripción</th>
+                                <th class="col-punit ">P. Unitario</th>
                                 @if($showDiscountColumn)
-                                    <td class="text-center">{{ $item->descuento_label }}</td>
+                                    <th class="col-descuento ">Desct %</th>
                                 @endif
-                                <td class="text-center">{{ $item->igv_label ?? '-' }}</td>
-                                <td class="text-center">{{ $item->total_label }}</td>
+                                <th class="col-igv">IGV</th>
+                                <th class="col-total ">Total</th>
                             </tr>
-                        @endforeach
-                        @if(trim((string) ($quoteItem->comentario ?? '')) !== '')
+                        </thead>
+                        <tbody>
+                            @foreach($groupItems as $index => $item)
+                                <tr>
+                                    <td class="text-center" style="font-size: 6pt; ">{{ number_format($item->cantidad) }}</td>
+                                    <td class="text-left" style="vertical-align: middle; font-size: 6pt; ">
+                                        @php
+                                            $periodo = $formatPeriodoPdf($item->periodo ?? '');
+                                        @endphp
+                                        {{ $item->producto ?? '-' }}@if($periodo !== '') <span
+                                        style="color: red; font-weight: bold; font-size: 6pt;">- {{ mb_strtoupper($periodo) }}</span>@endif
+                                    </td>
+                                    <td class="text-center" style="font-size: 7pt; ">{{ $item->precio_label }}</td>
+                                    @if($showDiscountColumn)
+                                        <td class="text-center" style="font-size: 7pt; ">{{ $item->descuento_label }}</td>
+                                    @endif
+                                    <td class="text-center nowrap" style="font-size: 7pt; ">{{ $item->igv_label ?? '-' }}</td>
+                                    <td class="text-center" style="font-size: 7pt; ">{{ $item->total_label }}
+                                </tr>
+                            @endforeach
+                            @if(trim((string) ($quoteItem->comentario ?? '')) !== '')
+                                <tr>
+                                    <td colspan="{{ $showDiscountColumn ? 6 : 5 }}" style="border-left: 1px solid #c0c0c0; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #c0c0c0; padding: 3px 10px 4px; color: #6b7280; font-size: 8px; font-style: italic; text-align: left; word-wrap: break-word; overflow-wrap: break-word;">
+                                        Comentario: {{ $quoteItem->comentario }}
+                                    </td>
+                                </tr>
+                            @endif
+                        </tbody>
+                        <tfoot>
                             <tr>
-                                <td colspan="{{ $showDiscountColumn ? 6 : 5 }}" style="border-left: 1px solid #c0c0c0; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #c0c0c0; padding: 3px 10px 4px; color: #6b7280; font-size: 9px; font-style: italic; text-align: left; word-wrap: break-word; overflow-wrap: break-word;">
-                                    Comentario: {{ $quoteItem->comentario }}
-                                </td>
+                                <td rowspan="1" colspan="{{ $showDiscountColumn ? 4 : 3 }}" style="border: none; background: transparent;"></td>
+                                <th class="text-center">Total</th>
+                                <td class="text-center total-amount">{{ $total_general_label }}</td>
                             </tr>
-                        @endif
-                    </tbody>
-                    <tfoot>
-                        <tr>
-                            <td rowspan="1" colspan="{{ $showDiscountColumn ? 4 : 3 }}" style="border: none; background: transparent;"></td>
-                            <th class="text-center">Total</th>
-                            <td class="text-center total-amount">{{ $total_general_label }}</td>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
+                        </tfoot>
+                    </table>
+                </div>
         @endforeach
     </div>
+    {{-- ===== PIE DE PÁGINA ===== --}}
     <div class="footer-fixed">
         <table class="footer-table">
             <tr>

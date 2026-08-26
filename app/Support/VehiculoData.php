@@ -7,23 +7,24 @@ class VehiculoData
     public static function getBrands(): array
     {
         return [
-            'Volvo', 'Scania', 'Mercedes-Benz', 'Freightliner', 'Kenworth',
-            'Peterbilt', 'International', 'Isuzu', 'Hino', 'Mitsubishi Fuso',
-            'MAN', 'DAF', 'Iveco', 'Mack', 'Hyundai', 'Dongfeng', 'Foton',
+            'VOLVO', 'SCANGIA', 'MERCEDES-BENZ', 'FREIGHTLINER', 'KENWORTH',
+            'PETERBILT', 'INTERNATIONAL', 'ISUZU', 'HINO', 'MITSUBISHI',
+            'MAN', 'DAF', 'IVECO', 'MACK', 'HYUNDAI', 'DONGFENG', 'FOTON', 
+            'UD TRUCKS', 'TATA', 'JAC', 'SINOTRUK', 'AUMAN', 'CAMC', 
         ];
     }
 
     public static function getModels(): array
     {
         return [
-            'FH16', 'R-Series', 'Actros', 'Cascadia', 'W900', 'Model 389',
-            'LoneStar', 'NPR', '500 Series', 'Canter', 'TGX', 'XF',
-            'Eurocargo', 'Anthem', 'Mighty', 'Auman', 'VNL',
+            'FH16', 'R-SERIES', 'ACTROS', 'CASDIA', 'W900', 'MODEL 389',
+            'LONESTAR', 'NPR', '500 SERIES', 'CANTER', 'TGX', 'XF',
+            'EUROCARGO', 'ANTHEM', 'MIGHTY', 'AUMAN', 'VNL', 'FUSO',
         ];
     }
 
     public static function getColors(): array
     {
-        return ['Blanco', 'Negro', 'Gris', 'Plateado', 'Rojo', 'Azul', 'Verde', 'Amarillo', 'Marrón'];
+        return ['BLANCO', 'NEGRO', 'GRIS', 'PLATEADO', 'ROJO', 'AZUL', 'VERDE', 'AMARILLO', 'MARRÓN'];
     }
 }

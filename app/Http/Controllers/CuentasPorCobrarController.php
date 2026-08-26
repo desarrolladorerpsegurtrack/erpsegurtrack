@@ -174,7 +174,7 @@ class CuentasPorCobrarController extends Controller
         }
 
         $selectedIds = (array) $request->input('selectedIds', []);
-        $query = $this->baseQuery();
+        $query = $this->applyExportFilters($request, $this->baseQuery());
 
         if (!empty($selectedIds)) {
             $query->whereIn('c.idcuentasPorCobrar', $selectedIds);
@@ -556,6 +556,41 @@ class CuentasPorCobrarController extends Controller
                 'c.fechaCancelacion',
                 'c.estado',
             ]);
+    }
+
+    private function applyExportFilters(Request $request, $query)
+    {
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $query->where(function ($builder) use ($term) {
+                $builder
+                    ->where('c.idcuentasPorCobrar', 'like', $term)
+                    ->orWhere('c.cliente_idcliente', 'like', $term)
+                    ->orWhere('cl.nombreComercial', 'like', $term)
+                    ->orWhere('cl.razonSocial', 'like', $term)
+                    ->orWhere('tc.nombre', 'like', $term)
+                    ->orWhere('c.docReferencia', 'like', $term)
+                    ->orWhere('c.descripcion', 'like', $term);
+            });
+        }
+
+        $cliente = trim((string) $request->input('cliente_idcliente', ''));
+        if ($cliente !== '') {
+            $query->where('c.cliente_idcliente', 'like', '%' . $cliente . '%');
+        }
+
+        $tipoCobro = trim((string) $request->input('tipoCobro_idtipoCobros', ''));
+        if ($tipoCobro !== '') {
+            $query->where('c.tipoCobro_idtipoCobros', $tipoCobro);
+        }
+
+        $estado = trim((string) $request->input('estado', ''));
+        if ($estado !== '') {
+            $query->where('c.estado', $estado);
+        }
+
+        return $query;
     }
 
     private function clienteOptions()

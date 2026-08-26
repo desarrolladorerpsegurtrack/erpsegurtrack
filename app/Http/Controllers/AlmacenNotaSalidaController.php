@@ -268,7 +268,7 @@ class AlmacenNotaSalidaController extends Controller
 
         $imeis = DB::table('elementoalmacen')
             ->where('dispositivo_iddispositivo', $deviceId)
-            ->where('estado', 1)
+            ->whereIn('estado', [1, 2, 4])
             ->inRandomOrder()
             ->limit(min($qty, 200))
             ->pluck('imei')
@@ -378,7 +378,7 @@ class AlmacenNotaSalidaController extends Controller
                 $cantidad = (int) $row['cantidad'];
                 $stockDisponible = DB::table('elementoalmacen')
                     ->where('dispositivo_iddispositivo', $deviceId)
-                    ->where('estado', 1)
+                    ->whereIn('estado', [1, 2, 4])
                     ->count();
 
                 if ($stockDisponible < $cantidad) {
@@ -421,7 +421,7 @@ class AlmacenNotaSalidaController extends Controller
                     $existing = DB::table('elementoalmacen')
                         ->whereIn('imei', $collectedImeis->all())
                         ->where('dispositivo_iddispositivo', $deviceId)
-                        ->where('estado', 1)
+                        ->whereIn('estado', [1, 2, 4])
                         ->pluck('imei')
                         ->values();
 
@@ -479,7 +479,7 @@ class AlmacenNotaSalidaController extends Controller
                             $deviceId = (int) $group['dispositivo_iddispositivo'];
                             $reserved = DB::table('elementoalmacen')
                                 ->where('dispositivo_iddispositivo', $deviceId)
-                                ->where('estado', 1)
+                                ->whereIn('estado', [1, 2, 4])
                                 ->lockForUpdate()
                                 ->limit($need)
                                 ->pluck('imei')
@@ -493,12 +493,23 @@ class AlmacenNotaSalidaController extends Controller
                         }
 
                         foreach ($imeisToProcess as $imei) {
-                            // Marcar elemento como salida (inactivo)
+                            $element = DB::table('elementoalmacen')
+                                ->where('imei', $imei)
+                                ->whereIn('estado', [1, 2, 4])
+                                ->lockForUpdate()
+                                ->first();
+
+                            if (!$element) {
+                                throw new \RuntimeException('stock_insufficient');
+                            }
+
+                            // Conservar el tipo de salida según el estado original.
+                            $saleState = [1 => 6, 2 => 3, 4 => 5][(int) $element->estado];
                             DB::table('elementoalmacen')
                                 ->where('imei', $imei)
                                 ->update([
                                     'fechaIngreso' => $fecha,
-                                    'estado' => 0,
+                                    'estado' => $saleState,
                                 ]);
 
                             // Registrar movimiento de salida
@@ -550,7 +561,7 @@ class AlmacenNotaSalidaController extends Controller
         $existing = DB::table('elementoalmacen')
             ->whereIn('imei', $selectedImeis->all())
             ->where('dispositivo_iddispositivo', (int) $validated['dispositivo_iddispositivo'])
-            ->where('estado', 1)
+            ->whereIn('estado', [1, 2, 4])
             ->pluck('imei')
             ->values();
 
@@ -582,7 +593,7 @@ class AlmacenNotaSalidaController extends Controller
                 $reserved = DB::table('elementoalmacen')
                     ->whereIn('imei', $selectedImeis->all())
                     ->where('dispositivo_iddispositivo', (int) $validated['dispositivo_iddispositivo'])
-                    ->where('estado', 1)
+                    ->whereIn('estado', [1, 2, 4])
                     ->lockForUpdate()
                     ->pluck('imei')
                     ->values();
@@ -593,12 +604,24 @@ class AlmacenNotaSalidaController extends Controller
 
                 $fecha = now()->format('Y-m-d H:i:s');
                 foreach ($reserved as $imei) {
+                    $element = DB::table('elementoalmacen')
+                        ->where('imei', $imei)
+                        ->where('dispositivo_iddispositivo', (int) $validated['dispositivo_iddispositivo'])
+                        ->whereIn('estado', [1, 2, 4])
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (!$element) {
+                        throw new \RuntimeException('stock_insufficient');
+                    }
+
+                    $saleState = [1 => 6, 2 => 3, 4 => 5][(int) $element->estado];
                     DB::table('elementoalmacen')
                         ->where('imei', $imei)
                         ->where('dispositivo_iddispositivo', (int) $validated['dispositivo_iddispositivo'])
                         ->update([
                             'fechaIngreso' => $fecha,
-                            'estado' => 0,
+                            'estado' => $saleState,
                         ]);
 
                     DB::table('detallemovalmacen')->insert([
@@ -705,7 +728,7 @@ class AlmacenNotaSalidaController extends Controller
 
         foreach ($imeisByDevice as $deviceId => $rows) {
             $countToRemove = count($rows);
-            $currentStock = (int) DB::table('elementoalmacen')->where('dispositivo_iddispositivo', $deviceId)->where('estado', 1)->count();
+            $currentStock = (int) DB::table('elementoalmacen')->where('dispositivo_iddispositivo', $deviceId)->whereIn('estado', [1, 2, 4])->count();
             $newStock = $currentStock - $countToRemove;
             if ($newStock <= 0) {
                 return redirect()
@@ -912,7 +935,7 @@ class AlmacenNotaSalidaController extends Controller
     {
         // Obtener stock activo por dispositivo en una sola consulta
         $stockByDevice = DB::table('elementoalmacen')
-            ->where('estado', 1)
+            ->whereIn('estado', [1, 2, 4])
             ->selectRaw('dispositivo_iddispositivo, COUNT(*) as stock')
             ->groupBy('dispositivo_iddispositivo')
             ->pluck('stock', 'dispositivo_iddispositivo');

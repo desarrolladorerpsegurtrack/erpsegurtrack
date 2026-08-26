@@ -468,8 +468,8 @@ class PersonalController extends Controller
 
         $validated = $request->validate([
             'dniPersonal' => ['required', 'digits:8', Rule::unique('personal', 'dniPersonal')->ignore($dni, 'dniPersonal')],
-            'apellido' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}$/u', Rule::unique('personal', 'apellido')->ignore($dni, 'dniPersonal')],
-            'nombre' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{5,}$/u', Rule::unique('personal', 'nombre')->ignore($dni, 'dniPersonal')],
+            'apellido' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}$/u', Rule::unique('personal', 'apellido')->ignore($dni, 'dniPersonal')],
+            'nombre' => ['nullable', 'string', 'max:50', 'regex:/^$|^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]{2,}$/u', Rule::unique('personal', 'nombre')->ignore($dni, 'dniPersonal')],
             'cargoPersonal_idcargoPersonal' => ['required', 'integer', 'exists:cargopersonal,idcargoPersonal'],
             'foto' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
             'firma' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],

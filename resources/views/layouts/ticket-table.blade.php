@@ -94,20 +94,28 @@
                         </div>
                     @endif
                 </div>
+                @php
+                    $resultCount = $items instanceof \Illuminate\Contracts\Pagination\LengthAwarePaginator
+                        ? $items->total()
+                        : collect($items ?? [])->count();
+                    $resultsLabel = $resultsLabel ?? trim((string) preg_replace('/^Módulo\s+/u', '', $title ?? 'Registros'));
+                @endphp
                 <div id="list-table-wrapper" class="flex w-full flex-col gap-8">
                     <!-- ESTADÍSTICAS -->
-                    @if($stats)
                         <div class="box box--stacked ticket-stats-white  flex flex-col p-3">
                             <div class="grid grid-cols-4 gap-5">
-                                @foreach($stats as $stat)
+                                @foreach($stats ?? [] as $stat)
                                     <div class="box col-span-4 rounded-none border border-dashed border-slate-300/80 bg-white p-5 shadow-none md:col-span-2 xl:col-span-1">
                                         <div class="text-base text-slate-500">{{ $stat['label'] }}</div>
                                             <div class="mt-1.5 text-2xl font-medium stat-value">{{ $stat['value'] }}</div>
                                     </div>
                                 @endforeach
+                                <div class="box col-span-4 rounded-none border border-dashed border-slate-300/80 bg-white p-5 shadow-none md:col-span-2 xl:col-span-1">
+                                    <div class="text-base text-slate-500">{{ $resultsLabel }} encontrados</div>
+                                    <div class="mt-1.5 text-2xl font-medium stat-value" data-list-result-stat>{{ number_format($resultCount, 0, ',', '.') }}</div>
+                                </div>
                             </div>
                         </div>
-                    @endif
 
                     <!-- TABLA -->
                     <div class="box box--stacked ticket-table-white flex w-full flex-col">
@@ -1506,6 +1514,11 @@
                 if (!nextWrapper || !wrapper) {
                     return;
                 }
+				const currentResultStat = document.querySelector('[data-list-result-stat]');
+				const nextResultStat = doc.querySelector('[data-list-result-stat]');
+				if (currentResultStat && nextResultStat) {
+					currentResultStat.textContent = nextResultStat.textContent;
+				}
                 cleanupTomSelectPortals();
                 wrapper.innerHTML = nextWrapper.innerHTML;
                 restoreIcons();

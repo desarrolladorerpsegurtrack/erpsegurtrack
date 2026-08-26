@@ -64,6 +64,22 @@ class GrupoClienteController extends Controller
                         });
                 })
                 ->leftJoin('ubigeo as u', 'dc.ubigeo_idubigeo', '=', 'u.idubigeo')
+                ->leftJoin('contacto as ct', function ($join) {
+                    $join->on('c.idcliente', '=', 'ct.cliente_idcliente')
+                        ->where(function ($query) {
+                            $query->where('ct.default', 1)
+                                ->orWhere(function ($subQuery) {
+                                    $subQuery->whereNull('ct.default')
+                                        ->whereRaw('ct.idcontacto = (select max(inner_ct.idcontacto) from contacto as inner_ct where inner_ct.cliente_idcliente = ct.cliente_idcliente)')
+                                        ->whereNotExists(function ($defaultQuery) {
+                                            $defaultQuery->select(DB::raw(1))
+                                                ->from('contacto as default_ct')
+                                                ->whereColumn('default_ct.cliente_idcliente', 'ct.cliente_idcliente')
+                                                ->where('default_ct.default', 1);
+                                        });
+                                });
+                        });
+                })
                 ->whereIn('dgc.grupoCliente_idgrupoCliente', $ids)
                 ->select(
                     'dgc.grupoCliente_idgrupoCliente',
@@ -71,6 +87,8 @@ class GrupoClienteController extends Controller
                     'c.nombreComercial',
                     'c.razonSocial',
                     'c.rubro',
+                    'ct.numero as telefono',
+                    'ct.correo as email',
                     'dc.direccion',
                     'u.departamento',
                     'u.provincia',
@@ -101,9 +119,9 @@ class GrupoClienteController extends Controller
                         'label' => 'Clientes',
                         'columns' => [
                             ['key' => 'idcliente', 'label' => 'RUC/DNI', 'type' => 'text'],
-                            ['key' => 'nombreComercial', 'label' => 'Cliente', 'type' => 'text'],
                             ['key' => 'razonSocial', 'label' => 'Razón Social', 'type' => 'text'],
-                            ['key' => 'rubro', 'label' => 'Rubro', 'type' => 'text'],
+                            ['key' => 'telefono', 'label' => 'Número de Teléfono', 'type' => 'text'],
+                            ['key' => 'email', 'label' => 'Correo Electrónico', 'type' => 'text'],
                             ['key' => 'direccion_completa', 'label' => 'Dirección', 'type' => 'text'],
                             ['key' => 'estadoCliente_idestadoCliente', 'label' => 'Estado', 'type' => 'status'],
                         ],

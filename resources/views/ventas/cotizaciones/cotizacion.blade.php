@@ -1,6 +1,29 @@
 @extends('layouts.crud-table')
 
 @push('modals')
+    <div id="cotizacion-pdf-preview-modal" class="fixed inset-0 hidden items-center justify-center p-3 sm:p-6"
+        style="z-index: 10000; background: rgba(0, 0, 0, 0.78);" role="dialog" aria-modal="true"
+        aria-labelledby="cotizacion-pdf-preview-title">
+        <div class="flex h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl" style="max-width: 1100px; width: 100%; height: calc(100vh - 3rem); min-height: calc(90vh - 3rem); max-height: calc(95vh - 3rem);">
+            <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                <div>
+                    <h2 id="cotizacion-pdf-preview-title" class="text-base font-semibold text-slate-800">Ver PDF de cotización</h2>
+                    <p id="cotizacion-pdf-preview-number" class="mt-0.5 text-xs text-slate-500"></p>
+                </div>
+                <button type="button" data-cotizacion-pdf-preview-close
+                    class="ml-auto rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                    aria-label="Cerrar visor PDF" title="Cerrar">
+                    <i data-lucide="x" class="h-5 w-5"></i>
+                </button>
+            </div>
+            <div class="min-h-0 flex-1 bg-slate-800">
+                <iframe id="cotizacion-pdf-preview-frame" title="PDF de cotización" class="h-full w-full border-0"></iframe>
+            </div>
+        </div>
+    </div>
+@endpush
+
+@push('modals')
     <!-- Botón FAB -->
     <button id="fab-states-btn"
         class="flex items-center justify-center rounded-full bg-primary text-white hover:bg-primary/90 focus:outline-none cursor-pointer"
@@ -97,6 +120,48 @@
 @push('scripts')
     <script>
         document.addEventListener('DOMContentLoaded', function () {
+            const pdfModal = document.getElementById('cotizacion-pdf-preview-modal');
+            const pdfFrame = document.getElementById('cotizacion-pdf-preview-frame');
+            const pdfNumber = document.getElementById('cotizacion-pdf-preview-number');
+            const closePdfModal = function () {
+                if (!pdfModal) {
+                    return;
+                }
+                pdfModal.classList.add('hidden');
+                pdfModal.classList.remove('flex');
+                if (pdfFrame) {
+                    pdfFrame.src = 'about:blank';
+                }
+                document.body.style.overflow = '';
+            };
+
+            document.addEventListener('click', function (event) {
+                const previewButton = event.target.closest('[data-cotizacion-pdf-preview]');
+                if (previewButton && pdfModal && pdfFrame) {
+                    event.preventDefault();
+                    pdfFrame.src = previewButton.dataset.cotizacionPdfPreview || 'about:blank';
+                    if (pdfNumber) {
+                        pdfNumber.textContent = previewButton.dataset.cotizacionNumber
+                            ? 'Cotización ' + previewButton.dataset.cotizacionNumber
+                            : '';
+                    }
+                    pdfModal.classList.remove('hidden');
+                    pdfModal.classList.add('flex');
+                    document.body.style.overflow = 'hidden';
+                    return;
+                }
+
+                if (event.target.closest('[data-cotizacion-pdf-preview-close]')) {
+                    closePdfModal();
+                }
+            });
+
+            document.addEventListener('keydown', function (event) {
+                if (event.key === 'Escape' && pdfModal && !pdfModal.classList.contains('hidden')) {
+                    closePdfModal();
+                }
+            });
+
             const fabBtn = document.getElementById('fab-states-btn');
             const fabPanel = document.getElementById('fab-states-panel');
 

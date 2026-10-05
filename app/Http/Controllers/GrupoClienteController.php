@@ -86,6 +86,7 @@ class GrupoClienteController extends Controller
                     'c.idcliente',
                     'c.nombreComercial',
                     'c.razonSocial',
+                    'c.flag_integrador',
                     'c.rubro',
                     'ct.numero as telefono',
                     'ct.correo as email',
@@ -119,7 +120,7 @@ class GrupoClienteController extends Controller
                         'label' => 'Clientes',
                         'columns' => [
                             ['key' => 'idcliente', 'label' => 'RUC/DNI', 'type' => 'text'],
-                            ['key' => 'razonSocial', 'label' => 'Razón Social', 'type' => 'text'],
+                            ['key' => 'razonSocial', 'label' => 'Razón Social', 'type' => 'text', 'integratorKey' => 'flag_integrador'],
                             ['key' => 'telefono', 'label' => 'Número de Teléfono', 'type' => 'text'],
                             ['key' => 'email', 'label' => 'Correo Electrónico', 'type' => 'text'],
                             ['key' => 'direccion_completa', 'label' => 'Dirección', 'type' => 'text'],

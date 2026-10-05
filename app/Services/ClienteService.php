@@ -206,6 +206,14 @@ class ClienteService
         return $row;
     }
 
+    private function isIntegrator($value): bool
+    {
+        $normalized = mb_strtolower(trim((string) $value), 'UTF-8');
+        $normalized = str_replace('í', 'i', $normalized);
+
+        return in_array($normalized, ['si', '1', 'true', 'on', 'yes', 'y'], true);
+    }
+
     public function buildRelationGroups(string $clienteId): array
     {
         $clienteId = trim($clienteId);
@@ -300,6 +308,7 @@ class ClienteService
                 'v.marca',
                 'v.tracto',
                 'd.iddispositivoCliente',
+                'd.marcaDispositivo',
                 'd.modeloDispositivo',
                 'd.fechaInstalacion',
                 'd.fechaBaja',
@@ -327,6 +336,7 @@ class ClienteService
                     ['key' => 'operador', 'label' => 'Operador'],
                     ['key' => 'monto', 'label' => 'Precio Servicio'],
                     ['key' => 'tipo_vehiculo', 'label' => 'Tipo'],
+                    ['key' => 'marcaDispositivo', 'label' => 'Marca'],
                     ['key' => 'modeloDispositivo', 'label' => 'Modelo'],
                     ['key' => 'tracto', 'label' => 'Tracto'],
                     ['key' => 'fechaInstalacion', 'label' => 'Fecha inicio'],
@@ -421,7 +431,7 @@ class ClienteService
 
         $roleRows = DB::table('detallerol as ur')
             ->join('rol as r', 'ur.rol_idrol', '=', 'r.idrol')
-            ->select('r.idrol', 'r.nombre')
+            ->select('r.idrol', 'r.nombre', 'r.tipo')
             ->where('ur.usuario_usuario', $username)
             ->get();
 
@@ -435,6 +445,25 @@ class ClienteService
         $roleIds = $roleRows->pluck('idrol')->all();
 
         if (empty($roleIds)) {
+            return [];
+        }
+
+        $internalRoleIds = $roleRows
+            ->filter(fn ($role) => (int) ($role->tipo ?? 1) === 0)
+            ->pluck('idrol')
+            ->all();
+
+        $internalTypes = $this->getAllowedContactTypesForRoles($internalRoleIds);
+        if ($internalTypes !== []) {
+            return $internalTypes;
+        }
+
+        return $this->getAllowedContactTypesForRoles($roleIds);
+    }
+
+    private function getAllowedContactTypesForRoles(array $roleIds): array
+    {
+        if ($roleIds === []) {
             return [];
         }
 
@@ -721,7 +750,7 @@ class ClienteService
         return array_values(array_filter($decoded, static fn ($item) => is_array($item)));
     }
 
-    public function insertContactosTemporales(string $clienteId, string $payload, ?string &$selectedContactId = null): array
+    public function insertContactosTemporales(string $clienteId, string $payload, ?string &$selectedContactId = null, ?array $allowedContactTypes = null): array
     {
         $contactos = $this->decodeContactosPayload($payload);
         if (empty($contactos)) {
@@ -733,14 +762,21 @@ class ClienteService
 
         foreach ($contactos as $contacto) {
             $tempId = isset($contacto['tempId']) ? (string) $contacto['tempId'] : null;
+            $tipoContactoRules = ['required', 'integer', 'exists:tipocontacto,idtipoContacto'];
+            if ($allowedContactTypes !== null && !in_array('*', $allowedContactTypes, true)) {
+                $tipoContactoRules[] = \Illuminate\Validation\Rule::in($allowedContactTypes);
+            }
+
             $validated = Validator::make($contacto, [
-                'tipoContacto_idtipoContacto' => ['required', 'integer', 'exists:tipocontacto,idtipoContacto'],
+                'tipoContacto_idtipoContacto' => $tipoContactoRules,
                 'nombreApellido' => ['required', 'string', 'max:100', 'regex:/^[^;<>`]+$/u'],
                 'cargo' => ['nullable', 'string', 'max:50', 'regex:/^[^;<>`]+$/u'],
                 'correo' => ['nullable', 'email', 'max:100'],
                 'correo2' => ['nullable', 'email', 'max:100'],
                 'numero' => ['nullable', 'string', 'max:15', 'regex:/^[0-9+\-\s()]*$/'],
                 'numero2' => ['nullable', 'string', 'max:15', 'regex:/^[0-9+\-\s()]*$/'],
+            ], [
+                'tipoContacto_idtipoContacto.in' => 'No tiene permiso para asignar este tipo de contacto.',
             ])->validate();
 
             DB::table('contacto')->insert([

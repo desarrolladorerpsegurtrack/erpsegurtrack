@@ -82,7 +82,7 @@ class RolesService
                 'label' => 'Nombre',
                 'required' => true,
                 'minlength' => 2,
-                'maxlength' => 15,
+                'maxlength' => 50,
             ],
             [
                 'name' => 'estado',
@@ -196,9 +196,9 @@ class RolesService
             ->all();
     }
 
-    public function extractSelectedTipoContactoIds(array $tipoInput): array
+    public function extractSelectedTipoContactoIds(array $tipoInput, ?string $mode = null): array
     {
-        if (in_array('*', $tipoInput, true)) {
+        if ($mode === 'all' || ($mode !== 'specific' && in_array('*', $tipoInput, true))) {
             return ['*'];
         }
 

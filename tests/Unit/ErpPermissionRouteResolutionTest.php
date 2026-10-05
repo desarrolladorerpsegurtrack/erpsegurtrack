@@ -23,6 +23,10 @@ class ErpPermissionRouteResolutionTest extends TestCase
             'modules.dispositivo-cliente.index' => 'dispositivo_cliente',
             'modules.vehiculos.edit' => 'vehiculos',
             'modules.cuentasporcobrar.index' => 'cuentasporcobrar',
+            'modules.cuentasporpagar.index' => 'cuentasporpagar',
+            'modules.finanzas.estado-cuenta.index' => 'finanzas.estado_cuenta',
+            'modules.finanzas.bancos.index' => 'finanzas.bancos',
+            'modules.finanzas.nota-creditos.index' => 'finanzas.nota_creditos',
             'modules.servicio-cliente.index' => 'servicio_cliente',
             'modules.servicio-cliente.export' => 'servicio_cliente',
             'modules.configuracion.estados.index' => 'configuracion.estado',
@@ -54,10 +58,40 @@ class ErpPermissionRouteResolutionTest extends TestCase
         $this->assertSame('editar', ErpPermission::inferActionFromRouteName('modules.clientes.lock', 'POST'));
         $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.lineas-chips.detallesimcard.import.preview', 'POST'));
         $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.lineas-chips.detallesimcard.import.process', 'POST'));
+        $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.lineas-chips.numeros-telefonico.import.preview', 'POST'));
+        $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.lineas-chips.numeros-telefonico.import.process', 'POST'));
+        $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.lineas-chips.simcard.import.preview', 'POST'));
+        $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.lineas-chips.simcard.import.process', 'POST'));
         $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.lineas-chips.detallesimcard.preview.export', 'POST'));
         $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.lineas-chips.detallesimcard.bulk-deactivate', 'POST'));
         $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.lineas-chips.detallesimcard.bulk-deactivate.parse-file', 'POST'));
         $this->assertNull(ErpPermission::inferActionFromRouteName('home', 'GET'));
+    }
+
+    public function test_relation_context_uses_real_lineas_chips_primary_keys(): void
+    {
+        $context = \App\Support\RelationContext::resolveResourceContext('lineas_chips.detallesimcard');
+
+        $this->assertNotNull($context);
+        $this->assertSame('detallesimcard', $context['table']);
+        $this->assertSame('iddetalleSimCard', $context['primaryKey']);
+
+        $simContext = \App\Support\RelationContext::resolveResourceContext('lineas_chips.simcard');
+        $this->assertNotNull($simContext);
+        $this->assertSame('simcard', $simContext['table']);
+        $this->assertSame('idsimCard', $simContext['primaryKey']);
+    }
+
+    public function test_import_routes_use_their_specific_solo_permission_key(): void
+    {
+        $this->assertSame(
+            'lineas_chips.cargar_numeros_solo',
+            ErpPermission::resolvePermissionKeyFromRouteName('modules.lineas-chips.numeros-telefonico.import.preview')
+        );
+        $this->assertSame(
+            'lineas_chips.cargar_simcard_solo',
+            ErpPermission::resolvePermissionKeyFromRouteName('modules.lineas-chips.simcard.import.process')
+        );
     }
 
     public function test_normalizes_credenciales_permission_key(): void
@@ -73,6 +107,24 @@ class ErpPermissionRouteResolutionTest extends TestCase
         $this->assertSame('cuentasporcobrar', ErpPermission::normalizePermissionKey('cuenta por cobrar'));
         $this->assertSame('cuentasporcobrar', ErpPermission::normalizePermissionKey('cuentasporcobrar.index'));
         $this->assertSame('cuentasporcobrar', ErpPermission::normalizePermissionKey('cuentas-por-cobrar.ver'));
+    }
+
+    public function test_normalizes_dar_de_baja_action_and_route(): void
+    {
+        $this->assertSame('dar_de_baja', ErpPermission::normalizeAction('Dar de baja'));
+        $this->assertSame('dar_de_baja', ErpPermission::inferActionFromRouteName(
+            'modules.cuentasporcobrar.dar-de-baja-servicios',
+            'POST'
+        ));
+    }
+
+    public function test_normalizes_cuentasporpagar_permission_key(): void
+    {
+        $this->assertSame('cuentasporpagar', ErpPermission::normalizePermissionKey('cuentasporpagar'));
+        $this->assertSame('cuentasporpagar', ErpPermission::normalizePermissionKey('cuentas-por-pagar'));
+        $this->assertSame('cuentasporpagar', ErpPermission::normalizePermissionKey('cuenta por pagar'));
+        $this->assertSame('cuentasporpagar', ErpPermission::normalizePermissionKey('cuentasporpagar.index'));
+        $this->assertSame('cuentasporpagar', ErpPermission::normalizePermissionKey('cuentas-por-pagar.ver'));
     }
 
     public function test_normalizes_almacen_leaf_permission_key(): void

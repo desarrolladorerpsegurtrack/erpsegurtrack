@@ -18,6 +18,15 @@ class RolePermissionMatrix
             ],
         ],
         'cuentasporcobrar' => 'Cuentas por Cobrar',
+        'cuentasporpagar' => 'Cuentas por Pagar',
+        'finanzas' => [
+            'label' => 'Banco / Caja',
+            'submodules' => [
+                'finanzas.estado_cuenta' => 'Estado de cuenta',
+                'finanzas.bancos' => 'Bancos',
+                'finanzas.nota_creditos' => 'Nota de créditos',
+            ],
+        ],
         'clientes' => [
             'label' => 'Clientes',
             'submodules' => [
@@ -36,8 +45,10 @@ class RolePermissionMatrix
                 'lineas_chips.numero_dispositivo' => 'Número de dispositivo',
                 'lineas_chips.simcard' => 'Plastico (SimCard)',
                 'lineas_chips.detallesimcard' => 'Asignacion SimCard',
-                'lineas_chips.cargar_numeros' => 'Cargar números',
+                'lineas_chips.cargar_numeros' => 'Cargar asignación',
                 'lineas_chips.bajar_numeros' => 'Dar de Baja números',
+                'lineas_chips.cargar_numeros_solo' => 'Cargar números',
+                'lineas_chips.cargar_simcard_solo' => 'Cargar SimCard',
             ],
         ],
         'almacen' => [
@@ -91,7 +102,7 @@ class RolePermissionMatrix
                 'configuracion.tipo_vehiculo' => 'Tipo de vehículo',
                 // Auditoria módulo de configuración
                 'configuracion.auditoria' => 'Auditoria',
-                
+
             ],
         ],
         'usuario_personal' => [
@@ -111,7 +122,7 @@ class RolePermissionMatrix
                 'sistema.historialflujo' => 'Historial Flujo',
             ],
         ],
-        
+
     ];
 
     private const PERMISSION_ACTIONS = [
@@ -120,6 +131,7 @@ class RolePermissionMatrix
         'crear' => 'Crear',
         'editar' => 'Editar',
         'eliminar' => 'Eliminar',
+        'dar_de_baja' => 'Dar de baja',
         'aprobar' => 'Aprobar',
         'anular' => 'Anular',
         'exportar' => 'Exportar',
@@ -142,6 +154,8 @@ class RolePermissionMatrix
         'inicio',
         'lineas_chips.cargar_numeros',
         'lineas_chips.bajar_numeros',
+        'lineas_chips.cargar_numeros_solo',
+        'lineas_chips.cargar_simcard_solo',
         'configuracion.auditoria',
         'ventas.personal',
         'sistema.historialflujo',
@@ -181,6 +195,10 @@ class RolePermissionMatrix
 
         foreach (array_keys($leafModules) as $moduleKey) {
             foreach (array_keys(self::PERMISSION_ACTIONS) as $actionKey) {
+                if ($actionKey === 'dar_de_baja' && $moduleKey !== 'cuentasporcobrar') {
+                    continue;
+                }
+
                 if (in_array($actionKey, ['aprobar', 'anular'], true) && !in_array($moduleKey, self::MODULES_WITH_APROBAR_ANULAR, true)) {
                     continue;
                 }
@@ -217,6 +235,10 @@ class RolePermissionMatrix
             $action = mb_strtolower(trim((string) (is_array($permission) ? ($permission['accion'] ?? '') : ($permission->accion ?? ''))));
 
             if ($module === '' || $action === '') {
+                continue;
+            }
+
+            if ($action === 'dar_de_baja' && $module !== 'cuentasporcobrar') {
                 continue;
             }
 
@@ -265,6 +287,10 @@ class RolePermissionMatrix
             }
 
             foreach (array_keys(self::PERMISSION_ACTIONS) as $actionKey) {
+                if ($actionKey === 'dar_de_baja' && $moduleKey !== 'cuentasporcobrar') {
+                    continue;
+                }
+
                 if (in_array($actionKey, ['aprobar', 'anular'], true) && !in_array($moduleKey, self::MODULES_WITH_APROBAR_ANULAR, true)) {
                     continue;
                 }
@@ -325,9 +351,9 @@ class RolePermissionMatrix
 
         if ($hasCredenciales) {
             $clienteActions = $permissionCollection
-                ->filter(fn ($permission) => ($permission['modulo'] ?? '') === 'clientes.cliente')
+                ->filter(fn($permission) => ($permission['modulo'] ?? '') === 'clientes.cliente')
                 ->pluck('accion')
-                ->map(fn ($action) => mb_strtolower(trim((string) $action)))
+                ->map(fn($action) => mb_strtolower(trim((string) $action)))
                 ->unique();
 
             $hasClienteVer = $clienteActions->contains('ver');
@@ -344,13 +370,45 @@ class RolePermissionMatrix
 
         if ($hasCargaOrBaja) {
             $detalleSimCardActions = $permissionCollection
-                ->filter(fn ($permission) => ($permission['modulo'] ?? '') === 'lineas_chips.detallesimcard')
+                ->filter(fn($permission) => ($permission['modulo'] ?? '') === 'lineas_chips.detallesimcard')
                 ->pluck('accion')
-                ->map(fn ($action) => mb_strtolower(trim((string) $action)))
+                ->map(fn($action) => mb_strtolower(trim((string) $action)))
                 ->unique();
 
             if (!$detalleSimCardActions->contains('ver')) {
                 $errors[] = 'Para asignar permisos de Cargar números o Bajar números debes dar primero permisos de Asignación SimCard: Ver.';
+            }
+        }
+
+        $hasCargaNumerosSolo = $permissionCollection->contains(function ($permission) {
+            return ($permission['modulo'] ?? '') === 'lineas_chips.cargar_numeros_solo';
+        });
+
+        if ($hasCargaNumerosSolo) {
+            $numeroTelefonicoActions = $permissionCollection
+                ->filter(fn($permission) => ($permission['modulo'] ?? '') === 'lineas_chips.numero_telefonico')
+                ->pluck('accion')
+                ->map(fn($action) => mb_strtolower(trim((string) $action)))
+                ->unique();
+
+            if (!$numeroTelefonicoActions->contains('ver')) {
+                $errors[] = 'Para asignar permisos de Cargar números debes dar primero permisos de Número telefónico: Ver.';
+            }
+        }
+
+        $hasCargaSimcardSolo = $permissionCollection->contains(function ($permission) {
+            return ($permission['modulo'] ?? '') === 'lineas_chips.cargar_simcard_solo';
+        });
+
+        if ($hasCargaSimcardSolo) {
+            $simcardActions = $permissionCollection
+                ->filter(fn($permission) => ($permission['modulo'] ?? '') === 'lineas_chips.simcard')
+                ->pluck('accion')
+                ->map(fn($action) => mb_strtolower(trim((string) $action)))
+                ->unique();
+
+            if (!$simcardActions->contains('ver')) {
+                $errors[] = 'Para asignar permisos de Cargar SimCard debes dar primero permisos de Plastico (SimCard): Ver.';
             }
         }
 
@@ -360,11 +418,11 @@ class RolePermissionMatrix
 
         if ($hasDniPersonal) {
             $cotActions = $permissionCollection
-                ->filter(fn ($permission) => ($permission['modulo'] ?? '') === 'ventas.cotizaciones')
+                ->filter(fn($permission) => ($permission['modulo'] ?? '') === 'ventas.cotizaciones')
                 ->pluck('accion')
-                ->map(fn ($action) => mb_strtolower(trim((string) $action)))
+                ->map(fn($action) => mb_strtolower(trim((string) $action)))
                 ->unique();
-                
+
             $hasCotVer = $cotActions->contains('ver');
             $hasCotCreateOrEdit = $cotActions->contains('crear') || $cotActions->contains('editar');
 

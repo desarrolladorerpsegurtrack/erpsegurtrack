@@ -16,7 +16,14 @@
                     <i data-lucide="x" class="h-5 w-5"></i>
                 </button>
             </div>
-            <div class="min-h-0 flex-1 bg-slate-800">
+            <div class="relative min-h-0 flex-1 bg-slate-800">
+                <div id="preview-loading" class="absolute inset-0 z-10 hidden flex-col items-center justify-center bg-white/80">
+                    <svg class="mb-3 h-10 w-10 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span class="text-sm font-medium text-slate-600">Cargando PDF de cotización...</span>
+                </div>
                 <iframe id="cotizacion-pdf-preview-frame" title="PDF de cotización" class="h-full w-full border-0"></iframe>
             </div>
         </div>
@@ -122,6 +129,7 @@
         document.addEventListener('DOMContentLoaded', function () {
             const pdfModal = document.getElementById('cotizacion-pdf-preview-modal');
             const pdfFrame = document.getElementById('cotizacion-pdf-preview-frame');
+            const previewLoading = document.getElementById('preview-loading');
             const pdfNumber = document.getElementById('cotizacion-pdf-preview-number');
             const closePdfModal = function () {
                 if (!pdfModal) {
@@ -132,13 +140,30 @@
                 if (pdfFrame) {
                     pdfFrame.src = 'about:blank';
                 }
+                if (previewLoading) {
+                    previewLoading.classList.add('hidden');
+                    previewLoading.classList.remove('flex');
+                }
                 document.body.style.overflow = '';
             };
+
+            if (pdfFrame) {
+                pdfFrame.addEventListener('load', function () {
+                    if (previewLoading) {
+                        previewLoading.classList.add('hidden');
+                        previewLoading.classList.remove('flex');
+                    }
+                });
+            }
 
             document.addEventListener('click', function (event) {
                 const previewButton = event.target.closest('[data-cotizacion-pdf-preview]');
                 if (previewButton && pdfModal && pdfFrame) {
                     event.preventDefault();
+                    if (previewLoading) {
+                        previewLoading.classList.remove('hidden');
+                        previewLoading.classList.add('flex');
+                    }
                     pdfFrame.src = previewButton.dataset.cotizacionPdfPreview || 'about:blank';
                     if (pdfNumber) {
                         pdfNumber.textContent = previewButton.dataset.cotizacionNumber

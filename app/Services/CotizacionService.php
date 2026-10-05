@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -49,7 +50,7 @@ class CotizacionService
             $monedas,
         );
 
-        [$record, $copyDetalles, $fields] = $this->loadCopyFromData($request, $fields);
+        [$record, $copyDetalles, $fields, $copyAsGroup, $copyGroupFields] = $this->loadCopyFromData($request, $fields);
         $paquetes = $this->loadPaquetes($this->loadPaquetesDetalles());
 
         return [
@@ -59,6 +60,8 @@ class CotizacionService
             'almacenes' => $almacenes,
             'paquetes' => $paquetes,
             'detalles' => $copyDetalles,
+            'copyAsGroup' => $copyAsGroup,
+            'copyGroupFields' => $copyGroupFields,
         ];
     }
 
@@ -71,7 +74,7 @@ class CotizacionService
 
         $personales = $canListPersonal ? $this->loadPersonales($currentDni, $isAdmin) : collect();
         $clientes = $this->loadClientes();
-        $vigencias = $this->loadVigencias(false);
+        $vigencias = $this->loadVigencias(true);
         $formasPago = $this->loadFormasPago();
         $monedas = $this->loadMonedas();
         $almacenes = $this->loadAlmacenes();
@@ -147,14 +150,15 @@ class CotizacionService
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
             $term = '%' . $search . '%';
-            $query->where(function ($builder) use ($term) {
+            $query->where(function ($builder) use ($term, $search) {
                 $builder->where('c.nroCotizacion', 'like', $term)
                     ->orWhere('cli.razonSocial', 'like', $term)
                     ->orWhere('cli.nombreComercial', 'like', $term)
                     ->orWhere('v.detalle', 'like', $term)
                     ->orWhere('fp.detalle', 'like', $term)
-                    ->orWhere('p.nombre', 'like', $term)
-                    ->orWhere('p.apellido', 'like', $term);
+                    ->orWhere(function ($personalQuery) use ($search) {
+                        $this->wherePersonalMatches($personalQuery, $search);
+                    });
             });
         }
 
@@ -175,11 +179,8 @@ class CotizacionService
 
         $vendedorSearch = trim((string) $request->input('vendedor_search', ''));
         if ($vendedorSearch !== '') {
-            $term = '%' . $vendedorSearch . '%';
-            $query->where(function ($b) use ($term) {
-                $b->where('p.dniPersonal', 'like', $term)
-                    ->orWhere('p.nombre', 'like', $term)
-                    ->orWhere('p.apellido', 'like', $term);
+            $query->where(function ($personalQuery) use ($vendedorSearch) {
+                $this->wherePersonalMatches($personalQuery, $vendedorSearch);
             });
         }
 
@@ -208,6 +209,20 @@ class CotizacionService
         }
 
         return $query;
+    }
+
+    private function wherePersonalMatches(Builder $query, string $search): void
+    {
+        $terms = preg_split('/\s+/u', trim($search), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        foreach ($terms as $term) {
+            $likeTerm = '%' . $term . '%';
+            $query->where(function ($termQuery) use ($likeTerm) {
+                $termQuery->where('p.dniPersonal', 'like', $likeTerm)
+                    ->orWhere('p.nombre', 'like', $likeTerm)
+                    ->orWhere('p.apellido', 'like', $likeTerm);
+            });
+        }
     }
 
     public function buildFields(?string $id = null): array
@@ -257,7 +272,7 @@ class CotizacionService
                 'type' => 'text',
                 'label' => 'Dirección',
                 'required' => true,
-                'maxlength' => 150,
+                'maxlength' => 200,
                 'quickAddressModal' => true,
             ],
             [
@@ -493,6 +508,7 @@ class CotizacionService
             ->get()
             ->map(function ($r) use ($includeDays) {
                 $label = trim((string) ($r->detalle ?? ''));
+                $dias = (int) ($r->tiempo ?? 0);
                 if ($includeDays) {
                     $dias = (int) ($r->dias ?? 0);
                     if ($dias > 0 && !str_contains(mb_strtolower($label), 'contado')) {
@@ -699,10 +715,12 @@ class CotizacionService
     {
         $record = null;
         $copyDetalles = [];
+        $copyAsGroup = false;
+        $copyGroupFields = [];
         $copyFrom = $request->input('copy_from');
 
         if (!$copyFrom) {
-            return [$record, $copyDetalles, $fields];
+            return [$record, $copyDetalles, $fields, $copyAsGroup, $copyGroupFields];
         }
 
         $record = DB::table('cotizacion as c')
@@ -712,8 +730,21 @@ class CotizacionService
             ->first();
 
         if (!$record) {
-            return [$record, $copyDetalles, $fields];
+            return [$record, $copyDetalles, $fields, $copyAsGroup, $copyGroupFields];
         }
+
+        $sourceQuotes = collect([$record]);
+        $sourceBatchId = trim((string) ($record->batch_id ?? ''));
+        if (str_starts_with($sourceBatchId, 'GRP-')) {
+            $sourceQuotes = DB::table('cotizacion')
+                ->where('batch_id', $sourceBatchId)
+                ->orderBy('nroCotizacion')
+                ->get();
+            $copyAsGroup = $sourceQuotes->count() >= 2;
+        }
+
+        $sourceQuoteNumbers = $sourceQuotes->pluck('nroCotizacion')->filter()->values()->all();
+        $sourceQuotesByNumber = $sourceQuotes->keyBy('nroCotizacion');
 
         $record->nroCotizacion = null;
         $record->fechaHoraEmision = null;
@@ -721,9 +752,10 @@ class CotizacionService
         $record->estado = '0';
 
         $copyDetalles = DB::table('detallecotizacion')
-            ->where('cotizacion_nroCotizacion', $copyFrom)
+            ->whereIn('cotizacion_nroCotizacion', $sourceQuoteNumbers)
+            ->orderBy('cotizacion_nroCotizacion')
             ->get()
-            ->map(function ($r) {
+            ->map(function ($r) use ($sourceQuotesByNumber) {
                 $a = DB::table('almacen')->where('idalmacen', $r->almacen_idalmacen)->first();
                 $tipo_nombre = 'EQUIPAMIENTO';
                 if ($a && $a->tipoElemento_idtipoElemento) {
@@ -732,6 +764,13 @@ class CotizacionService
                         $tipo_nombre = $te->nombre;
                     }
                 }
+                $sourceQuote = $sourceQuotesByNumber->get($r->cotizacion_nroCotizacion);
+                $groupFields = $sourceQuote ? [
+                    'vigenciaOferta_idvigenciaOferta' => $sourceQuote->vigenciaOferta_idvigenciaOferta,
+                    'formaPago_idformaPago' => $sourceQuote->formaPago_idformaPago,
+                    'moneda_idmoneda' => $sourceQuote->moneda_idmoneda,
+                    'comentario' => $sourceQuote->comentario,
+                ] : [];
                 return (object) [
                     'almacen_idalmacen' => $r->almacen_idalmacen,
                     'precioUnitario' => $r->precioUnitario,
@@ -739,8 +778,24 @@ class CotizacionService
                     'descuento' => $r->descuento,
                     'total' => $r->total,
                     'tipo_nombre' => $tipo_nombre,
+                    'group_fields' => $groupFields,
                 ];
             })->toArray();
+
+        foreach ($copyDetalles as $detalle) {
+            $groupKey = strtoupper((string) ($detalle->tipo_nombre ?? ''));
+            if (str_contains($groupKey, 'SERVIC')) {
+                $groupKey = 'SERVICIOS TÉCNICOS';
+            } elseif (str_contains($groupKey, 'PLAN')) {
+                $groupKey = 'PLANES';
+            } else {
+                $groupKey = 'EQUIPAMIENTO';
+            }
+            $safeKey = strtolower((string) preg_replace('/[^a-zA-Z0-9]/', '_', $groupKey));
+            if (!isset($copyGroupFields[$safeKey])) {
+                $copyGroupFields[$safeKey] = $detalle->group_fields ?? [];
+            }
+        }
 
         foreach ($fields as $idx => $field) {
             $fieldName = $field['name'] ?? null;
@@ -752,7 +807,7 @@ class CotizacionService
             }
         }
 
-        return [$record, $copyDetalles, $fields];
+        return [$record, $copyDetalles, $fields, $copyAsGroup, $copyGroupFields];
     }
 
     private function loadPaquetesDetalles(): Collection
@@ -943,16 +998,35 @@ class CotizacionService
 
     private function loadEditDetalles(string $id): Collection
     {
+        $record = DB::table('cotizacion')->where('nroCotizacion', $id)->first();
+        $batchId = trim((string) ($record->batch_id ?? ''));
+        $sourceQuotes = $batchId !== '' && str_starts_with($batchId, 'GRP-')
+            ? DB::table('cotizacion')->where('batch_id', $batchId)->orderBy('nroCotizacion')->get()
+            : collect([$record]);
+        $sourceQuotesByNumber = $sourceQuotes->keyBy('nroCotizacion');
+        $sourceNumbers = $sourceQuotes->pluck('nroCotizacion')->filter()->values()->all();
+
         return DB::table('detallecotizacion')
-            ->where('cotizacion_nroCotizacion', $id)
+            ->whereIn('cotizacion_nroCotizacion', $sourceNumbers)
+            ->orderBy('cotizacion_nroCotizacion')
             ->get()
-            ->map(function ($r) {
+            ->map(function ($r) use ($sourceQuotesByNumber) {
+                $sourceQuote = $sourceQuotesByNumber->get($r->cotizacion_nroCotizacion);
                 return (object) [
                     'almacen_idalmacen' => $r->almacen_idalmacen,
                     'precioUnitario' => $r->precioUnitario,
                     'cantidad' => $r->cantidad,
                     'descuento' => $r->descuento,
                     'total' => $r->total,
+                    'group_fields' => [
+                        'vigenciaOferta_idvigenciaOferta' => $sourceQuote->vigenciaOferta_idvigenciaOferta ?? null,
+                        'formaPago_idformaPago' => $sourceQuote->formaPago_idformaPago ?? null,
+                        'moneda_idmoneda' => $sourceQuote->moneda_idmoneda ?? null,
+                        'comentario' => $sourceQuote->comentario ?? null,
+                        'descuento' => $sourceQuote->descuento ?? 0,
+                        'igv' => $sourceQuote->igv ?? 18,
+                        'source_nroCotizacion' => $sourceQuote->nroCotizacion ?? null,
+                    ],
                 ];
             });
     }
@@ -965,7 +1039,7 @@ class CotizacionService
             'tipoDocumento_idtipoDocumento' => ['nullable', 'integer'],
             'tipoDocumentoIDCliente' => ['nullable', 'string', 'max:3'],
             'personal_dniPersonal' => ['nullable', 'string', 'max:20'],
-            'direccion' => ['required', 'string', 'max:150'],
+            'direccion' => ['required', 'string', 'max:200'],
             'telefono' => ['nullable', 'string', 'max:15'],
             'correo' => ['nullable', 'email', 'max:100'],
             'vigenciaOferta_idvigenciaOferta' => ['nullable', 'required_without:cotizaciones', 'integer', 'exists:vigenciaoferta,idvigenciaOferta'],
@@ -980,6 +1054,7 @@ class CotizacionService
             'cotizaciones.*.igv' => ['required_with:cotizaciones', 'numeric'],
             'cotizaciones.*.total' => ['required_with:cotizaciones', 'numeric'],
             'cotizaciones.*.detalle' => ['required_with:cotizaciones', 'array'],
+            'cotizaciones.*.source_nroCotizacion' => ['nullable', 'string', 'max:15'],
             'cotizaciones.*.vigenciaOferta_idvigenciaOferta' => ['nullable', 'integer', 'exists:vigenciaoferta,idvigenciaOferta'],
             'cotizaciones.*.formaPago_idformaPago' => ['required', 'integer', 'exists:formapago,idformaPago'],
             'cotizaciones.*.moneda_idmoneda' => ['required', 'integer', 'exists:moneda,idmoneda'],

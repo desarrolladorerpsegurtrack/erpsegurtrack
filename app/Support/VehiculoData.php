@@ -7,7 +7,7 @@ class VehiculoData
     public static function getBrands(): array
     {
         return [
-            'VOLVO', 'SCANGIA', 'MERCEDES-BENZ', 'FREIGHTLINER', 'KENWORTH',
+            'VOLVO', 'SCANIA', 'MERCEDES-BENZ', 'FREIGHTLINER', 'KENWORTH',
             'PETERBILT', 'INTERNATIONAL', 'ISUZU', 'HINO', 'MITSUBISHI',
             'MAN', 'DAF', 'IVECO', 'MACK', 'HYUNDAI', 'DONGFENG', 'FOTON', 
             'UD TRUCKS', 'TATA', 'JAC', 'SINOTRUK', 'AUMAN', 'CAMC', 

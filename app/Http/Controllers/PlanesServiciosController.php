@@ -520,7 +520,13 @@ class PlanesServiciosController extends Controller
             'empresaPropietaria_RUC' => ['required', 'integer', Rule::exists('empresapropietaria', 'RUC')],
             'tipoElemento_idtipoElemento' => ['required', 'integer', Rule::in($allowedTipoElementoIds)],
             'detalle' => ['nullable', 'string', 'max:200', 'regex:' . self::SAFE_TEXT_REGEX],
-            'periodo' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'periodo' => [
+                'nullable',
+                'string',
+                'max:50',
+                'regex:' . self::SAFE_TEXT_REGEX,
+                'regex:/^(?:no|mensual|\d+(?:\s*(?:mes(?:es)?|año(?:s)?|ano(?:s)?|d[ií]as?))?)$/iu',
+            ],
             'precio' => ['nullable', 'numeric', 'min:0'],
             'moneda_idmoneda' => ['nullable', 'integer', Rule::exists('moneda', 'idmoneda')],
             'renovacion' => ['nullable', 'integer', Rule::in([0, 1])],
@@ -724,28 +730,49 @@ class PlanesServiciosController extends Controller
     private function convertPeriodoToDays(mixed $value): ?string
     {
         $periodo = trim((string) ($value ?? ''));
-        
-        if ($periodo === '' || $periodo === 'No') {
+        $normalizedPeriodo = mb_strtolower((string) preg_replace('/\s+/u', ' ', $periodo), 'UTF-8');
+
+        if ($normalizedPeriodo === '' || $normalizedPeriodo === 'no') {
             return null;
         }
 
-        // Si ya es un número, retornar como está
-        if (is_numeric($periodo)) {
+        if (is_numeric($normalizedPeriodo)) {
             return (string) $periodo;
         }
 
-        // Mapeo de texto a días
         $mapping = [
-            'Mensual' => 30,
-            '3 Meses' => 90,
-            '6 Meses' => 180,
-            '12 Meses' => 365,
-            '24 Meses' => 730,
-            '36 Meses' => 1095,
-            '48 Meses' => 1460,
+            'mensual' => 30,
+            '3 meses' => 90,
+            '6 meses' => 180,
+            '12 meses' => 365,
+            '24 meses' => 730,
+            '36 meses' => 1095,
+            '48 meses' => 1460,
         ];
 
-        return $mapping[$periodo] !== null ? (string) $mapping[$periodo] : $periodo;
+        if (isset($mapping[$normalizedPeriodo])) {
+            return (string) $mapping[$normalizedPeriodo];
+        }
+
+        if (preg_match('/^(\d+)\s*mes(?:es)?$/u', $normalizedPeriodo, $matches) === 1) {
+            $months = (int) $matches[1];
+            $days = $months % 12 === 0
+                ? intdiv($months, 12) * 365
+                : $months * 30;
+
+            return (string) $days;
+        }
+
+        if (preg_match('/^(\d+)\s*año(?:s)?$/u', $normalizedPeriodo, $matches) === 1
+            || preg_match('/^(\d+)\s*ano(?:s)?$/u', $normalizedPeriodo, $matches) === 1) {
+            return (string) ((int) $matches[1] * 365);
+        }
+
+        if (preg_match('/^(\d+)\s*d[ií]as?$/u', $normalizedPeriodo, $matches) === 1) {
+            return (string) (int) $matches[1];
+        }
+
+        return $periodo;
     }
 
     private function convertDaysToFormattedPeriodo(mixed $value): string
@@ -767,7 +794,19 @@ class PlanesServiciosController extends Controller
             1460 => '48 Meses',
         ];
 
-        return $mapping[$days] ?? '';
+        if (isset($mapping[$days])) {
+            return $mapping[$days];
+        }
+
+        if ($days > 0 && $days % 30 === 0) {
+            return intdiv($days, 30) . ' Meses';
+        }
+
+        if ($days > 0 && $days % 365 === 0) {
+            return (intdiv($days, 365) * 12) . ' Meses';
+        }
+
+        return '';
     }
 
     private function detailListaPrecioItems(int $almacenId): Collection

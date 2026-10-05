@@ -109,6 +109,7 @@ class UsuarioService
         $roleIds = $roles->pluck('idrol')->map(fn ($id) => (int) $id)->filter()->values();
         $permissionsByRole = collect();
         $vistasByRole = collect();
+        $contactTypesByRole = collect();
 
         if ($roleIds->isNotEmpty()) {
             $permissionsByRole = DB::table('inforol')
@@ -124,9 +125,17 @@ class UsuarioService
                 ->select('rol_idrol', 'modulo')
                 ->get()
                 ->groupBy('rol_idrol');
+
+            $contactTypesByRole = DB::table('inforol')
+                ->whereIn('rol_idrol', $roleIds)
+                ->where('accion', 'ver')
+                ->where('modulo', 'like', 'cliente.tipo_contacto.%')
+                ->select('rol_idrol', 'modulo')
+                ->get()
+                ->groupBy('rol_idrol');
         }
 
-        return $roles->map(function ($role) use ($permissionsByRole, $vistasByRole) {
+        return $roles->map(function ($role) use ($permissionsByRole, $vistasByRole, $contactTypesByRole) {
             $role->label = $role->nombre;
             $role->submodules_summary = $this->formatRoleSubmodules($role->submodulos);
             $role->permission_matrix = RolePermissionMatrix::matrixFromStoredPermissions(
@@ -138,6 +147,16 @@ class UsuarioService
                 ->unique()
                 ->values()
                 ->all();
+            $contactTypeModules = collect($contactTypesByRole->get((int) $role->idrol, collect()))
+                ->pluck('modulo');
+            $role->contact_type_ids = $contactTypeModules->contains('cliente.tipo_contacto.*')
+                ? ['*']
+                : $contactTypeModules
+                    ->map(fn ($module) => (int) str_replace('cliente.tipo_contacto.', '', (string) $module))
+                    ->filter(fn ($id) => $id > 0)
+                    ->unique()
+                    ->values()
+                    ->all();
             return $role;
         });
     }
@@ -160,6 +179,20 @@ class UsuarioService
             ->get();
     }
 
+    public function formatPersonalOptions(Collection $personales): Collection
+    {
+        return $personales->map(function ($personal) {
+            $nombreCompleto = trim(implode(' ', array_filter([
+                trim((string) ($personal->nombre ?? '')),
+                trim((string) ($personal->apellido ?? '')),
+            ])));
+            $dni = trim((string) ($personal->dniPersonal ?? ''));
+            $personal->label = $nombreCompleto !== '' ? $nombreCompleto . ' - ' . $dni : $dni;
+
+            return $personal;
+        });
+    }
+
     public function createUser(array $validated, ?int $selectedRoleId, array $permissionPairs, array $vistaIds, array $tipoContactoIds = []): void
     {
         DB::transaction(function () use ($validated, $selectedRoleId, $permissionPairs, $vistaIds, $tipoContactoIds) {
@@ -170,7 +203,7 @@ class UsuarioService
                 'estado' => $validated['estado'] ?? '1',
             ]);
 
-            $hasCustomPermissions = $permissionPairs !== [] || $vistaIds !== [];
+            $hasCustomPermissions = $permissionPairs !== [] || $vistaIds !== [] || $tipoContactoIds !== [];
 
             if ($selectedRoleId !== null && !$hasCustomPermissions) {
                 DB::table('detallerol')->insert([
@@ -244,6 +277,25 @@ class UsuarioService
             ->unique()
             ->values()
             ->all();
+    }
+
+    public function getStoredTipoContactoIdsForUser(string $usuario): array
+    {
+        $assignedRoles = $this->getAssignedRoles($usuario);
+        $internalRole = $assignedRoles->first(fn ($role) => (int) ($role->tipo ?? 1) === 0);
+
+        if ($internalRole !== null) {
+            $internalTipoIds = $this->rolesService->getStoredTipoContactoIdsByRoleId((int) $internalRole->idrol);
+            if ($internalTipoIds !== []) {
+                return $internalTipoIds;
+            }
+        }
+
+        $precreatedRole = $assignedRoles->first(fn ($role) => (int) ($role->tipo ?? 1) === 1);
+
+        return $precreatedRole !== null
+            ? $this->rolesService->getStoredTipoContactoIdsByRoleId((int) $precreatedRole->idrol)
+            : [];
     }
 
     public function extractSelectedVistaIds(array $vistaInput): array
@@ -330,7 +382,7 @@ class UsuarioService
             DB::table('usuario')->where('usuario', $usuario)->update($payload);
             DB::table('detallerol')->where('usuario_usuario', $usuario)->delete();
 
-            $hasCustomPermissions = $permissionPairs !== [] || $vistaIds !== [];
+            $hasCustomPermissions = $permissionPairs !== [] || $vistaIds !== [] || $tipoContactoIds !== [];
 
             if ($selectedRoleId !== null && !$hasCustomPermissions) {
                 DB::table('detallerol')->insert([

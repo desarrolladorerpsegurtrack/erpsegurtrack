@@ -1791,6 +1791,8 @@
                         var cotVer = fieldset.querySelector('input[name="permissions[ventas.cotizaciones][ver]"]');
                         var cotCrear = fieldset.querySelector('input[name="permissions[ventas.cotizaciones][crear]"]');
                         var cotEditar = fieldset.querySelector('input[name="permissions[ventas.cotizaciones][editar]"]');
+                            var numeroTelefonicoVer = fieldset.querySelector('input[name="permissions[lineas_chips.numero_telefonico][ver]"]');
+                            var simcardVer = fieldset.querySelector('input[name="permissions[lineas_chips.simcard][ver]"]');
 
                         conditionalRows.forEach(function (row) {
                             var submodule = row.dataset.submodule;
@@ -1811,6 +1813,10 @@
                                 canUse = true;
                             } else if (submodule === 'lineas_chips.cargar_numeros' || submodule === 'lineas_chips.bajar_numeros') {
                                 canUse = hasLineasDetalleVer;
+                            } else if (submodule === 'lineas_chips.cargar_numeros_solo') {
+                                canUse = numeroTelefonicoVer && numeroTelefonicoVer.checked;
+                            } else if (submodule === 'lineas_chips.cargar_simcard_solo') {
+                                canUse = simcardVer && simcardVer.checked;
                             } else if (submodule === 'ventas.personal') {
                                 // Personal Cotizadora only enabled when Cotizaciones has Crear + (Editar or Eliminar)
                                 canUse = hasCotVer && hasCotCreateOrEdit;
@@ -1844,6 +1850,34 @@
                     if (roleInputs.length === 0) {
                         return;
                     }
+
+                    var contactoTiposFieldset = form.querySelector('[data-contacto-tipos-fieldset]');
+                    var syncContactoTiposFromRole = function (roleInput) {
+                        if (!contactoTiposFieldset || !roleInput) {
+                            return;
+                        }
+
+                        var tipoIds = [];
+                        try {
+                            var parsedTipoIds = JSON.parse(roleInput.dataset.roleContactTypeIds || '[]');
+                            tipoIds = Array.isArray(parsedTipoIds) ? parsedTipoIds.map(String) : [];
+                        } catch (error) {
+                            tipoIds = [];
+                        }
+
+                        var allowAll = tipoIds.length === 0 || tipoIds.includes('*');
+                        var allRadio = contactoTiposFieldset.querySelector('input[name="contacto_tipos_modo"][value="all"]');
+                        var specificRadio = contactoTiposFieldset.querySelector('input[name="contacto_tipos_modo"][value="specific"]');
+                        contactoTiposFieldset.querySelectorAll('.contacto-tipo-checkbox').forEach(function (checkbox) {
+                            checkbox.checked = !allowAll && tipoIds.includes(String(checkbox.value));
+                        });
+
+                        var activeRadio = allowAll ? allRadio : specificRadio;
+                        if (activeRadio) {
+                            activeRadio.checked = true;
+                            activeRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    };
 
                     var permissionInputs = Array.from(permissionFieldset.querySelectorAll('input.permission-switch-input'));
                     var moduleToggles = Array.from(permissionFieldset.querySelectorAll('.module-select-all'));
@@ -2011,6 +2045,9 @@
                         input.addEventListener('change', function () {
                             enforceSingleSelection(input);
                             syncWithRoleSelection();
+                            if (input.checked) {
+                                syncContactoTiposFromRole(input);
+                            }
                         });
                     });
 
@@ -2239,7 +2276,8 @@
 
                                 @if((($field['quickCreateCredential'] ?? false) === true && !($canSeeCredencialesField ?? true)) ||
                                     (($field['quickCreateDispositivo'] ?? false) === true && !($canSeeDispositivoField ?? true)) ||
-                                    (($field['name'] ?? '') === 'dispositivoSeleccionado' && !($canSeeDispositivoField ?? true)))
+                                    (($field['name'] ?? '') === 'dispositivoSeleccionado' && !($canSeeDispositivoField ?? true)) ||
+                                    (($field['name'] ?? '') === 'numeroTelefonico_numeroTelefonico' && ($isIntegrador ?? false)))
                                     @continue
                                 @endif
 
@@ -2513,6 +2551,7 @@
                                             <select 
                                                 id="select-{{ $field['name'] }}"
                                                 name="{{ $field['name'] }}" 
+                                                @if(($field['ownershipChangeBlocked'] ?? false)) data-edit-locked="true" data-edit-lock-message="{{ $field['ownershipChangeBlockedMessage'] }}" @endif
                                                 @if(!empty($field['tomSelect'])) data-placeholder="{{ $field['placeholder'] ?? 'Selecciona una opción' }}" @endif
                                                 class="{{ !empty($field['tomSelect']) ? 'tom-select tom-select--compact ' : '' }}w-full rounded-lg border {{ $hasError ? 'border-red-500' : 'border-slate-300' }} px-3 py-2 text-sm transition duration-200 ease-in-out focus:border-primary focus:ring-1 focus:ring-primary {{ ($field['readonly'] ?? false) ? 'bg-slate-50 cursor-not-allowed' : '' }}"
                                                 {{ ($field['required'] ?? false) ? 'required' : '' }}
@@ -2564,6 +2603,10 @@
                                                     @endforeach
                                                 @endif
                                             </select>
+                                            @if(($field['ownershipChangeBlocked'] ?? false))
+                                                <input type="hidden" name="{{ $field['name'] }}" value="{{ $fieldValue }}">
+                                                <p class="mt-1 text-xs font-medium text-amber-700">{{ $field['ownershipChangeBlockedMessage'] }}</p>
+                                            @endif
                                             @if(($field['readonly'] ?? false))
                                                 <input type="hidden" name="{{ $field['name'] }}" value="{{ $fieldValue }}">
                                             @endif
@@ -2713,6 +2756,7 @@
                                                                     data-role-id="{{ $optKey }}"
                                                                     data-role-permissions-matrix='@json(data_get($option, 'permissionMatrix', []))'
                                                                     data-role-vista-ids='@json(data_get($option, 'vista_ids', []))'
+                                                                    data-role-contact-type-ids='@json(data_get($option, 'contact_type_ids', []))'
                                                                 @endif
                                                             >
                                                             <span class="custom-checkbox-box" aria-hidden="true"></span>
@@ -3034,6 +3078,9 @@
                                                                                             if ($moduleEntry['moduleKey'] !== 'ventas') {
                                                                                                 $tablePermissionActions = $tablePermissionActions->except(['aprobar', 'anular']);
                                                                                             }
+                                                                                            if ($moduleEntry['moduleKey'] !== 'cuentasporcobrar') {
+                                                                                                $tablePermissionActions = $tablePermissionActions->except('dar_de_baja');
+                                                                                            }
                                                                                             $tablePermissionActions = $tablePermissionActions->all();
                                                                                         @endphp
                                                                                         <thead>
@@ -3104,6 +3151,9 @@
                                                                                 if ($moduleEntry['moduleKey'] !== 'ventas') {
                                                                                     $tablePermissionActions = $tablePermissionActions->except(['aprobar', 'anular']);
                                                                                 }
+                                                                                if ($moduleEntry['moduleKey'] !== 'cuentasporcobrar') {
+                                                                                    $tablePermissionActions = $tablePermissionActions->except('dar_de_baja');
+                                                                                }
                                                                                 $tablePermissionActions = $tablePermissionActions->all();
                                                                             @endphp
                                                                             <thead>
@@ -3121,7 +3171,12 @@
                                                                                             $isHistorialFlujoRow = $moduleEntry['moduleKey'] === 'sistema' && $subKey === 'sistema.historialflujo';
                                                                                             $isCredentialRow = $subKey === 'clientes.credenciales';
                                                                                             $isDeviceRow = $subKey === 'vehiculos.dispositivo_cliente' || $subKey === 'dispositivo_cliente';
-                                                                                            $isLineasChildRow = in_array($subKey, ['lineas_chips.cargar_numeros', 'lineas_chips.bajar_numeros'], true);
+                                                                                            $isLineasChildRow = in_array($subKey, [
+                                                                                                'lineas_chips.cargar_numeros',
+                                                                                                'lineas_chips.bajar_numeros',
+                                                                                                'lineas_chips.cargar_numeros_solo',
+                                                                                                'lineas_chips.cargar_simcard_solo',
+                                                                                            ], true);
                                                                                             $isTicketsRow = $subKey === 'tickets';
                                                                                             $clienteActions = $permissionValue['clientes.cliente'] ?? [];
                                                                                             $clienteVer = !empty($clienteActions['ver']);
@@ -3129,9 +3184,17 @@
                                                                                             $clienteEditar = !empty($clienteActions['editar']);
                                                                                             $lineasDetalleActions = $permissionValue['lineas_chips.detallesimcard'] ?? [];
                                                                                             $lineasDetalleVer = !empty($lineasDetalleActions['ver']);
+                                                                                            $numeroTelefonicoActions = $permissionValue['lineas_chips.numero_telefonico'] ?? [];
+                                                                                            $numeroTelefonicoVer = !empty($numeroTelefonicoActions['ver']);
+                                                                                            $simcardActions = $permissionValue['lineas_chips.simcard'] ?? [];
+                                                                                            $simcardVer = !empty($simcardActions['ver']);
                                                                                             $credentialDisabled = $isCredentialRow && !($clienteVer && ($clienteCrear || $clienteEditar));
                                                                                             $deviceDisabled = false;
-                                                                                            $lineasChildDisabled = $isLineasChildRow && !$lineasDetalleVer;
+                                                                                            $lineasChildDisabled = ($subKey === 'lineas_chips.cargar_numeros' || $subKey === 'lineas_chips.bajar_numeros')
+                                                                                                ? !$lineasDetalleVer
+                                                                                                : ($subKey === 'lineas_chips.cargar_numeros_solo'
+                                                                                                    ? !$numeroTelefonicoVer
+                                                                                                    : ($subKey === 'lineas_chips.cargar_simcard_solo' ? !$simcardVer : false));
                                                                                             $isDniPersonalRow = $subKey === 'ventas.personal';
                                                                                             $cotizacionesActions = $permissionValue['ventas.cotizaciones'] ?? [];
                                                                                             $cotCrear = !empty($cotizacionesActions['crear']);
@@ -3147,7 +3210,13 @@
                                                                                         @php
                                                                                             $isEditForbidden = in_array($subKey, ['lineas_chips.detallesimcard', 'lineas_chips.numero_dispositivo'], true) && $actionKey === 'editar';
                                                                                             $isDeleteForbidden = $isTicketsRow && in_array($actionKey, ['editar', 'eliminar'], true);
-                                                                                            $isVerOnlyRow = in_array($subKey, ['lineas_chips.cargar_numeros', 'lineas_chips.bajar_numeros', 'ventas.personal'], true);
+                                                                                            $isVerOnlyRow = in_array($subKey, [
+                                                                                                'lineas_chips.cargar_numeros',
+                                                                                                'lineas_chips.bajar_numeros',
+                                                                                                'lineas_chips.cargar_numeros_solo',
+                                                                                                'lineas_chips.cargar_simcard_solo',
+                                                                                                'ventas.personal',
+                                                                                            ], true);
                                                                                             $isApprovalAction = in_array($actionKey, ['aprobar', 'anular'], true);
                                                                                             $isHistorialFlujoHidden = $isHistorialFlujoRow && !in_array($actionKey, ['ver', 'exportar'], true);
                                                                                             $isActionHidden = ($isVerOnlyRow && !in_array($actionKey, ['ver', 'exportar'], true)) || ($isCredentialRow && $actionKey === 'exportar') || ($isApprovalAction && $subKey !== 'ventas.cotizaciones');
@@ -3706,7 +3775,7 @@
                                     required
                                     class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 ease-in-out focus:border-red-600 focus:ring-2 focus:ring-red-500/20"
                                     placeholder="Selecciona o escribe un tipo"
-                                    data-datalist-options='["principal","base","taller","oficina"]'
+                                    data-datalist-options='["PRINCIPAL","BASE","TALLER","OFICINA"]'
                                     autocomplete="off"
                                 >
                                 <div class="custom-datalist hidden absolute left-0 right-0 z-20 mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
@@ -3719,7 +3788,7 @@
                             </div>
                             <div class="mb-4">
                                 <label class="mb-3 block text-sm font-medium text-slate-700">Ubigeo <span class="text-red-600">*</span></label>
-                                <select id="quick-ubigeo" class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 ease-in-out focus:border-red-600 focus:ring-2 focus:ring-red-500/20" data-placeholder="Selecciona ubigeo"></select>
+                                <select id="quick-ubigeo" class="w-full text-sm transition duration-200 ease-in-out focus:border-red-600 focus:ring-2 focus:ring-red-500/20" data-placeholder="Selecciona ubigeo"></select>
                                 <p id="quick-ubigeo-error" class="text-xs mt-2 hidden text-danger"></p>
                             </div>
                             <div class="mb-4">
@@ -6458,8 +6527,15 @@
             // Habilitar todos los campos
             const fields = document.querySelectorAll('input, select, textarea');
             fields.forEach(field => {
+                if (field.dataset.editLocked === 'true') {
+                    return;
+                }
                 field.disabled = false;
             });
+
+            const contactoTiposFieldset = document.querySelector('[data-contacto-tipos-fieldset]');
+            const contactoTiposModo = contactoTiposFieldset?.querySelector('input[name="contacto_tipos_modo"]:checked');
+            contactoTiposModo?.dispatchEvent(new Event('change', { bubbles: true }));
 
             // Habilitar botones que estaban deshabilitados por la vista inicial de solo lectura.
             const buttons = document.querySelectorAll('button');
@@ -6473,6 +6549,9 @@
             // Habilitar TomSelect específicamente (instancias y wrappers)
             const tomSelectElements = document.querySelectorAll('select.tom-select');
             tomSelectElements.forEach(el => {
+                if (el.dataset.editLocked === 'true') {
+                    return;
+                }
                 try {
                     // Intenta habilitar la instancia si está adjunta al elemento
                     const inst = el.tomselect || el.tomSelect || el._tomselect || null;

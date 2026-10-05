@@ -830,6 +830,23 @@
 				if (!nextWrapper) {
 					return;
 				}
+
+				const currentTableContainer = wrapper.querySelector('table')?.parentElement;
+				const nextTableContainer = nextWrapper.querySelector('table')?.parentElement;
+				if (currentTableContainer && nextTableContainer) {
+					currentTableContainer.replaceWith(nextTableContainer);
+				}
+
+				const currentPagination = wrapper.querySelector('nav')?.closest('.flex-reverse');
+				const nextPagination = nextWrapper.querySelector('nav')?.closest('.flex-reverse');
+				if (currentPagination && nextPagination) {
+					currentPagination.replaceWith(nextPagination);
+				} else if (currentPagination && !nextPagination) {
+					currentPagination.remove();
+				} else if (!currentPagination && nextPagination) {
+					wrapper.querySelector('table')?.closest('.box')?.appendChild(nextPagination);
+				}
+
 				const currentResultStat = document.querySelector('[data-list-result-stat]');
 				const nextResultStat = doc.querySelector('[data-list-result-stat]');
 				if (currentResultStat && nextResultStat) {
@@ -837,7 +854,6 @@
 				}
 				// remove any TomSelect portal dropdowns created by previous instances
 				try { cleanupTomSelectPortals(); } catch (e) {}
-				wrapper.innerHTML = nextWrapper.innerHTML;
 				restoreIcons();
 				requestAnimationFrame(() => restoreIcons());
 				if (window.initLitepickers && typeof window.initLitepickers === 'function') {
@@ -847,9 +863,6 @@
 			};
 
 			const fetchList = async (url, options = {}) => {
-				const shouldRestoreSearchFocus = Boolean(options.preserveSearchFocus && searchInput && document.activeElement === searchInput);
-				const caretStart = shouldRestoreSearchFocus ? searchInput.selectionStart : null;
-				const caretEnd = shouldRestoreSearchFocus ? searchInput.selectionEnd : null;
 				const requestId = ++fetchRequestId;
 
 				if (fetchController) {
@@ -874,13 +887,6 @@
 						return;
 					}
 					await replaceWrapper(html);
-
-					if (shouldRestoreSearchFocus && searchInput) {
-						searchInput.focus({ preventScroll: true });
-						if (caretStart !== null && caretEnd !== null && typeof searchInput.setSelectionRange === 'function') {
-							searchInput.setSelectionRange(caretStart, caretEnd);
-						}
-					}
 				} catch (error) {
 					if (error && error.name === 'AbortError') {
 						return;
@@ -1318,11 +1324,6 @@
 			};
 
 			window.addEventListener('beforeunload', stopAutoRefresh);
-			document.addEventListener('visibilitychange', () => {
-				if (document.visibilityState === 'visible') {
-					window.ERPListRefresh();
-				}
-			});
 
 			init();
 		})();

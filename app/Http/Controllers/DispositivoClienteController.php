@@ -23,17 +23,18 @@ class DispositivoClienteController extends Controller
 
     public function index(Request $request): View
     {
-        $latestService = DB::table('serviciocliente')
-            ->select('vehiculo_placa', DB::raw('MAX(idservicioCliente) as idservicioCliente'))
-            ->groupBy('vehiculo_placa');
+        $latestService = DB::table('detalle_serviciodispositivo')
+            ->select('dispositivoCliente_iddispositivoCliente', DB::raw('MAX(iddetalle_serviciodispositivo) as iddetalle_serviciodispositivo'))
+            ->groupBy('dispositivoCliente_iddispositivoCliente');
 
         $query = DB::table('dispositivocliente as d')
             ->leftJoin('vehiculo as v', 'v.placa', '=', 'd.vehiculo_placa')
             ->leftJoin('cliente as c', 'c.idcliente', '=', 'v.cliente_idcliente')
-            ->leftJoinSub($latestService, 'latest_sc', function ($join) {
-                $join->on('latest_sc.vehiculo_placa', '=', 'd.vehiculo_placa');
+            ->leftJoinSub($latestService, 'latest_dsd', function ($join) {
+                $join->on('latest_dsd.dispositivoCliente_iddispositivoCliente', '=', 'd.iddispositivoCliente');
             })
-            ->leftJoin('serviciocliente as sc', 'sc.idservicioCliente', '=', 'latest_sc.idservicioCliente')
+            ->leftJoin('detalle_serviciodispositivo as dsd', 'dsd.iddetalle_serviciodispositivo', '=', 'latest_dsd.iddetalle_serviciodispositivo')
+            ->leftJoin('serviciocliente as sc', 'sc.idservicioCliente', '=', 'dsd.servicioCliente_idservicioCliente')
             ->leftJoin('almacen as sa', 'sa.idalmacen', '=', 'sc.almacen_idalmacen')
             ->select([
                 'd.iddispositivoCliente',
@@ -58,7 +59,13 @@ class DispositivoClienteController extends Controller
                         $numberQuery->select(DB::raw(1))
                             ->from('detnumerosdispositivo as n')
                             ->whereColumn('n.dispositivoCliente_iddispositivoCliente', 'd.iddispositivoCliente')
-                            ->where('n.numeroTelefonico_numeroTelefonico', 'like', $term);
+                                ->where('n.numeroTelefonico_numeroTelefonico', 'like', $term)
+                                ->whereNotExists(function ($newer) {
+                                    $newer->select(DB::raw(1))
+                                        ->from('detnumerosdispositivo as newer_n')
+                                        ->whereColumn('newer_n.dispositivoCliente_iddispositivoCliente', 'n.dispositivoCliente_iddispositivoCliente')
+                                        ->whereColumn('newer_n.iddetNumerosDispositivo', '>', 'n.iddetNumerosDispositivo');
+                                });
                     })
                     ->orWhere('v.placa', 'like', $term)
                     ->orWhere('c.nombreComercial', 'like', $term)
@@ -78,7 +85,13 @@ class DispositivoClienteController extends Controller
                 $numberQuery->select(DB::raw(1))
                     ->from('detnumerosdispositivo as n')
                     ->whereColumn('n.dispositivoCliente_iddispositivoCliente', 'd.iddispositivoCliente')
-                    ->where('n.numeroTelefonico_numeroTelefonico', 'like', "%{$numero}%");
+                    ->where('n.numeroTelefonico_numeroTelefonico', 'like', "%{$numero}%")
+                    ->whereNotExists(function ($newer) {
+                        $newer->select(DB::raw(1))
+                            ->from('detnumerosdispositivo as newer_n')
+                            ->whereColumn('newer_n.dispositivoCliente_iddispositivoCliente', 'n.dispositivoCliente_iddispositivoCliente')
+                            ->whereColumn('newer_n.iddetNumerosDispositivo', '>', 'n.iddetNumerosDispositivo');
+                    });
             });
         }
 
@@ -195,6 +208,7 @@ class DispositivoClienteController extends Controller
                 ['key' => 'numero', 'label' => 'Número', 'type' => 'text'],
                 ['key' => 'nombre_cliente', 'label' => 'Cliente', 'type' => 'text'],
                 ['key' => 'servicio', 'label' => 'Servicio', 'type' => 'text'],
+                ['key' => 'marcaDispositivo', 'label' => 'Marca', 'type' => 'text'],
                 ['key' => 'modeloDispositivo', 'label' => 'Modelo', 'type' => 'text'],
                 ['key' => 'fechaInstalacion', 'label' => 'Fecha Inicio', 'type' => 'date'],
                 ['key' => 'fechaBaja', 'label' => 'Fecha Fin', 'type' => 'date'],
@@ -351,6 +365,9 @@ class DispositivoClienteController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        $this->normalizeDateRequestForValidation($request, 'fechaInstalacion');
+        $this->normalizeDateRequestForValidation($request, 'fechaBaja');
+
         $validated = $request->validate([
             'iddispositivoCliente' => ['required', 'string', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX, 'unique:dispositivocliente,iddispositivoCliente'],
             'vehiculo_placa' => ['required', 'exists:vehiculo,placa'],
@@ -478,6 +495,9 @@ class DispositivoClienteController extends Controller
         if ($redirect = $this->assertLockAvailable($request, self::LOCK_RESOURCE, $id, 'dispositivo cliente', 'modules.dispositivo-cliente')) {
             return $redirect;
         }
+
+        $this->normalizeDateRequestForValidation($request, 'fechaInstalacion');
+        $this->normalizeDateRequestForValidation($request, 'fechaBaja');
 
         $validated = $request->validate([
             'vehiculo_placa' => ['required', 'exists:vehiculo,placa'],
@@ -614,15 +634,16 @@ class DispositivoClienteController extends Controller
             ->leftJoin('vehiculo as v', 'v.placa', '=', 'd.vehiculo_placa')
             ->leftJoin('cliente as c', 'c.idcliente', '=', 'v.cliente_idcliente')
             ->leftJoinSub(
-                DB::table('serviciocliente')
-                    ->select('vehiculo_placa', DB::raw('MAX(idservicioCliente) as idservicioCliente'))
-                    ->groupBy('vehiculo_placa'),
-                'latest_sc',
+                DB::table('detalle_serviciodispositivo')
+                    ->select('dispositivoCliente_iddispositivoCliente', DB::raw('MAX(iddetalle_serviciodispositivo) as iddetalle_serviciodispositivo'))
+                    ->groupBy('dispositivoCliente_iddispositivoCliente'),
+                'latest_dsd',
                 function ($join) {
-                    $join->on('latest_sc.vehiculo_placa', '=', 'd.vehiculo_placa');
+                    $join->on('latest_dsd.dispositivoCliente_iddispositivoCliente', '=', 'd.iddispositivoCliente');
                 }
             )
-            ->leftJoin('serviciocliente as sc', 'sc.idservicioCliente', '=', 'latest_sc.idservicioCliente')
+            ->leftJoin('detalle_serviciodispositivo as dsd', 'dsd.iddetalle_serviciodispositivo', '=', 'latest_dsd.iddetalle_serviciodispositivo')
+            ->leftJoin('serviciocliente as sc', 'sc.idservicioCliente', '=', 'dsd.servicioCliente_idservicioCliente')
             ->leftJoin('almacen as sa', 'sa.idalmacen', '=', 'sc.almacen_idalmacen')
             ->select([
                 'd.iddispositivoCliente',
@@ -712,6 +733,7 @@ class DispositivoClienteController extends Controller
             ['key' => 'iddispositivoCliente', 'label' => 'ID Dispositivo'],
             ['key' => 'vehiculo_placa', 'label' => 'Vehículo'],
             ['key' => 'numero', 'label' => 'Número'],
+            ['key' => 'nombre_cliente', 'label' => 'Cliente'],
             ['key' => 'marcaDispositivo', 'label' => 'Marca'],
             ['key' => 'modeloDispositivo', 'label' => 'Modelo'],
             ['key' => 'servicio', 'label' => 'Servicio'],
@@ -750,6 +772,30 @@ class DispositivoClienteController extends Controller
             return Carbon::parse($trimmed)->format('Y-m-d H:i:s');
         } catch (\Exception) {
             return null;
+        }
+    }
+
+    private function normalizeDateRequestForValidation(Request $request, string $field): void
+    {
+        $value = $request->input($field);
+        if (!is_string($value) || trim($value) === '') {
+            return;
+        }
+
+        $displayDate = mb_strtolower(trim($value), 'UTF-8');
+        $months = [
+            'ene' => '01', 'feb' => '02', 'mar' => '03', 'abr' => '04',
+            'may' => '05', 'jun' => '06', 'jul' => '07', 'ago' => '08',
+            'sep' => '09', 'oct' => '10', 'nov' => '11', 'dic' => '12',
+        ];
+
+        if (preg_match('/^(\d{1,2})\s+([a-z]{3})\.?[,]?\s+(\d{4})$/u', $displayDate, $matches)) {
+            $month = $months[$matches[2]] ?? null;
+            if ($month !== null) {
+                $request->merge([
+                    $field => sprintf('%04d-%s-%02d', (int) $matches[3], $month, (int) $matches[1]),
+                ]);
+            }
         }
     }
 

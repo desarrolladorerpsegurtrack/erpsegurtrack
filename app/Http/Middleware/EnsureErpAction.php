@@ -95,6 +95,20 @@ class EnsureErpAction
             $resolvedAction = ErpPermission::inferActionFromRouteName($routeName, $request->method());
         }
 
+        if ($routeName === 'modules.lineas-chips.detallesimcard.preview.export') {
+            $previewPayload = trim((string) $request->input('previewPayload', ''));
+            $preview = json_decode(rawurldecode($previewPayload), true);
+            $importType = is_array($preview) ? trim((string) ($preview['importType'] ?? '')) : '';
+
+            if ($importType === 'numero') {
+                $resolvedPermissionKey = 'lineas_chips.cargar_numeros_solo';
+                $resolvedAction = 'exportar';
+            } elseif ($importType === 'simcard') {
+                $resolvedPermissionKey = 'lineas_chips.cargar_simcard_solo';
+                $resolvedAction = 'exportar';
+            }
+        }
+
         if ($resolvedAction === null) {
             $resolvedAction = ErpPermission::normalizeAction(optional($request->route())->getActionMethod());
         }

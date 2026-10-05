@@ -43,7 +43,7 @@ class ClientesController extends Controller
             'stats' => $stats,
             'columns' => [
                 ['key' => 'idcliente', 'label' => 'RUC/DNI', 'type' => 'text'],
-                ['key' => 'razonSocial', 'label' => 'Razón Social', 'type' => 'text', 'wrap' => true],
+                ['key' => 'razonSocial', 'label' => 'Razón Social', 'type' => 'text', 'wrap' => true, 'integratorKey' => 'flag_integrador'],
                 ['key' => 'grupo_asignado', 'label' => 'Grupo Asignado', 'type' => 'text'],
                 ['key' => 'contacto', 'label' => 'Contacto', 'type' => 'text'],
                 ['key' => 'telefono', 'label' => 'Telefónico', 'type' => 'text'],
@@ -145,6 +145,7 @@ class ClientesController extends Controller
     public function create(Request $request): View
     {
         $estados = $this->clienteService->getEstados();
+        $estadoActivo = $estados->first(fn ($estado) => mb_strtolower(trim((string) $estado->detalle)) === 'activo');
         $direcciones = $this->clienteService->getDirecciones();
         $grupos = $this->clienteService->getGrupos();
         $ubigeos = $this->clienteService->getUbigeos();
@@ -264,6 +265,7 @@ class ClientesController extends Controller
                     'optionKey' => 'idestadoCliente',
                     'optionLabel' => 'detalle',
                     'placeholder' => 'Selecciona estado',
+                    'value' => old('estadoCliente_idestadoCliente', $estadoActivo?->idestadoCliente),
                 ],
                 [
                     'name' => 'direccionCliente_iddireccionCliente',
@@ -453,7 +455,9 @@ class ClientesController extends Controller
         ) ? '1' : '0';
         unset($validated['grupoCliente_idgrupoCliente'], $validated['contactoSeleccionado'], $validated['credencialSeleccionada'], $validated['contactos_payload'], $validated['direcciones_payload'], $validated['credenciales_payload'], $validated['direccionCliente_iddireccionCliente']);
 
-        DB::transaction(function () use ($validated, $grupoId, $contactosPayload, $direccionesPayload, $credencialesPayload, &$selectedAddressId, $selectedContactId, $selectedCredencialId): void {
+        $allowedContactTypes = $this->clienteService->getAllowedContactTypes($request->session()->get('erp_auth.usuario'));
+
+        DB::transaction(function () use ($validated, $grupoId, $contactosPayload, $direccionesPayload, $credencialesPayload, &$selectedAddressId, $selectedContactId, $selectedCredencialId, $allowedContactTypes): void {
             DB::table('cliente')->insert($validated);
 
             if ($grupoId) {
@@ -465,7 +469,7 @@ class ClientesController extends Controller
                 ]);
             }
 
-            $this->clienteService->insertContactosTemporales($validated['idcliente'], $contactosPayload, $selectedContactId);
+            $this->clienteService->insertContactosTemporales($validated['idcliente'], $contactosPayload, $selectedContactId, $allowedContactTypes);
             $this->clienteService->insertDireccionesTemporales($validated['idcliente'], $direccionesPayload, $selectedAddressId);
             $this->clienteService->insertCredencialesTemporales($validated['idcliente'], $credencialesPayload, $selectedCredencialId);
 
@@ -975,7 +979,9 @@ class ClientesController extends Controller
         ) ? '1' : '0';
         unset($validated['grupoCliente_idgrupoCliente'], $validated['contactos_payload'], $validated['direcciones_payload'], $validated['contactoSeleccionado'], $validated['credencialSeleccionada'], $validated['direccionCliente_iddireccionCliente'], $validated['credenciales_payload']);
 
-        DB::transaction(function () use ($cliente, $validated, $grupoId, $contactosPayload, $direccionesPayload, $credencialesPayload, &$selectedAddressId, $selectedContactId, $selectedCredencialId): void {
+        $allowedContactTypes = $this->clienteService->getAllowedContactTypes($currentUser);
+
+        DB::transaction(function () use ($cliente, $validated, $grupoId, $contactosPayload, $direccionesPayload, $credencialesPayload, &$selectedAddressId, $selectedContactId, $selectedCredencialId, $allowedContactTypes): void {
             DB::table('cliente')->where('idcliente', $cliente)->update($validated);
 
             DB::table('detalleGrupoCliente')->where('cliente_idcliente', $cliente)->delete();
@@ -988,7 +994,7 @@ class ClientesController extends Controller
                 ]);
             }
 
-            $this->clienteService->insertContactosTemporales($cliente, $contactosPayload, $selectedContactId);
+            $this->clienteService->insertContactosTemporales($cliente, $contactosPayload, $selectedContactId, $allowedContactTypes);
             $this->clienteService->insertDireccionesTemporales($cliente, $direccionesPayload, $selectedAddressId);
             $this->clienteService->insertCredencialesTemporales($cliente, $credencialesPayload, $selectedCredencialId);
 

@@ -533,14 +533,13 @@
 
         {{-- ===== TABLA DE ÍTEMS ===== --}}
         @php
-            $maxRows = 15;
+            $maxRows = 17;
             $itemsArray = collect($items)->sortByDesc(function ($item) {
                 return (float) ($item->precioUnitario ?? 0);
             });
             $chunks = $itemsArray->isEmpty() ? collect([collect([])]) : $itemsArray->chunk($maxRows);
-            $igvColumnTotal = $itemsArray->sum(function ($item) {
-                return round((float) ($item->total ?? 0) * 0.18, 2);
-            });
+            $itemsTotal = $itemsArray->sum(fn ($item) => (float) ($item->total ?? 0));
+            $igvColumnTotal = round($itemsTotal - ($itemsTotal / 1.18), 2);
             $igvColumnTotalLabel = trim((string) ($quote->moneda_simbolo ?? 'S/')) . ' ' . number_format($igvColumnTotal, 2, '.', ',');
             $showDiscountColumn = false;
             foreach ($itemsArray as $item) {

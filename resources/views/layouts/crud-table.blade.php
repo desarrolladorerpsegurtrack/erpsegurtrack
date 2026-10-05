@@ -23,6 +23,7 @@
                             {{ $title ?? 'Listado' }}
                         </div>
                         @php
+                            $identifierKey = $identifierKey ?? 'id';
                             $authData = session('erp_auth', []);
                             $userRoles = collect($authData['roles'] ?? [])
                                 ->map(fn ($role) => mb_strtolower(trim((string) $role)))
@@ -69,11 +70,30 @@
                                 ->filter()
                                 ->unique()
                                 ->contains('ver');
-                            $canImport = $isAdmin || collect($authData['permissions']['lineas_chips.cargar_numeros'] ?? [])
+                            $canImportAsignacion = $isAdmin || collect($authData['permissions']['lineas_chips.cargar_numeros'] ?? [])
                                 ->map(fn ($value) => App\Support\ErpPermission::normalizeAction((string) $value))
                                 ->filter()
                                 ->unique()
                                 ->contains('ver');
+                            $canImportNumerosSolo = $isAdmin || collect($authData['permissions']['lineas_chips.cargar_numeros_solo'] ?? [])
+                                ->map(fn ($value) => App\Support\ErpPermission::normalizeAction((string) $value))
+                                ->filter()
+                                ->unique()
+                                ->contains('ver');
+                            $canImportSimcardSolo = $isAdmin || collect($authData['permissions']['lineas_chips.cargar_simcard_solo'] ?? [])
+                                ->map(fn ($value) => App\Support\ErpPermission::normalizeAction((string) $value))
+                                ->filter()
+                                ->unique()
+                                ->contains('ver');
+                            // Determinar canImport según la ruta de importación activa
+                            $importRouteStr = (string) ($importPreviewRoute ?? '');
+                            if (str_contains($importRouteStr, 'numeros-telefonico')) {
+                                $canImport = $canImportNumerosSolo;
+                            } elseif (str_contains($importRouteStr, 'simcard') && !str_contains($importRouteStr, 'detallesimcard')) {
+                                $canImport = $canImportSimcardSolo;
+                            } else {
+                                $canImport = $canImportAsignacion;
+                            }
                             $canPerformActions = $canEdit || $canDelete || $canApproveAction || $canAnularAction;
                             $hasDownloadColumn = collect($columns ?? [])->contains(fn ($col) => ($col['key'] ?? '') === 'download_link');
                             $canShowActionHeader = ($showActionsColumn ?? true) && $canPerformActions;
@@ -130,7 +150,7 @@
                             @if(!empty($importPreviewRoute) && !empty($importProcessRoute) && $canImport)
                                 <button type="button" data-open-detallesimcard-modal="import" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed dark:border-darkmode-100/40 dark:text-slate-300" style="border-color:#000000;color:#000000;">
                                     <i data-tw-merge="" data-lucide="upload" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
-                                    Cargar números
+                                    {{ $importButtonLabel ?? 'Cargar asignación' }}
                                 </button>
                             @endif
                             @if(!empty($createRoute) && $canCreate)
@@ -230,7 +250,9 @@
                                 : collect($items ?? [])->count();
                             $resultsLabel = $resultsLabel ?? trim((string) preg_replace('/^Módulo\s+/u', '', $title ?? 'Registros'));
                         @endphp
-                        <!-- ESTADÍSTICAS -->
+                                <!-- ESTADÍSTICAS -->
+                                @php $showResultStat = $showResultStat ?? true; @endphp
+                                <div data-list-stats>
                            <div class="box box--stacked flex flex-col p-5 {{ $statsWrapperClass ?? '' }}">
                                 <div class="grid grid-cols-4 gap-5">
                                     @foreach($stats ?? [] as $key => $stat)
@@ -245,12 +267,15 @@
                                             <div class="mt-1.5 text-2xl font-medium">{{ $value }}</div>
                                         </div>
                                     @endforeach
-                                    <div class="box col-span-4 rounded-[0.6rem] border border-dashed border-slate-300/80 bg-white p-5 shadow-sm md:col-span-2 xl:col-span-1">
-                                        <div class="text-base text-slate-500">{{ $resultsLabel }} encontrados</div>
-                                        <div class="mt-1.5 text-2xl font-medium" data-list-result-stat>{{ number_format($resultCount, 0, ',', '.') }}</div>
-                                    </div>
+                                    @if($showResultStat)
+                                        <div class="box col-span-4 rounded-[0.6rem] border border-dashed border-slate-300/80 bg-white p-5 shadow-sm md:col-span-2 xl:col-span-1">
+                                            <div class="text-base text-slate-500">{{ $resultsLabel }} encontrados</div>
+                                            <div class="mt-1.5 text-2xl font-medium" data-list-result-stat>{{ number_format($resultCount, 0, ',', '.') }}</div>
+                                        </div>
+                                    @endif
                                 </div>
                             </div>
+                        </div>
 
                         <!-- TABLA -->
                         <div id="list-table-wrapper" class="box box--stacked flex w-full flex-col {{ $tableWrapperClass ?? '' }}">
@@ -258,9 +283,11 @@
                                 $filters = $filters ?? [];
                                 $showGroupClientsColumn = $showGroupClientsColumn ?? false;
                                 $activeFilters = collect($filters)
-                                    ->filter(function ($filter) {
-                                        $name = $filter['name'] ?? '';
-                                        return $name !== '' && request()->has($name) && request($name) !== '';
+                                    ->flatMap(function ($filter) {
+                                        return array_filter([$filter['name'] ?? '', $filter['toName'] ?? '']);
+                                    })
+                                    ->filter(function ($name) {
+                                        return request()->has($name) && request($name) !== '';
                                     })
                                     ->count();
                                 $hasListSearchOrFilter = trim((string) request('q', '')) !== '' || $activeFilters > 0;
@@ -338,6 +365,35 @@
                                                                         placeholder="{{ $filterPlaceholder }}"
                                                                         class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20"
                                                                     >
+                                                                @elseif($filterType === 'number')
+                                                                    <input
+                                                                        type="number"
+                                                                        name="{{ $filterName }}"
+                                                                        data-list-filter-field="true"
+                                                                        value="{{ request($filterName) }}"
+                                                                        placeholder="{{ $filterPlaceholder }}"
+                                                                        min="0"
+                                                                        step="0.01"
+                                                                        class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20"
+                                                                    >
+                                                                @elseif($filterType === 'number_operator')
+                                                                    <div class="mt-2 flex gap-2">
+                                                                        <select name="{{ $filter['operatorName'] ?? ($filterName . '_operador') }}" data-list-filter-field="true" aria-label="Comparador de {{ strtolower($filterLabel) }}" class="w-20 shrink-0 rounded-[0.5rem] border-slate-200 text-sm shadow-sm focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20">
+                                                                            @foreach($filterOptions as $option)
+                                                                                <option value="{{ $option['value'] }}" @selected((string) request($filter['operatorName'] ?? ($filterName . '_operador'), 'eq') === (string) $option['value'])>{{ $option['label'] }}</option>
+                                                                            @endforeach
+                                                                        </select>
+                                                                        <input
+                                                                            type="number"
+                                                                            name="{{ $filterName }}"
+                                                                            data-list-filter-field="true"
+                                                                            value="{{ request($filterName) }}"
+                                                                            placeholder="{{ $filterPlaceholder }}"
+                                                                            min="0"
+                                                                            step="0.01"
+                                                                            class="min-w-0 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20"
+                                                                        >
+                                                                    </div>
                                                                 @elseif($filterType === 'date')
                                                                     <input
                                                                         type="date"
@@ -345,6 +401,35 @@
                                                                         value="{{ request($filterName) }}"
                                                                         class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20"
                                                                     >
+                                                                @elseif($filterType === 'date_range' || $filterType === 'number_range')
+                                                                    @php
+                                                                        $rangeInputType = $filterType === 'date_range' ? 'date' : 'number';
+                                                                        $rangeStep = $filterType === 'number_range' ? '0.01' : null;
+                                                                    @endphp
+                                                                    <div class="mt-2 {{ $filterType === 'date_range' ? 'flex flex-col gap-2' : 'grid grid-cols-2 gap-2' }}">
+                                                                        <label class="min-w-0 text-xs text-slate-500">
+                                                                            Desde
+                                                                            <input
+                                                                                type="{{ $rangeInputType }}"
+                                                                                name="{{ $filterName }}"
+                                                                                value="{{ request($filterName) }}"
+                                                                                data-list-filter-field="true"
+                                                                                @if($filterType === 'number_range') min="0" step="{{ $rangeStep }}" placeholder="{{ $filterPlaceholder ?? 'Desde' }}" @endif
+                                                                                class="mt-1 w-full min-w-0 rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20"
+                                                                            >
+                                                                        </label>
+                                                                        <label class="min-w-0 text-xs text-slate-500">
+                                                                            Hasta
+                                                                            <input
+                                                                                type="{{ $rangeInputType }}"
+                                                                                name="{{ $filter['toName'] }}"
+                                                                                value="{{ request($filter['toName']) }}"
+                                                                                data-list-filter-field="true"
+                                                                                @if($filterType === 'number_range') min="0" step="{{ $rangeStep }}" placeholder="{{ $filterPlaceholder ?? 'Hasta' }}" @endif
+                                                                                class="mt-1 w-full min-w-0 rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20"
+                                                                            >
+                                                                        </label>
+                                                                    </div>
                                                                 @else
                                                                     <select name="{{ $filterName }}" data-list-filter-field="true" class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20">
                                                                         <option value="">{{ $filterPlaceholder }}</option>
@@ -443,6 +528,12 @@
                                                             @case('text')
                                                                 @php
                                                                     $cellValue = data_get($row, $column['key']) ?? '-';
+                                                                    $integratorValue = $column['integratorKey'] ?? null;
+                                                                    $isIntegrator = $integratorValue !== null && in_array(
+                                                                        mb_strtolower(str_replace('í', 'i', trim((string) data_get($row, $integratorValue))), 'UTF-8'),
+                                                                        ['si', '1', 'true', 'on', 'yes', 'y'],
+                                                                        true
+                                                                    );
                                                                     $canShowLink = $columnIndex === 0 
                                                                         && isset($showRoute) 
                                                                         && !empty($showRoute)
@@ -452,11 +543,13 @@
                                                                         && $canEdit;
                                                                 @endphp
                                                                 @if($canShowLink)
-                                                                    <a class="font-medium text-slate-700 hover:text-primary hover:underline @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif" href="{{ route($showRoute, data_get($row, $identifierKey)) }}" title="{{ $cellValue }}">
+                                                                    <a class="font-medium text-slate-700 hover:text-primary hover:underline {{ $column['valueClass'] ?? '' }} @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif" href="{{ route($showRoute, data_get($row, $identifierKey)) }}" title="{{ $cellValue }}">
+                                                                        @if($isIntegrator)<span class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-danger font-bold leading-none text-white" style="font-size: 10px; line-height: 1;" title="Cliente integrador">IN</span>@endif
                                                                         {{ $cellValue }}
                                                                     </a>
                                                                 @else
-                                                                    <span class="font-medium @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif" title="{{ $cellValue }}">
+                                                                    <span class="font-medium {{ $column['valueClass'] ?? '' }} @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif" title="{{ $cellValue }}">
+                                                                        @if($isIntegrator)<span class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-danger font-bold leading-none text-white" style="font-size: 10px; line-height: 1;" title="Cliente integrador">IN</span>@endif
                                                                         {{ $cellValue }}
                                                                     </span>
                                                                 @endif
@@ -556,32 +649,34 @@
                                                                     $isActive = false;
                                                                     $label = '';
                                                                     $statusTone = 'inactive';
-                                                                    // Permitir valores tipo texto o numérico
+                                                                    // Permitir valores tipo texto o numérico (1=Activo, 0=Inactivo)
                                                                     if (is_numeric($value)) {
-                                                                        $isActive = (string)($value ?? '1') === '1';
-                                                                        $label = $isActive ? 'Activo' : 'Inactivo';
+                                                                        $strVal = (string)$value;
+                                                                        $label = match ($strVal) {
+                                                                            '3' => 'En Uso',
+                                                                            '2' => 'Disponible',
+                                                                            '1' => 'Activo',
+                                                                            '0' => 'Inactivo',
+                                                                            default => 'Inactivo',
+                                                                        };
                                                                     } else {
                                                                         $label = trim((string)($value ?? ''));
-                                                                        $isActive = stripos($label, 'activo') !== false && stripos($label, 'inactivo') === false;
                                                                     }
 
-                                                                    if (stripos($label, 'comodato') !== false) {
-                                                                        $statusTone = 'orange';
-                                                                    } elseif (stripos($label, 'migrado') !== false) {
-                                                                        $statusTone = 'green';
-                                                                    } elseif ($isActive || stripos($label, 'venta') !== false) {
-                                                                        $statusTone = 'red';
-                                                                    }
-                                                                    $statusColorClass = match ($statusTone) {
-                                                                        'orange' => 'text-orange-500',
-                                                                        'green' => 'text-green-600',
-                                                                        'red' => 'text-danger',
-                                                                        default => 'text-slate-400',
+                                                                    $hexColor = match (mb_strtolower($label)) {
+                                                                        'en uso'                     => '#B41B29',
+                                                                        'disponible'                 => '#1D8F5F',
+                                                                        'libre'                      => '#2563eb',
+                                                                        'inactivo'                   => '#64748b',
+                                                                        'activo', 'venta'            => '#B41B29',
+                                                                        'comodato', 'comodato venta' => '#d97706',
+                                                                        'migrado', 'migrado venta'   => '#16a34a',
+                                                                        default                      => '#727c8a',
                                                                     };
                                                                 @endphp
                                                                 <div class="flex items-center justify-center">
-                                                                    <i data-tw-merge="" data-lucide="database" class="h-3.5 w-3.5 stroke-[1.7] {{ $statusColorClass }}"></i>
-                                                                    <span class="ml-1.5 whitespace-nowrap font-medium {{ $statusColorClass }}">
+                                                                    <i data-tw-merge="" data-lucide="database" class="h-3.5 w-3.5 stroke-[1.7]" style="color: {{ $hexColor }}; stroke: {{ $hexColor }};"></i>
+                                                                    <span class="ml-1.5 whitespace-nowrap font-medium" style="color: {{ $hexColor }};">
                                                                         {{ $label }}
                                                                     </span>
                                                                 </div>
@@ -732,7 +827,9 @@
                                                             ])
                                                         @else
                                                             <div class="overflow-hidden rounded-lg border border-black shadow-sm" style="background-color: #ffffff; ">
-                                                                <div class="border-b border-black bg-slate-200 text-slate-800 px-4 py-3 text-sm font-semibold" >{{ $historyTitle }}</div>
+                                                                @unless($hideHistoryPanelTitle ?? false)
+                                                                    <div class="border-b border-black bg-slate-200 text-slate-800 px-4 py-3 text-sm font-semibold">{{ $historyTitle }}</div>
+                                                                @endunless
                                                                 <div class="overflow-x-auto" >
                                                                     @if($relationGroups->isNotEmpty())
                                                                         <div class="flex flex-col gap-4">
@@ -780,6 +877,12 @@
                                                                                                                 $relationValue = data_get($relationRecord, $relationColumn['key'] ?? '') ?? '-';
                                                                                                                 $relationKey = (string) ($relationColumn['key'] ?? '');
                                                                                                                 $relationType = $relationColumn['type'] ?? 'text';
+                                                                                                                $relationIntegratorKey = $relationColumn['integratorKey'] ?? null;
+                                                                                                                $relationIsIntegrator = $relationIntegratorKey !== null && in_array(
+                                                                                                                    mb_strtolower(str_replace('í', 'i', trim((string) data_get($relationRecord, $relationIntegratorKey))), 'UTF-8'),
+                                                                                                                    ['si', '1', 'true', 'on', 'yes', 'y'],
+                                                                                                                    true
+                                                                                                                );
                                                                                                             @endphp
                                                                                                             @if($relationType === 'status' || $relationKey === 'estado')
                                                                                                                 @php
@@ -820,7 +923,7 @@
                                                                                                                 @endphp
                                                                                                                 <td class="px-3 py-2 whitespace-nowrap border-b border-black">{{ $formattedRelationDate }}</td>
                                                                                                             @else
-                                                                                                                <td class="px-3 py-2 whitespace-nowrap border-b border-black">{{ $relationValue }}</td>
+                                                                                                                <td class="px-3 py-2 whitespace-nowrap border-b border-black">@if($relationIsIntegrator)<span class="text-danger">IN-</span>@endif{{ $relationValue }}</td>
                                                                                                             @endif
                                                                                                         @endforeach
                                                                                                     </tr>
@@ -1127,10 +1230,17 @@
 
             <!-- Carga de numeros nuevos -->
             @if(!empty($importPreviewRoute) && !empty($importProcessRoute))
+                @php
+                    $activeImportPreview = $importPreview ?? $detallesimcardImportPreview ?? null;
+                    $activeImportType = $activeImportPreview['importType'] ?? (isset($importModalTitle) && str_contains(mb_strtolower($importModalTitle), 'simcard') ? 'simcard' : (isset($importModalTitle) && str_contains(mb_strtolower($importModalTitle), 'número') ? 'numero' : 'detallesimcard'));
+                    $modalTitle = $importModalTitle ?? 'Cargar números por archivo';
+                    $modalHint = $importModalHint ?? 'Archivo (.xlsx) con las columnas: Numero, SimCard, Operador';
+                    $btnLabel = $importButtonLabel ?? 'Cargar números';
+                @endphp
                 <div id="detallesimcard-import-modal" class="fixed inset-0 hidden items-start justify-center px-4" style="z-index: 9999; background-color: rgba(0, 0, 0, 0.78);" role="dialog" aria-modal="true" aria-labelledby="detallesimcard-import-title">
                     <div class="w-full rounded-lg max-w-2xl max-h-[calc(100vh-4rem)] overflow-hidden rounded-[1.25rem] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.16)] modal-dialog">
                         <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
-                            <h3 id="detallesimcard-import-title" class="text-lg font-semibold text-slate-800">Cargar números por archivo</h3>
+                            <h3 id="detallesimcard-import-title" class="text-lg font-semibold text-slate-800">{{ $modalTitle }}</h3>
                             <button type="button" data-close-detallesimcard-modal="import" class="rounded-full ml-auto p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700">
                                 <i data-lucide="x" class="h-5 w-5"></i>
                             </button>
@@ -1141,8 +1251,8 @@
                                 <div class="rounded-[1rem] border border-slate-200 bg-slate-50 p-4 shadow-sm">
                                     <div class="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
                                         <div>
-                                            <label class="mb-2 block text-sm font-medium text-slate-700">Archivo (.xlsx) con las columnas: Numero, SimCard, Operador</label>
-                                            <input type="file" name="importFile" accept=".xlsx" required class="disabled:bg-slate-100 disabled:cursor-not-allowed transition duration-200 ease-in-out w-full text-sm border-slate-200 shadow-sm rounded-md placeholder:text-slate-400/90 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 [&[type='file']]:border file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:border-r-[1px] file:border-slate-100/10 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-500/70 hover:file:bg-slate-200">
+                                            <label class="mb-2 block text-sm font-medium text-slate-700">{{ $modalHint }}</label>
+                                            <input type="file" name="importFile" accept=".xlsx, .xls, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" required class="disabled:bg-slate-100 disabled:cursor-not-allowed transition duration-200 ease-in-out w-full text-sm border-slate-200 shadow-sm rounded-md placeholder:text-slate-400/90 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 [&[type='file']]:border file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:border-r-[1px] file:border-slate-100/10 file:text-sm file:font-semibold file:bg-slate-100 file:text-slate-500/70 hover:file:bg-slate-200">
                                         </div>
                                         <button type="submit" class="inline-flex h-12 items-center justify-center rounded-xl bg-danger px-6 py-2 text-sm font-semibold text-white transition hover:bg-danger/90">
                                             <i data-lucide="eye" class="mr-2 h-4 w-4"></i>
@@ -1155,14 +1265,14 @@
                             </form>
 
                             <div id="detallesimcard-import-preview" class="mt-4 rounded-[1rem] border border-slate-200 bg-white p-4 min-h-[20rem] shadow-sm">
-                                @if(is_array($detallesimcardImportPreview ?? null))
+                                @if(is_array($activeImportPreview))
                                     <div class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-                                        <div><span class="block text-slate-500">Filas válidas</span><span class="font-semibold">{{ (int) ($detallesimcardImportPreview['candidateCount'] ?? 0) }}</span></div>
-                                        <div><span class="block text-slate-500">Nuevas</span><span class="font-semibold text-emerald-700">{{ (int) ($detallesimcardImportPreview['newRows'] ?? 0) }}</span></div>
-                                        <div><span class="block text-slate-500">Vacías</span><span class="font-semibold text-amber-700">{{ (int) ($detallesimcardImportPreview['emptyRows'] ?? 0) }}</span></div>
-                                        <div><span class="block text-slate-500">Inválidas</span><span class="font-semibold text-amber-700">{{ (int) ($detallesimcardImportPreview['invalidRows'] ?? 0) }}</span></div>
-                                        <div><span class="block text-slate-500">Duplicadas archivo</span><span class="font-semibold text-slate-700">{{ (int) ($detallesimcardImportPreview['fileDuplicateRows'] ?? 0) }}</span></div>
-                                        <div><span class="block text-slate-500">Existente en BD</span><span class="font-semibold text-slate-700">{{ (int) ($detallesimcardImportPreview['duplicateExistingRows'] ?? 0) }}</span></div>
+                                        <div><span class="block text-slate-500">Filas válidas</span><span class="font-semibold">{{ (int) ($activeImportPreview['candidateCount'] ?? 0) }}</span></div>
+                                        <div><span class="block text-slate-500">Nuevas</span><span class="font-semibold text-emerald-700">{{ (int) ($activeImportPreview['newRows'] ?? 0) }}</span></div>
+                                        <div><span class="block text-slate-500">Vacías</span><span class="font-semibold text-amber-700">{{ (int) ($activeImportPreview['emptyRows'] ?? 0) }}</span></div>
+                                        <div><span class="block text-slate-500">Inválidas</span><span class="font-semibold text-amber-700">{{ (int) ($activeImportPreview['invalidRows'] ?? 0) }}</span></div>
+                                        <div><span class="block text-slate-500">Duplicadas archivo</span><span class="font-semibold text-slate-700">{{ (int) ($activeImportPreview['fileDuplicateRows'] ?? 0) }}</span></div>
+                                        <div><span class="block text-slate-500">Existente en BD</span><span class="font-semibold text-slate-700">{{ (int) ($activeImportPreview['duplicateExistingRows'] ?? 0) }}</span></div>
                                     </div>
 
                                     <div class="mt-4 rounded-[0.85rem] border border-slate-200" style="max-height: 240px; overflow-y: auto;">
@@ -1170,19 +1280,33 @@
                                             <thead class="bg-slate-100 text-slate-600">
                                                 <tr>
                                                     <th class="px-3 py-2">Línea</th>
-                                                    <th class="px-3 py-2">Número</th>
-                                                    <th class="px-3 py-2">SimCard</th> 
-                                                    <th class="px-3 py-2">Operador</th>
+                                                    @if($activeImportType === 'numero')
+                                                        <th class="px-3 py-2">Número</th>
+                                                    @elseif($activeImportType === 'simcard')
+                                                        <th class="px-3 py-2">SimCard</th>
+                                                        <th class="px-3 py-2">Operador</th>
+                                                    @else
+                                                        <th class="px-3 py-2">Número</th>
+                                                        <th class="px-3 py-2">SimCard</th> 
+                                                        <th class="px-3 py-2">Operador</th>
+                                                    @endif
                                                     <th class="px-3 py-2">Estado</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                @foreach(($detallesimcardImportPreview['previewRows'] ?? []) as $previewRow)
+                                                @foreach(($activeImportPreview['previewRows'] ?? []) as $previewRow)
                                                     <tr class="border-t border-slate-100">
                                                         <td class="px-3 py-2">{{ $previewRow['line'] ?? '-' }}</td>
-                                                        <td class="px-3 py-2">{{ $previewRow['numero'] ?? '' }}</td>
-                                                        <td class="px-3 py-2">{{ $previewRow['simcard'] ?? '' }}</td>
-                                                        <td class="px-3 py-2">{{ $previewRow['operador'] ?? '' }}</td>
+                                                        @if(($previewRow['importType'] ?? $activeImportType) === 'numero')
+                                                            <td class="px-3 py-2">{{ $previewRow['numero'] ?? '' }}</td>
+                                                        @elseif(($previewRow['importType'] ?? $activeImportType) === 'simcard')
+                                                            <td class="px-3 py-2">{{ $previewRow['simcard'] ?? '' }}</td>
+                                                            <td class="px-3 py-2">{{ $previewRow['operador'] ?? '' }}</td>
+                                                        @else
+                                                            <td class="px-3 py-2">{{ $previewRow['numero'] ?? '' }}</td>
+                                                            <td class="px-3 py-2">{{ $previewRow['simcard'] ?? '' }}</td>
+                                                            <td class="px-3 py-2">{{ $previewRow['operador'] ?? '' }}</td>
+                                                        @endif
                                                         <td class="px-3 py-2">{{ $previewRow['status'] ?? '' }}</td>
                                                     </tr>
                                                 @endforeach
@@ -1190,16 +1314,18 @@
                                         </table>
                                     </div>
                                     <div class="mt-4 flex items-center justify-start" data-preview-export-wrapper="import">
-                                        <input type="hidden" data-preview-payload="import" value="{{ rawurlencode(json_encode($detallesimcardImportPreview ?? [])) }}">
+                                        <input type="hidden" data-preview-payload="import" value="{{ rawurlencode(json_encode($activeImportPreview)) }}">
                                         <button type="button" data-preview-download="import" data-preview-download-url="{{ route('modules.lineas-chips.detallesimcard.preview.export', ['type' => 'import']) }}" class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50" aria-label="Descargar en xlsx">
                                             <i data-lucide="download" class="mr-1 h-4 w-4 stroke-[1.3]"></i>
                                             <span>Descargar en xlsx</span>
                                         </button>
                                     </div>
-                                    <div class="mt-4 flex items-center justify-end gap-3">
+                                    <form id="detallesimcard-import-save-form" method="POST" action="{{ $activeImportPreview['processRoute'] ?? $importProcessRoute }}" class="mt-4 flex items-center justify-end gap-3">
+                                        @csrf
+                                        <input type="hidden" name="importToken" value="{{ $activeImportPreview['token'] ?? '' }}">
                                         <button type="button" onclick="closeDetallesimcardModal('import')" class="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-100" style=" border-color: #000000; color: #000000;">Cancelar</button>
-                                        <button id="detallesimcard-import-save-button" type="submit" class="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700">Guardar cambios</button>
-                                    </div>
+                                        <button id="detallesimcard-import-save-button" type="submit" @if((int) ($activeImportPreview['newRows'] ?? 0) === 0) disabled @endif class="rounded-xl px-4 py-3 text-sm font-semibold text-white transition @if((int) ($activeImportPreview['newRows'] ?? 0) > 0) bg-emerald-600 hover:bg-emerald-700 @else cursor-not-allowed bg-slate-400 opacity-60 @endif">{{ $activeImportPreview['buttonLabel'] ?? $btnLabel }}</button>
+                                    </form>
                                 @else
                                     <div class="flex h-full min-h-[18rem] items-center justify-center rounded-[0.85rem] border border-dashed border-slate-200 bg-slate-50 px-5 text-center text-sm text-slate-500">
                                         Aquí es donde se va a visualizar los datos
@@ -1325,6 +1451,10 @@
         #list-table-wrapper.planes-servicios-table table td {
             max-width: 350px;
         }
+        /* Regla específica para la vista de Numeros Telefonico */
+        #list-table-wrapper.numeros-telefonico-table table td {
+            max-width: 225px;
+        }
         /* Regla específica para la vista de Planes y Servicios */
         #list-table-wrapper.clientes-table table td {
             max-width: 200px;
@@ -1381,6 +1511,7 @@
             let cotizacionCurrentHref = null;
             let hasBoundCotizacionDownloadClick = false;
             const hasBulkDestroyRoute = {{ (!empty($bulkDestroyRoute) && $canDelete) ? 'true' : 'false' }};
+            const refreshStatsOnFilter = {{ ($refreshStatsOnFilter ?? false) ? 'true' : 'false' }};
 
             const getWrapper = () => document.getElementById(listWrapperId);
             const getForm = () => document.getElementById(formId);
@@ -2166,6 +2297,12 @@
                 if (currentResultStat && nextResultStat) {
                     currentResultStat.textContent = nextResultStat.textContent;
                 }
+                
+                const currentStats = document.querySelector('[data-list-stats]');
+                const nextStats = doc.querySelector('[data-list-stats]');
+                if (refreshStatsOnFilter && currentStats && nextStats) {
+                    currentStats.replaceWith(nextStats);
+                }
 
                 restoreIcons();
                 initDropdowns();
@@ -2496,6 +2633,20 @@
                 return wrapper.querySelector('[data-preview-payload]');
             };
 
+            const getFilenameFromContentDisposition = (contentDisposition, fallback) => {
+                if (!contentDisposition) {
+                    return fallback;
+                }
+
+                const encodedFilename = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+                if (encodedFilename?.[1]) {
+                    return decodeURIComponent(encodedFilename[1].trim().replace(/^"|"$/g, ''));
+                }
+
+                const filename = contentDisposition.match(/filename="?([^";]+)"?/i);
+                return filename?.[1]?.trim() || fallback;
+            };
+
             const downloadPreviewXlsx = async (type, trigger) => {
                 const exportUrl = trigger instanceof Element ? trigger.getAttribute('data-preview-download-url') : '';
                 if (!exportUrl) {
@@ -2540,7 +2691,11 @@
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;
-                link.download = `${type === 'bulk' ? 'baja_numeros_preview' : 'carga_numeros_preview'}_${new Date().toISOString().replace(/[:.]/g, '-')}.xlsx`;
+                const fallbackFilename = `${type === 'bulk' ? 'baja_numeros_preview' : 'carga_numeros_preview'}_${new Date().toISOString().replace(/[:.]/g, '-')}.xlsx`;
+                link.download = getFilenameFromContentDisposition(
+                    response.headers.get('Content-Disposition'),
+                    fallbackFilename
+                );
                 document.body.appendChild(link);
                 link.click();
                 link.remove();
@@ -2586,6 +2741,29 @@
                             <tr class="border-t border-slate-100">
                                 <td class="px-3 py-2">${row.line ?? '-'}</td>
                                 <td class="px-3 py-2">${row.numero ?? ''}</td>
+                                <td class="px-3 py-2">${row.status ?? ''}</td>
+                            </tr>
+                        `;
+                    }
+
+                    if (row.importType === 'numero') {
+                        return `
+                            <tr class="border-t border-slate-100">
+                                <td class="px-3 py-2">${row.line ?? '-'}</td>
+                                <td class="px-3 py-2">${row.numero ?? ''}</td>
+                                <td class="px-3 py-2">${row.plan ?? ''}</td>
+                                <td class="px-3 py-2">${row.moneda ?? 'S/'} ${row.precio ?? ''}</td>
+                                <td class="px-3 py-2">${row.status ?? ''}</td>
+                            </tr>
+                        `;
+                    }
+
+                    if (row.importType === 'simcard') {
+                        return `
+                            <tr class="border-t border-slate-100">
+                                <td class="px-3 py-2">${row.line ?? '-'}</td>
+                                <td class="px-3 py-2">${row.simcard ?? ''}</td>
+                                <td class="px-3 py-2">${row.operador ?? ''}</td>
                                 <td class="px-3 py-2">${row.status ?? ''}</td>
                             </tr>
                         `;
@@ -2665,6 +2843,31 @@
                     </div>
                 `;
 
+                let headersHtml = `
+                    <th class="px-3 py-2">Línea</th>
+                    <th class="px-3 py-2">Número</th>
+                    <th class="px-3 py-2">SimCard</th>
+                    <th class="px-3 py-2">Operador</th>
+                    <th class="px-3 py-2">Estado</th>
+                `;
+
+                if (preview.importType === 'numero') {
+                    headersHtml = `
+                        <th class="px-3 py-2">Línea</th>
+                        <th class="px-3 py-2">Número</th>
+                        <th class="px-3 py-2">Plan</th>
+                        <th class="px-3 py-2">Precio</th>
+                        <th class="px-3 py-2">Estado</th>
+                    `;
+                } else if (preview.importType === 'simcard') {
+                    headersHtml = `
+                        <th class="px-3 py-2">Línea</th>
+                        <th class="px-3 py-2">SimCard</th>
+                        <th class="px-3 py-2">Operador</th>
+                        <th class="px-3 py-2">Estado</th>
+                    `;
+                }
+
                 const initialRows = getPreviewRowsChunk('import');
                 previewContainer.innerHTML = `
                     ${summaryHtml}
@@ -2672,11 +2875,7 @@
                         <table class="w-full text-left text-sm">
                             <thead class="bg-slate-100 text-slate-600">
                                 <tr>
-                                    <th class="px-3 py-2">Línea</th>
-                                    <th class="px-3 py-2">Número</th>
-                                    <th class="px-3 py-2">SimCard</th>
-                                    <th class="px-3 py-2">Operador</th>
-                                    <th class="px-3 py-2">Estado</th>
+                                    ${headersHtml}
                                 </tr>
                             </thead>
                             <tbody id="detallesimcard-import-preview-rows">${buildPreviewRowsHtml(initialRows, 'import')}</tbody>
@@ -2689,11 +2888,18 @@
                             <span>Descargar en xlsx</span>
                         </button>
                     </div>
-                    <form id="detallesimcard-import-save-form" method="POST" action="${preview.processRoute}" class="mt-4 flex items-center justify-end gap-3">
-                        <input type="hidden" name="_token" value="${preview.csrfToken}">
+                    <form id="detallesimcard-import-save-form" method="POST" action="${preview.processRoute || '{{ $importProcessRoute ?? '' }}'}" class="mt-4 flex items-center justify-end gap-3">
+                        <input type="hidden" name="_token" value="${preview.csrfToken || '{{ csrf_token() }}'}">
                         <input type="hidden" name="importToken" value="${preview.token}">
                         <button type="button" onclick="closeDetallesimcardModal('import')" class="rounded-md border border-slate-300 bg-white px-4 py-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-100" style=" border-color: #000000; color: #000000;">Cancelar</button>
-                        <button id="detallesimcard-import-save-button" type="submit" class="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700">Guardar cambios</button>
+                        <button 
+                        id="detallesimcard-import-save-button" 
+                        type="submit" 
+                        ${Number(preview.newRows || 0) > 0 ? '' : 'disabled'} 
+                        class="rounded-xl px-4 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:bg-slate-400 disabled:opacity-60 bg-emerald-600 hover:bg-emerald-700"
+                        >
+                        ${preview.buttonLabel || '{{ $importButtonLabel ?? "Cargar números" }}'}
+                        </button>
                     </form>
                 `;
 

@@ -76,6 +76,14 @@ class RolesController extends Controller
                 'configuracion.tipo_cobro' => 'Tipo de cobro',
             ],
         ],
+        'finanzas' => [
+            'label' => 'Banco / Caja',
+            'submodules' => [
+                'finanzas.estado_cuenta' => 'Estado de cuenta',
+                'finanzas.bancos' => 'Bancos',
+                'finanzas.nota_creditos' => 'Nota de créditos',
+            ],
+        ],
         'sistema' => [
             'label' => 'Sistema',
             'submodules' => [
@@ -92,8 +100,10 @@ class RolesController extends Controller
                 'lineas_chips.numero_dispositivo' => 'Número de dispositivo',
                 'lineas_chips.simcard' => 'Plastico (SimCard)',
                 'lineas_chips.detallesimcard' => 'Asignacion SimCard',
-                'lineas_chips.cargar_numeros' => 'Cargar números',
+                'lineas_chips.cargar_numeros' => 'Cargar asignación',
                 'lineas_chips.bajar_numeros' => 'Dar de Baja números',
+                'lineas_chips.cargar_numeros_solo' => 'Cargar números',
+                'lineas_chips.cargar_simcard_solo' => 'Cargar SimCard',
             ],
         ],
     ];
@@ -103,13 +113,13 @@ class RolesController extends Controller
         $stats = $this->rolesService->getRoleStats($request);
 
         $roles->through(function ($row) {
-        if (isset($row->fechaCreacion)) {
-            $row->fechaCreacion = Carbon::parse($row->fechaCreacion)
-                ->locale('es')
-                ->translatedFormat('d M Y, H:i'); 
-        }
-        return $row;
-    });
+            if (isset($row->fechaCreacion)) {
+                $row->fechaCreacion = Carbon::parse($row->fechaCreacion)
+                    ->locale('es')
+                    ->translatedFormat('d M Y, H:i');
+            }
+            return $row;
+        });
 
         return view('role.roles', [
             'title' => 'Módulo Roles',
@@ -178,13 +188,14 @@ class RolesController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'nombre' => ['required', 'string', 'min:2', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('rol', 'nombre')->where(fn ($query) => $query->where('tipo', 1))],
+            'nombre' => ['required', 'string', 'min:2', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('rol', 'nombre')->where(fn($query) => $query->where('tipo', 1))],
             'estado' => ['required', Rule::in(['0', '1'])],
             'permissions' => ['nullable', 'array'],
             'vista_permissions' => ['nullable', 'array'],
             'vista_permissions.*' => ['integer', Rule::exists('vista', 'idvista')],
             'contacto_tipos_permissions' => ['nullable', 'array'],
             'contacto_tipos_permissions.*' => ['string'],
+            'contacto_tipos_modo' => ['nullable', Rule::in(['all', 'specific'])],
         ], [
             'nombre.unique' => 'Ya existe un rol con ese nombre.',
             'estado.required' => 'El estado es requerido.',
@@ -193,7 +204,10 @@ class RolesController extends Controller
 
         $permissionPairs = $this->rolesService->extractSelectedPermissions((array) ($request->input('permissions') ?? []));
         $vistaIds = $this->rolesService->extractSelectedVistaIds((array) ($request->input('vista_permissions') ?? []));
-        $tipoContactoIds = $this->rolesService->extractSelectedTipoContactoIds((array) ($request->input('contacto_tipos_permissions') ?? []));
+        $tipoContactoIds = $this->rolesService->extractSelectedTipoContactoIds(
+            (array) ($request->input('contacto_tipos_permissions') ?? []),
+            $request->input('contacto_tipos_modo')
+        );
 
         if ($permissionPairs === [] && $vistaIds === []) {
             return back()
@@ -268,13 +282,14 @@ class RolesController extends Controller
         }
 
         $validated = $request->validate([
-            'nombre' => ['required', 'string', 'min:2', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('rol', 'nombre')->ignore($id, 'idrol')->where(fn ($query) => $query->where('tipo', 1))],
+            'nombre' => ['required', 'string', 'min:2', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX, Rule::unique('rol', 'nombre')->ignore($id, 'idrol')->where(fn($query) => $query->where('tipo', 1))],
             'estado' => ['required', Rule::in(['0', '1'])],
             'permissions' => ['nullable', 'array'],
             'vista_permissions' => ['nullable', 'array'],
             'vista_permissions.*' => ['integer', Rule::exists('vista', 'idvista')],
             'contacto_tipos_permissions' => ['nullable', 'array'],
             'contacto_tipos_permissions.*' => ['string'],
+            'contacto_tipos_modo' => ['nullable', Rule::in(['all', 'specific'])],
         ], [
             'nombre.unique' => 'Ya existe un rol con ese nombre.',
             'estado.required' => 'El estado es requerido.',
@@ -283,7 +298,10 @@ class RolesController extends Controller
 
         $permissionPairs = $this->rolesService->extractSelectedPermissions((array) ($request->input('permissions') ?? []));
         $vistaIds = $this->rolesService->extractSelectedVistaIds((array) ($request->input('vista_permissions') ?? []));
-        $tipoContactoIds = $this->rolesService->extractSelectedTipoContactoIds((array) ($request->input('contacto_tipos_permissions') ?? []));
+        $tipoContactoIds = $this->rolesService->extractSelectedTipoContactoIds(
+            (array) ($request->input('contacto_tipos_permissions') ?? []),
+            $request->input('contacto_tipos_modo')
+        );
 
         if ($permissionPairs === [] && $vistaIds === []) {
             return back()
@@ -360,9 +378,13 @@ class RolesController extends Controller
     }
 
 
-    private function buildRoleFields(array $permissionsMatrix, 
-        Collection $vistasCatalog, array $selectedVistaIds, ?Collection $tiposContactoCatalog = null, array $selectedTipoContactoIds = []): array
-    {
+    private function buildRoleFields(
+        array $permissionsMatrix,
+        Collection $vistasCatalog,
+        array $selectedVistaIds,
+        ?Collection $tiposContactoCatalog = null,
+        array $selectedTipoContactoIds = []
+    ): array {
         return $this->rolesService->buildRoleFields($permissionsMatrix, $vistasCatalog, $selectedVistaIds, $tiposContactoCatalog, $selectedTipoContactoIds);
     }
 

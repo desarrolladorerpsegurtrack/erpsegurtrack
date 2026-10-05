@@ -13,6 +13,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class VehiculosController extends Controller
@@ -287,8 +289,7 @@ class VehiculosController extends Controller
                     ['key' => 'almacen_detalle', 'label' => 'Servicio', 'type' => 'text'],
                     ['key' => 'plataforma', 'label' => 'Plataforma', 'type' => 'text'],
                     ['key' => 'fechaInicio', 'label' => 'Fecha Inicio', 'type' => 'date'],
-                    ['key' => 'fecheVencimiento', 'label' => 'Fecha Fin', 'type' => 'date'],
-                    ['key' => 'monto', 'label' => 'Monto', 'type' => 'text'],
+                    ['key' => 'fechaVencimiento', 'label' => 'Fecha Fin', 'type' => 'date'],
                     ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
                     ['key' => 'docReferencia', 'label' => 'Documento', 'type' => 'text'],
                 ],
@@ -299,9 +300,21 @@ class VehiculosController extends Controller
         $rowArr = (array) $row;
         $rowArr['numero'] = '-';
         $rowArr['operador'] = '-';
-        if (!empty($devices) && is_array($devices) && isset($devices[0]['numero'])) {
-            $rowArr['numero'] = $devices[0]['numero'] ?? '-';
-            $rowArr['operador'] = $devices[0]['operador'] ?? '-';
+        if (!empty($devices) && is_array($devices)) {
+            // Priorizar dispositivo activo; si no hay, usar el primero disponible
+            $activeDevice = null;
+            foreach ($devices as $device) {
+                $estado = strtolower((string) ($device['estado'] ?? ''));
+                if ($estado === '1' || $estado === 'activo') {
+                    $activeDevice = $device;
+                    break;
+                }
+            }
+            $selectedDevice = $activeDevice ?? $devices[0];
+            if (isset($selectedDevice['numero'])) {
+                $rowArr['numero'] = $selectedDevice['numero'] ?? '-';
+                $rowArr['operador'] = $selectedDevice['operador'] ?? '-';
+            }
         }
         $rowArr['relation_groups'] = $relationGroups;
 
@@ -320,9 +333,8 @@ class VehiculosController extends Controller
             'items' => $items,
             'columns' => [
                 ['key' => 'placa', 'label' => 'Placa', 'type' => 'text'],
-                ['key' => 'numero', 'label' => 'Número', 'type' => 'text'],
-                ['key' => 'operador', 'label' => 'Operador', 'type' => 'text'],
                 ['key' => 'cliente_nombre', 'label' => 'Cliente', 'type' => 'text'],
+                ['key' => 'numero_contacto', 'label' => 'Telf. Contacto', 'type' => 'text'],
                 ['key' => 'tipo_vehiculo', 'label' => 'Tipo', 'type' => 'text'],
                 ['key' => 'anio', 'label' => 'Año', 'type' => 'text'],
                 ['key' => 'marca', 'label' => 'Marca', 'type' => 'text'],
@@ -577,6 +589,7 @@ class VehiculosController extends Controller
             ->where('vehiculo_placa', $placa)
             ->select('iddispositivoCliente', 'marcaDispositivo', 'modeloDispositivo', 'fechaInstalacion', 'fechaBaja', 'estado')
             ->get();
+        $clienteCambioBloqueado = $this->getOwnershipChangeBlockReason($placa);
 
         return view('vehiculo.vehiculos-form', [
             'title' => 'Editar Vehículo',
@@ -597,7 +610,6 @@ class VehiculosController extends Controller
                     'required' => true,
                     'maxlength' => 20,
                     'helpText' => 'Identificador único del vehículo.',
-                    'disabled' => true,
                     'consultButton' => true,
                     'consultButtonLabel' => 'Consultar',
                     'consultButtonUrl' => route('api.consultar.placa'),
@@ -613,6 +625,8 @@ class VehiculosController extends Controller
                     'optionKey' => 'idcliente',
                     'optionLabel' => 'cliente_label',
                     'placeholder' => 'Selecciona cliente',
+                    'ownershipChangeBlocked' => $clienteCambioBloqueado !== null,
+                    'ownershipChangeBlockedMessage' => $clienteCambioBloqueado,
                 ],
                 [
                     'name' => 'tipoUnidad_idtable1',
@@ -694,7 +708,18 @@ class VehiculosController extends Controller
             return $redirect;
         }
 
+        $request->merge([
+            'placa' => Str::upper(trim((string) $request->input('placa', ''))),
+        ]);
+
         $validated = $request->validate([
+            'placa' => [
+                'required',
+                'string',
+                'max:20',
+                'regex:' . self::SAFE_TEXT_REGEX,
+                Rule::unique('vehiculo', 'placa')->ignore($placa, 'placa'),
+            ],
             'cliente_idcliente' => ['required', 'exists:cliente,idcliente'],
             'tipoUnidad_idtable1' => ['required', 'exists:tipovehiculo,idtipoVehiculo'],
             'anio' => ['required', 'integer', 'digits:4', 'min:1900', 'max:' . ((int) date('Y') + 1)],
@@ -704,7 +729,51 @@ class VehiculosController extends Controller
             'tracto' => ['nullable', 'in:Si,No'],
         ]);
 
-        DB::table('vehiculo')->where('placa', $placa)->update($validated);
+        $currentCliente = DB::table('vehiculo')->where('placa', $placa)->value('cliente_idcliente');
+        if ((string) $validated['cliente_idcliente'] !== (string) $currentCliente) {
+            $blockReason = $this->getOwnershipChangeBlockReason($placa);
+            if ($blockReason !== null) {
+                throw ValidationException::withMessages([
+                    'cliente_idcliente' => $blockReason,
+                ]);
+            }
+        }
+
+        DB::transaction(function () use ($placa, $validated) {
+            $currentCliente = DB::table('vehiculo')->where('placa', $placa)->value('cliente_idcliente');
+            if ((string) $validated['cliente_idcliente'] !== (string) $currentCliente) {
+                $blockReason = $this->getOwnershipChangeBlockReason($placa);
+                if ($blockReason !== null) {
+                    throw ValidationException::withMessages([
+                        'cliente_idcliente' => $blockReason,
+                    ]);
+                }
+            }
+
+            $newPlaca = $validated['placa'];
+            $vehicleData = $validated;
+            unset($vehicleData['placa']);
+
+            DB::table('vehiculo')->where('placa', $placa)->update([
+                'placa' => $newPlaca,
+                ...$vehicleData,
+            ]);
+
+            if ($newPlaca !== $placa) {
+                DB::table('dispositivocliente')
+                    ->where('vehiculo_placa', $placa)
+                    ->update(['vehiculo_placa' => $newPlaca]);
+
+                DB::table('serviciocliente')
+                    ->where('vehiculo_placa', $placa)
+                    ->update(['vehiculo_placa' => $newPlaca]);
+
+                DB::table('detalle_serviciodispositivo')
+                    ->where('vehiculo_placa', $placa)
+                    ->update(['vehiculo_placa' => $newPlaca]);
+            }
+        });
+
         $this->publishResourceEvent(self::LOCK_RESOURCE, $placa, 'updated');
         $this->releaseLockIfOwned($request, self::LOCK_RESOURCE, $placa);
 
@@ -880,6 +949,26 @@ class VehiculosController extends Controller
                 'v.modelo',
                 'v.tracto',
                 DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as cliente_nombre'),
+                DB::raw("COALESCE((
+                    SELECT c_contacto.numero
+                    FROM contacto as c_contacto
+                    LEFT JOIN tipocontacto as tc_contacto
+                        ON tc_contacto.idtipoContacto = c_contacto.tipoContacto_idtipoContacto
+                    WHERE c_contacto.cliente_idcliente = v.cliente_idcliente
+                        AND TRIM(COALESCE(c_contacto.numero, '')) <> ''
+                        AND (
+                            LOWER(TRIM(COALESCE(tc_contacto.detalle, ''))) = 'emergencia'
+                            OR c_contacto.`default` = 1
+                        )
+                    ORDER BY
+                        CASE
+                            WHEN LOWER(TRIM(COALESCE(tc_contacto.detalle, ''))) = 'emergencia' THEN 0
+                            ELSE 1
+                        END,
+                        c_contacto.`default` DESC,
+                        c_contacto.idcontacto DESC
+                    LIMIT 1
+                ), '') as numero_contacto"),
                 DB::raw('COALESCE(tv.nombre, "") as tipo_vehiculo'),
             ]);
     }
@@ -893,6 +982,29 @@ class VehiculosController extends Controller
             ])
             ->orderBy('cliente_label')
             ->get();
+    }
+
+    private function getOwnershipChangeBlockReason(string $placa): ?string
+    {
+        $hasActiveDevice = DB::table('dispositivocliente')
+            ->where('vehiculo_placa', $placa)
+            ->where('estado', '1')
+            ->exists();
+
+        if ($hasActiveDevice) {
+            return 'No se puede cambiar el cliente porque el vehículo tiene dispositivos activos.';
+        }
+
+        $hasActiveService = DB::table('serviciocliente')
+            ->where('vehiculo_placa', $placa)
+            ->whereIn('estado', ['activo', '1', 'true'])
+            ->exists();
+
+        if ($hasActiveService) {
+            return 'No se puede cambiar el cliente porque el vehículo tiene servicios activos.';
+        }
+
+        return null;
     }
 
     private function tipoVehiculoOptions()

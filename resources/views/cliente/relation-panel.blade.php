@@ -299,7 +299,7 @@
                                     }
                                     if (!empty($vehicleTimestamps)) $vehicleMaxTs = max($vehicleTimestamps);
                                 @endphp
-                                <table class="w-full text-left text-sm border-collapse border border-black" style="width: 100%; min-width: 1200px; table-layout: auto;">
+                                <table class="w-full text-left text-sm border-collapse border border-black" style="width: 100%; min-width: 1400px; table-layout: auto;">
                                     <thead class="bg-slate-300 text-slate-800">
                                         <tr>
                                             @foreach(($vehicleGroup['columns'] ?? []) as $col)

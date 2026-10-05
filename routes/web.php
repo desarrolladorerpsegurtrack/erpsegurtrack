@@ -10,6 +10,16 @@ Route::get('/api/consultar-placa', [\App\Http\Controllers\VehiculosController::c
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
 Route::post('/login', [AuthController::class, 'login'])->name('login.attempt');
 
+Route::middleware(['erp.auth'])->group(function () {
+    Route::get('/relaciones/{resource}/{id}', [RelationContextController::class, 'show'])->name('modules.relations.summary');
+    
+    // Rutas de Notificaciones
+    Route::get('/api/notificaciones', [\App\Http\Controllers\NotificacionController::class, 'index'])->name('api.notificaciones.index');
+    Route::post('/api/notificaciones/mark-all-read', [\App\Http\Controllers\NotificacionController::class, 'markAllAsRead'])->name('api.notificaciones.read_all');
+    Route::post('/api/notificaciones/{id}/read', [\App\Http\Controllers\NotificacionController::class, 'markAsRead'])->name('api.notificaciones.read');
+    Route::get('/api/notificaciones/trigger-cron', [\App\Http\Controllers\NotificacionController::class, 'triggerCron'])->name('api.notificaciones.trigger_cron');
+});
+
 Route::middleware(['erp.auth', 'audit.log', 'erp.action'])->group(function () {
     Route::get('/', function (\Illuminate\Http\Request $request) {
         $authData = $request->session()->get('erp_auth', []);
@@ -34,6 +44,8 @@ Route::middleware(['erp.auth', 'audit.log', 'erp.action'])->group(function () {
     require __DIR__.'/usuarios.php';
     require __DIR__.'/clientes.php';
     require __DIR__.'/cuentas-por-cobrar.php';
+    require __DIR__.'/cuentas-por-pagar.php';
+    require __DIR__.'/finanzas.php';
     require __DIR__.'/planificacion.php';
     require __DIR__.'/vehiculos.php';
     require __DIR__.'/almacen.php';
@@ -44,8 +56,6 @@ Route::middleware(['erp.auth', 'audit.log', 'erp.action'])->group(function () {
     require __DIR__.'/sistema.php';
     require __DIR__.'/lineas-chips.php';
     require __DIR__.'/tickets.php';
-
-    Route::get('/relaciones/{resource}/{id}', [RelationContextController::class, 'show'])->name('modules.relations.summary');
 
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 });

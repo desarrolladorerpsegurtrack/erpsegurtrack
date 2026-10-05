@@ -9,6 +9,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -28,8 +29,18 @@ class LineasChipsController extends Controller
     public function numerosTelefonicoIndex(Request $request): View
     {
         $baseQuery = DB::table('numerotelefonico as n')
-            ->select('n.numeroTelefonico', 'n.estado')
+            ->select('n.numeroTelefonico', 'n.plan', 'n.estado')
             ->addSelect([
+                'precio_numero' => DB::table('detalle_precionumero as dp')
+                    ->select('dp.precio')
+                    ->whereColumn('dp.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
+                    ->orderByDesc('dp.iddetalle_precionumero')
+                    ->limit(1),
+                'moneda_numero' => DB::table('detalle_precionumero as dp')
+                    ->select('dp.moneda')
+                    ->whereColumn('dp.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
+                    ->orderByDesc('dp.iddetalle_precionumero')
+                    ->limit(1),
                 'simcard_actual' => DB::table('detallesimcard as d')
                     ->select('d.simCard_idsimCard')
                     ->whereColumn('d.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
@@ -42,14 +53,22 @@ class LineasChipsController extends Controller
                     ->where('d.estado', '1')
                     ->orderByDesc('d.iddetalleSimCard')
                     ->limit(1),
+                'operador_actual' => DB::table('detallesimcard as d')
+                    ->leftJoin('simcard as s', 's.idsimCard', '=', 'd.simCard_idsimCard')
+                    ->leftJoin('operador as o', 'o.idoperador', '=', 's.operador_idoperador')
+                    ->select('o.nombre')
+                    ->whereColumn('d.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
+                    ->where('d.estado', '0')
+                    ->orderByDesc('d.iddetalleSimCard')
+                    ->limit(1),
             ]);
 
         $estadoFilter = trim((string) $request->input('estado', ''));
-        if ($estadoFilter !== '' && in_array($estadoFilter, ['0', '1'], true)) {
+        if ($estadoFilter !== '' && in_array($estadoFilter, ['0', '1', '2', '3'], true)) {
             $baseQuery->where('n.estado', $estadoFilter);
         }
 
-         $numeroFilter = trim((string) $request->input('numero', ''));
+        $numeroFilter = trim((string) $request->input('numero', ''));
         if ($numeroFilter !== '') {
             $baseQuery->where('n.numeroTelefonico', $numeroFilter);
         }
@@ -76,12 +95,20 @@ class LineasChipsController extends Controller
                             ->from('detallesimcard as d')
                             ->whereColumn('d.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
                             ->where('d.simCard_idsimCard', 'like', $term);
+                    })
+                    ->orWhereExists(function ($query) use ($term) {
+                        $query->select(DB::raw('1'))
+                            ->from('detallesimcard as d')
+                            ->leftJoin('simcard as s', 's.idsimCard', '=', 'd.simCard_idsimCard')
+                            ->leftJoin('operador as o', 'o.idoperador', '=', 's.operador_idoperador')
+                            ->whereColumn('d.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
+                            ->where('o.nombre', 'like', $term);
                     });
             });
         }
 
         $items = $baseQuery
-            ->orderByRaw("CASE WHEN n.estado = '1' THEN 0 ELSE 1 END")
+            ->orderByRaw("CASE WHEN n.estado != '0' THEN 0 ELSE 1 END")
             ->orderBy('n.numeroTelefonico')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
@@ -89,10 +116,16 @@ class LineasChipsController extends Controller
         $items->getCollection()->transform(function ($item) {
             $simcardActual = trim((string) ($item->simcard_actual ?? ''));
             $simcardPasada = trim((string) ($item->simcard_pasada ?? ''));
+            $precio = trim((string) ($item->precio_numero ?? ''));
+            $moneda = trim((string) ($item->moneda_numero ?? ''));
+            $item->precio_numero = $precio !== ''
+                ? trim($moneda . ' ' . number_format((float) $precio, 2, '.', ''))
+                : '-';
             $item->relacion_simcard = $simcardActual !== ''
                 ? 'Asignación Actual: ' . $simcardActual
                 : ($simcardPasada !== '' ? 'Ultima Asignación: ' . $simcardPasada : 'Sin asignación');
-            $item->estado = self::normalizeEstado($item->estado);
+            $item->operador_actual = trim((string) ($item->operador_actual ?? '')) !== '' ? $item->operador_actual : '-';
+            $item->estado = self::normalizeEstadoLabel($item->estado);
             return $item;
         });
 
@@ -102,7 +135,10 @@ class LineasChipsController extends Controller
             'items' => $items,
             'columns' => [
                 ['key' => 'numeroTelefonico', 'label' => 'Número', 'type' => 'text'],
+                ['key' => 'precio_numero', 'label' => 'Precio', 'type' => 'text'],
+                ['key' => 'plan', 'label' => 'Plan', 'type' => 'text'],
                 ['key' => 'relacion_simcard', 'label' => 'Relación SimCard', 'type' => 'text'],
+                ['key' => 'operador_actual', 'label' => 'Operador', 'type' => 'text'],
                 ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
             ],
             'exportRoutes' => [
@@ -111,8 +147,8 @@ class LineasChipsController extends Controller
             ],
             'stats' => [
                 ['label' => 'Total de números', 'value' => (clone $baseQuery)->count()],
-                ['label' => 'Números activos', 'value' => (clone $baseQuery)->where('n.estado', '1')->count()],
-                ['label' => 'Números inactivos', 'value' => (clone $baseQuery)->where('n.estado', '0')->count()],
+                ['label' => 'En Uso', 'value' => (clone $baseQuery)->where('n.estado', '3')->count()],
+                ['label' => 'Disponibles', 'value' => (clone $baseQuery)->where('n.estado', '2')->count()],
             ],
             'filters' => [
                 [
@@ -132,20 +168,28 @@ class LineasChipsController extends Controller
                     'label' => 'Estado',
                     'type' => 'select',
                     'options' => [
-                        ['value' => '1', 'label' => 'Activo'],
+                        ['value' => '1', 'label' => 'Libre'],
+                        ['value' => '2', 'label' => 'Disponible'],
+                        ['value' => '3', 'label' => 'En Uso'],
                         ['value' => '0', 'label' => 'Inactivo'],
                     ],
                     'placeholder' => 'Todos',
                 ],
-                
             ],
             'createRoute' => route('modules.lineas-chips.numeros-telefonico.create'),
             'editRoute' => 'modules.lineas-chips.numeros-telefonico.edit',
             'showRoute' => 'modules.lineas-chips.numeros-telefonico.edit',
             'destroyRoute' => 'modules.lineas-chips.numeros-telefonico.destroy',
             'bulkDestroyRoute' => route('modules.lineas-chips.numeros-telefonico.bulk-destroy'),
+            'importPreviewRoute' => route('modules.lineas-chips.numeros-telefonico.import.preview'),
+            'importProcessRoute' => route('modules.lineas-chips.numeros-telefonico.import.process'),
+            'importButtonLabel' => 'Cargar números',
+            'importModalTitle' => 'Cargar números por archivo',
+            'importModalHint' => 'Archivo (.xlsx) con las columnas: Numero, Plan, Precio',
+            'importPreview' => null,
             'identifierKey' => 'numeroTelefonico',
             'lockResource' => 'lineas_chips.numero_telefonico',
+            'tableWrapperClass' => 'numeros-telefonico-table',
         ]);
     }
 
@@ -167,6 +211,36 @@ class LineasChipsController extends Controller
                     'maxlength' => 30,
                     'minlength' => 9,
                     'helpText' => 'Ingrese mínimo 9 digitos, sin guiones ni espacios.',
+                ],
+                [
+                    'name' => 'plan',
+                    'type' => 'text',
+                    'label' => 'Plan',
+                    'required' => true,
+                    'maxlength' => 45,
+                    'helpText' => 'Ingrese el nombre o referencia del plan.',
+                ],
+                [
+                    'name' => 'precio',
+                    'type' => 'number',
+                    'label' => 'Precio',
+                    'required' => true,
+                    'min' => 0,
+                    'step' => '0.01',
+                    'placeholder' => 'Ej: 29.90',
+                    'helpText' => 'Ingrese solo el valor numérico.',
+                ],
+                [
+                    'name' => 'moneda',
+                    'type' => 'select',
+                    'label' => 'Moneda',
+                    'required' => true,
+                    'value' => old('moneda', 'S/'),
+                    'options' => [
+                        'S/' => 'S/',
+                        '$' => '$',
+                    ],
+                    'helpText' => 'Seleccione el símbolo de moneda.',
                 ],
                 [
                     'name' => 'estado',
@@ -230,6 +304,9 @@ class LineasChipsController extends Controller
 
         $validated = $request->validate([
             'numeroTelefonico' => ['required', 'string', 'min:9', 'max:30', 'regex:' . self::SAFE_TEXT_REGEX, 'unique:numerotelefonico,numeroTelefonico'],
+            'plan' => ['required', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+            'precio' => ['required', 'numeric', 'min:0'],
+            'moneda' => ['required', Rule::in(['S/', '$'])],
             'estado' => ['required', 'string', $wantsSimCard ? Rule::in(['1']) : Rule::in(['0', '1'])],
             'idsimCard' => [
                 Rule::requiredIf($wantsSimCard),
@@ -249,17 +326,28 @@ class LineasChipsController extends Controller
             'estado_simcard.in' => 'La SimCard debe estar en estado activo para poder crearla junto al número.',
         ]);
 
+        $precio = number_format((float) $validated['precio'], 2, '.', '');
+        $moneda = $validated['moneda'];
+
         if ($wantsSimCard) {
-            DB::transaction(function () use ($validated): void {
+            DB::transaction(function () use ($validated, $precio, $moneda): void {
                 DB::table('numerotelefonico')->insert([
                     'numeroTelefonico' => $validated['numeroTelefonico'],
-                    'estado' => '1',
+                    'plan' => $validated['plan'],
+                    'estado' => '2',
+                ]);
+
+                DB::table('detalle_precionumero')->insert([
+                    'numeroTelefonico_numeroTelefonico' => $validated['numeroTelefonico'],
+                    'precio' => $precio,
+                    'moneda' => $moneda,
+                    'fecha' => Carbon::now()->format('Y-m-d H:i:s'),
                 ]);
 
                 DB::table('simcard')->insert([
                     'idsimCard' => $validated['idsimCard'],
                     'operador_idoperador' => (int) $validated['operador_idoperador_simcard'],
-                    'estado' => '1',
+                    'estado' => '2',
                 ]);
 
                 DB::table('detallesimcard')->insert([
@@ -280,7 +368,14 @@ class LineasChipsController extends Controller
 
         DB::table('numerotelefonico')->insert([
             'numeroTelefonico' => $validated['numeroTelefonico'],
+            'plan' => $validated['plan'],
             'estado' => $validated['estado'],
+        ]);
+        DB::table('detalle_precionumero')->insert([
+            'numeroTelefonico_numeroTelefonico' => $validated['numeroTelefonico'],
+            'precio' => $precio,
+            'moneda' => $moneda,
+            'fecha' => Carbon::now()->format('Y-m-d H:i:s'),
         ]);
         $this->publishResourceEvent('lineas_chips.numero_telefonico', $validated['numeroTelefonico'] ?? '', 'created');
 
@@ -297,6 +392,13 @@ class LineasChipsController extends Controller
                 ->route('modules.lineas-chips.numeros-telefonico.index')
                 ->with('error', 'No se encontro el número telefónico solicitado.');
         }
+
+        $priceDetail = DB::table('detalle_precionumero')
+            ->where('numeroTelefonico_numeroTelefonico', $id)
+            ->orderByDesc('iddetalle_precionumero')
+            ->first();
+        $record->precio = $priceDetail?->precio;
+        $record->moneda = $priceDetail?->moneda ?? 'S/';
 
         $historialPrevio = $this->countNumeroHistorialSinRelacionActual($id);
         if ($historialPrevio > 0) {
@@ -327,6 +429,35 @@ class LineasChipsController extends Controller
                     'minlength' => 9,
                     'readonly' => false,
                     'helpText' => 'Ingrese mínimo 9 digitos, sin guiones ni espacios.',
+                ],
+                [
+                    'name' => 'plan',
+                    'type' => 'text',
+                    'label' => 'Plan',
+                    'required' => true,
+                    'maxlength' => 45,
+                    'helpText' => 'Ingrese el nombre o referencia del plan.',
+                ],
+                [
+                    'name' => 'precio',
+                    'type' => 'number',
+                    'label' => 'Precio',
+                    'required' => true,
+                    'min' => 0,
+                    'step' => '0.01',
+                    'placeholder' => 'Ej: 29.90',
+                    'helpText' => 'Ingrese solo el valor numérico.',
+                ],
+                [
+                    'name' => 'moneda',
+                    'type' => 'select',
+                    'label' => 'Moneda',
+                    'required' => true,
+                    'options' => [
+                        'S/' => 'S/',
+                        '$' => '$',
+                    ],
+                    'helpText' => 'Seleccione el símbolo de moneda.',
                 ],
                 [
                     'name' => 'estado',
@@ -382,17 +513,27 @@ class LineasChipsController extends Controller
                 'regex:' . self::SAFE_TEXT_REGEX,
                 Rule::unique('numerotelefonico', 'numeroTelefonico')->ignore($id, 'numeroTelefonico'),
             ],
-            'estado' => ['required', 'string', 'in:0,1'],
+            'plan' => ['required', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+            'precio' => ['required', 'numeric', 'min:0'],
+            'moneda' => ['required', Rule::in(['S/', '$'])],
+            'estado' => ['required', 'string', 'in:0,1,2,3'],
         ]);
 
         $newNumero = $validated['numeroTelefonico'];
+        $precio = number_format((float) $validated['precio'], 2, '.', '');
+        $moneda = $validated['moneda'];
 
-        DB::transaction(function () use ($id, $newNumero, $validated): void {
+        DB::transaction(function () use ($id, $newNumero, $validated, $precio, $moneda): void {
             if ($newNumero !== $id) {
                 DB::table('numerotelefonico')->insert([
                     'numeroTelefonico' => $newNumero,
+                    'plan' => $validated['plan'],
                     'estado' => $validated['estado'],
                 ]);
+
+                DB::table('detalle_precionumero')
+                    ->where('numeroTelefonico_numeroTelefonico', $id)
+                    ->update(['numeroTelefonico_numeroTelefonico' => $newNumero]);
 
                 DB::table('detallesimcard')
                     ->where('numeroTelefonico_numeroTelefonico', $id)
@@ -402,15 +543,29 @@ class LineasChipsController extends Controller
                     ->where('numeroTelefonico_numeroTelefonico', $id)
                     ->update(['numeroTelefonico_numeroTelefonico' => $newNumero]);
 
+                $this->upsertNumeroPrecio($newNumero, $precio, $moneda);
+
                 DB::table('numerotelefonico')
                     ->where('numeroTelefonico', $id)
                     ->delete();
 
                 if ($validated['estado'] === '0') {
+                    $pairedSims = DB::table('detallesimcard')
+                        ->where('numeroTelefonico_numeroTelefonico', $newNumero)
+                        ->where('estado', '0')
+                        ->pluck('simCard_idsimCard');
+
                     DB::table('detallesimcard')
                         ->where('numeroTelefonico_numeroTelefonico', $newNumero)
                         ->where('estado', '0')
                         ->update(['estado' => '1']);
+
+                    if ($pairedSims->isNotEmpty()) {
+                        DB::table('simcard')
+                            ->whereIn('idsimCard', $pairedSims)
+                            ->where('estado', '!=', '0')
+                            ->update(['estado' => '1']);
+                    }
                 }
 
                 return;
@@ -419,14 +574,29 @@ class LineasChipsController extends Controller
             DB::table('numerotelefonico')
                 ->where('numeroTelefonico', $id)
                 ->update([
+                    'plan' => $validated['plan'],
                     'estado' => $validated['estado'],
                 ]);
 
+            $this->upsertNumeroPrecio($id, $precio, $moneda);
+
             if ($validated['estado'] === '0') {
+                $pairedSims = DB::table('detallesimcard')
+                    ->where('numeroTelefonico_numeroTelefonico', $id)
+                    ->where('estado', '0')
+                    ->pluck('simCard_idsimCard');
+
                 DB::table('detallesimcard')
                     ->where('numeroTelefonico_numeroTelefonico', $id)
                     ->where('estado', '0')
                     ->update(['estado' => '1']);
+
+                if ($pairedSims->isNotEmpty()) {
+                    DB::table('simcard')
+                        ->whereIn('idsimCard', $pairedSims)
+                        ->where('estado', '!=', '0')
+                        ->update(['estado' => '1']);
+                }
             }
         });
 
@@ -461,7 +631,7 @@ class LineasChipsController extends Controller
         $rows = collect($preview['allRows'] ?? $preview['previewRows'] ?? []);
 
         if (!empty($selectedIds)) {
-            $rows = $rows->whereIn('id', $selectedIds); 
+            $rows = $rows->whereIn('id', $selectedIds);
         }
 
         if ($type === 'bulk') {
@@ -471,18 +641,62 @@ class LineasChipsController extends Controller
                 ['key' => 'status', 'label' => 'Estado'],
             ];
             $filename = 'detallesimcard_baja_preview_' . now()->format('Ymd_His') . '.xlsx';
-            
+
             return $this->exportXlsxResponse($rows, $columns, $filename);
         }
 
-        $columns = [
-            ['key' => 'line', 'label' => 'Línea'],
-            ['key' => 'numero', 'label' => 'Número'],
-            ['key' => 'simcard', 'label' => 'SimCard'],
-            ['key' => 'operador', 'label' => 'Operador'],
-            ['key' => 'status', 'label' => 'Estado'],
-        ];
-        $filename = 'detallesimcard_carga_preview_' . now()->format('Ymd_His') . '.xlsx';
+        // Para importaciones: columnas según el importType del payload
+        $importType = trim((string) ($preview['importType'] ?? 'detallesimcard'));
+
+        if ($importType === 'numero') {
+            $columns = [
+                ['key' => 'line', 'label' => 'Línea'],
+                ['key' => 'numero', 'label' => 'Número'],
+                ['key' => 'plan', 'label' => 'Plan'],
+                [
+                    'key' => 'precio_display',
+                    'label' => 'Precio',
+                    'value' => function ($row) {
+                        $moneda = trim((string) ($row['moneda'] ?? 'S/'));
+                        $precio = trim((string) ($row['precio'] ?? ''));
+
+                        if ($precio === '') {
+                            return $moneda === '' ? '' : $moneda;
+                        }
+
+                        $precioDisplay = $precio;
+                        if (!preg_match('/^\s*[-+]?\d+(?:[.,]\d+)?\s*$/', $precioDisplay)) {
+                            $precioDisplay = preg_replace('/[^0-9,.-]/', '', $precioDisplay) ?? $precioDisplay;
+                        }
+
+                        if ($precioDisplay === '') {
+                            return $moneda;
+                        }
+
+                        return trim($moneda . ' ' . $precioDisplay);
+                    },
+                ],
+                ['key' => 'status', 'label' => 'Estado'],
+            ];
+            $filename = 'numeros_carga_preview_' . now()->format('Ymd_His') . '.xlsx';
+        } elseif ($importType === 'simcard') {
+            $columns = [
+                ['key' => 'line', 'label' => 'Línea'],
+                ['key' => 'simcard', 'label' => 'SimCard'],
+                ['key' => 'operador', 'label' => 'Operador'],
+                ['key' => 'status', 'label' => 'Estado'],
+            ];
+            $filename = 'simcard_carga_preview_' . now()->format('Ymd_His') . '.xlsx';
+        } else {
+            $columns = [
+                ['key' => 'line', 'label' => 'Línea'],
+                ['key' => 'numero', 'label' => 'Número'],
+                ['key' => 'simcard', 'label' => 'SimCard'],
+                ['key' => 'operador', 'label' => 'Operador'],
+                ['key' => 'status', 'label' => 'Estado'],
+            ];
+            $filename = 'detallesimcard_carga_preview_' . now()->format('Ymd_His') . '.xlsx';
+        }
 
         return $this->exportXlsxResponse($rows, $columns, $filename);
     }
@@ -563,7 +777,7 @@ class LineasChipsController extends Controller
             $selectedIds = [];
         }
 
-        $selectedIds = array_filter(array_map('trim', $selectedIds), fn ($id) => $id !== '');
+        $selectedIds = array_filter(array_map('trim', $selectedIds), fn($id) => $id !== '');
         if (empty($selectedIds)) {
             return redirect()
                 ->route('modules.lineas-chips.numeros-telefonico.index')
@@ -619,10 +833,20 @@ class LineasChipsController extends Controller
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
-        
+
         $baseQuery = DB::table('numerotelefonico as n')
-            ->select('n.numeroTelefonico', 'n.estado')
+            ->select('n.numeroTelefonico', 'n.plan', 'n.estado')
             ->addSelect([
+                'precio_numero' => DB::table('detalle_precionumero as dp')
+                    ->select('dp.precio')
+                    ->whereColumn('dp.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
+                    ->orderByDesc('dp.iddetalle_precionumero')
+                    ->limit(1),
+                'moneda_numero' => DB::table('detalle_precionumero as dp')
+                    ->select('dp.moneda')
+                    ->whereColumn('dp.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
+                    ->orderByDesc('dp.iddetalle_precionumero')
+                    ->limit(1),
                 'simcard_actual' => DB::table('detallesimcard as d')
                     ->select('d.simCard_idsimCard')
                     ->whereColumn('d.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
@@ -637,27 +861,51 @@ class LineasChipsController extends Controller
                     ->limit(1),
             ]);
 
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('n.numeroTelefonico', 'like', $term)
-                    ->orWhere('n.estado', 'like', $term);
-            });
-        }
-        
-
         $selectedIds = (array) $request->input('selectedIds', []);
         if (!empty($selectedIds)) {
             $baseQuery->whereIn('n.numeroTelefonico', $selectedIds);
         } else {
+            $estadoFilter = trim((string) $request->input('estado', ''));
+            if ($estadoFilter !== '' && in_array($estadoFilter, ['0', '1', '2', '3'], true)) {
+                $baseQuery->where('n.estado', $estadoFilter);
+            }
+
+            $numeroFilter = trim((string) $request->input('numero', ''));
+            if ($numeroFilter !== '') {
+                $baseQuery->where('n.numeroTelefonico', 'like', '%' . $numeroFilter . '%');
+            }
+
+            $simCardFilter = trim((string) $request->input('simcard', ''));
+            if ($simCardFilter !== '') {
+                $baseQuery->whereExists(function ($query) use ($simCardFilter) {
+                    $query->select(DB::raw('1'))
+                        ->from('detallesimcard as d')
+                        ->whereColumn('d.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
+                        ->where('d.simCard_idsimCard', 'like', '%' . $simCardFilter . '%');
+                });
+            }
+
             $search = trim((string) $request->input('q', ''));
             if ($search !== '') {
                 $term = '%' . $search . '%';
                 $baseQuery->where(function ($query) use ($term) {
-                    $query->where('n.numeroTelefonico', 'like', $term)
-                        ->orWhere('n.estado', 'like', $term);
+                    $query
+                        ->where('n.numeroTelefonico', 'like', $term)
+                        ->orWhere('n.estado', 'like', $term)
+                        ->orWhereExists(function ($query) use ($term) {
+                            $query->select(DB::raw('1'))
+                                ->from('detallesimcard as d')
+                                ->whereColumn('d.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
+                                ->where('d.simCard_idsimCard', 'like', $term);
+                        })
+                        ->orWhereExists(function ($query) use ($term) {
+                            $query->select(DB::raw('1'))
+                                ->from('detallesimcard as d')
+                                ->leftJoin('simcard as s', 's.idsimCard', '=', 'd.simCard_idsimCard')
+                                ->leftJoin('operador as o', 'o.idoperador', '=', 's.operador_idoperador')
+                                ->whereColumn('d.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
+                                ->where('o.nombre', 'like', $term);
+                        });
                 });
             }
         }
@@ -670,6 +918,11 @@ class LineasChipsController extends Controller
         $rows->transform(function ($item) {
             $simcardActual = trim((string) ($item->simcard_actual ?? ''));
             $simcardPasada = trim((string) ($item->simcard_pasada ?? ''));
+            $precio = trim((string) ($item->precio_numero ?? ''));
+            $moneda = trim((string) ($item->moneda_numero ?? ''));
+            $item->precio_numero = $precio !== ''
+                ? trim($moneda . ' ' . number_format((float) $precio, 2, '.', ''))
+                : '-';
             $item->relacion_simcard = $simcardActual !== ''
                 ? 'Asignación Actual: ' . $simcardActual
                 : ($simcardPasada !== '' ? 'Última Asignación: ' . $simcardPasada : 'Sin Asignación');
@@ -679,6 +932,8 @@ class LineasChipsController extends Controller
 
         $columns = [
             ['key' => 'numeroTelefonico', 'label' => 'Número'],
+            ['key' => 'plan', 'label' => 'Plan'],
+            ['key' => 'precio_numero', 'label' => 'Precio'],
             ['key' => 'relacion_simcard', 'label' => 'Asignación SimCard'],
             ['key' => 'estado', 'label' => 'Estado'],
         ];
@@ -698,7 +953,7 @@ class LineasChipsController extends Controller
             ->leftJoin('operador as o', 'o.idoperador', '=', 's.operador_idoperador');
 
         $estadoFilter = trim((string) $request->input('estado', ''));
-        if ($estadoFilter !== '' && in_array($estadoFilter, ['0', '1'], true)) {
+        if ($estadoFilter !== '' && in_array($estadoFilter, ['0', '1', '2', '3'], true)) {
             $baseQuery->where('s.estado', $estadoFilter);
         }
 
@@ -755,7 +1010,7 @@ class LineasChipsController extends Controller
                     ->orderByDesc('d.iddetalleSimCard')
                     ->limit(1),
             ])
-            ->orderByRaw("CASE WHEN s.estado = '1' THEN 0 ELSE 1 END")
+            ->orderByRaw("CASE WHEN s.estado != '0' THEN 0 ELSE 1 END")
             ->orderBy('s.idsimCard')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
@@ -766,7 +1021,7 @@ class LineasChipsController extends Controller
             $item->relacion_numero = $numeroActual !== ''
                 ? 'Asignación Actual: ' . $numeroActual
                 : ($numeroPasada !== '' ? 'Última Asignación: ' . $numeroPasada : 'Sin Asignación');
-            $item->estado = self::normalizeEstado($item->estado);
+            $item->estado = self::normalizeEstadoLabel($item->estado);
             return $item;
         });
 
@@ -786,8 +1041,8 @@ class LineasChipsController extends Controller
             ],
             'stats' => [
                 ['label' => 'Total de simcards', 'value' => (clone $baseQuery)->count()],
-                ['label' => 'SimCards activas', 'value' => (clone $baseQuery)->where('s.estado', '1')->count()],
-                ['label' => 'SimCards inactivas', 'value' => (clone $baseQuery)->where('s.estado', '0')->count()],
+                ['label' => 'En Uso', 'value' => (clone $baseQuery)->where('s.estado', '3')->count()],
+                ['label' => 'Disponibles', 'value' => (clone $baseQuery)->where('s.estado', '2')->count()],
             ],
             'filters' => [
                 [
@@ -806,7 +1061,7 @@ class LineasChipsController extends Controller
                     'name' => 'operador',
                     'label' => 'Operador',
                     'options' => collect($this->operadorOptions())
-                        ->map(fn ($label, $value): array => ['value' => (string) $value, 'label' => (string) $label])
+                        ->map(fn($label, $value): array => ['value' => (string) $value, 'label' => (string) $label])
                         ->values()
                         ->all(),
                 ],
@@ -814,7 +1069,9 @@ class LineasChipsController extends Controller
                     'name' => 'estado',
                     'label' => 'Estado',
                     'options' => [
-                        ['value' => '1', 'label' => 'Activo'],
+                        ['value' => '1', 'label' => 'Libre'],
+                        ['value' => '2', 'label' => 'Disponible'],
+                        ['value' => '3', 'label' => 'En Uso'],
                         ['value' => '0', 'label' => 'Inactivo'],
                     ],
                 ],
@@ -823,6 +1080,12 @@ class LineasChipsController extends Controller
             'editRoute' => 'modules.lineas-chips.simcard.edit',
             'showRoute' => 'modules.lineas-chips.simcard.edit',
             'destroyRoute' => 'modules.lineas-chips.simcard.destroy',
+            'importPreviewRoute' => route('modules.lineas-chips.simcard.import.preview'),
+            'importProcessRoute' => route('modules.lineas-chips.simcard.import.process'),
+            'importButtonLabel' => 'Cargar SimCards',
+            'importModalTitle' => 'Cargar SimCards por archivo',
+            'importModalHint' => 'Archivo (.xlsx) con las columnas: SimCard, Operador',
+            'importPreview' => null,
             'identifierKey' => 'idsimCard',
             'lockResource' => 'lineas_chips.simcard',
         ]);
@@ -931,12 +1194,12 @@ class LineasChipsController extends Controller
                 DB::table('simcard')->insert([
                     'idsimCard' => $validated['idsimCard'],
                     'operador_idoperador' => (int) $validated['operador_idoperador'],
-                    'estado' => '1',
+                    'estado' => '2',
                 ]);
 
                 DB::table('numerotelefonico')->insert([
                     'numeroTelefonico' => $validated['numeroTelefonico'],
-                    'estado' => '1',
+                    'estado' => '2',
                 ]);
 
                 DB::table('detallesimcard')->insert([
@@ -1067,7 +1330,7 @@ class LineasChipsController extends Controller
                 Rule::unique('simcard', 'idsimCard')->ignore($id, 'idsimCard'),
             ],
             'operador_idoperador' => ['required', 'integer', 'exists:operador,idoperador'],
-            'estado' => ['required', 'string', 'in:0,1'],
+            'estado' => ['required', 'string', 'in:0,1,2,3'],
         ]);
 
         $newId = $validated['idsimCard'];
@@ -1085,10 +1348,22 @@ class LineasChipsController extends Controller
                     ->update(['simCard_idsimCard' => $newId]);
 
                 if ($validated['estado'] === '0') {
+                    $pairedNumeros = DB::table('detallesimcard')
+                        ->where('simCard_idsimCard', $newId)
+                        ->where('estado', '0')
+                        ->pluck('numeroTelefonico_numeroTelefonico');
+
                     DB::table('detallesimcard')
                         ->where('simCard_idsimCard', $newId)
                         ->where('estado', '0')
                         ->update(['estado' => '1']);
+
+                    if ($pairedNumeros->isNotEmpty()) {
+                        DB::table('numerotelefonico')
+                            ->whereIn('numeroTelefonico', $pairedNumeros)
+                            ->where('estado', '!=', '0')
+                            ->update(['estado' => '1']);
+                    }
                 }
 
                 DB::table('simcard')
@@ -1104,10 +1379,22 @@ class LineasChipsController extends Controller
             ]);
 
             if ($validated['estado'] === '0') {
+                $pairedNumeros = DB::table('detallesimcard')
+                    ->where('simCard_idsimCard', $id)
+                    ->where('estado', '0')
+                    ->pluck('numeroTelefonico_numeroTelefonico');
+
                 DB::table('detallesimcard')
                     ->where('simCard_idsimCard', $id)
                     ->where('estado', '0')
                     ->update(['estado' => '1']);
+
+                if ($pairedNumeros->isNotEmpty()) {
+                    DB::table('numerotelefonico')
+                        ->whereIn('numeroTelefonico', $pairedNumeros)
+                        ->where('estado', '!=', '0')
+                        ->update(['estado' => '1']);
+                }
             }
         });
 
@@ -1195,13 +1482,28 @@ class LineasChipsController extends Controller
             $baseQuery->whereIn('s.idsimCard', $selectedIds);
         } else {
             $estadoFilter = trim((string) $request->input('estado', ''));
-            if ($estadoFilter !== '' && in_array($estadoFilter, ['0', '1'], true)) {
+            if ($estadoFilter !== '' && in_array($estadoFilter, ['0', '1', '2', '3'], true)) {
                 $baseQuery->where('s.estado', $estadoFilter);
             }
 
             $operadorFilter = trim((string) $request->input('operador', ''));
             if ($operadorFilter !== '') {
                 $baseQuery->where('s.operador_idoperador', $operadorFilter);
+            }
+
+            $idsimCardFilter = trim((string) $request->input('idsimCard', ''));
+            if ($idsimCardFilter !== '') {
+                $baseQuery->where('s.idsimCard', 'like', '%' . $idsimCardFilter . '%');
+            }
+
+            $numeroFilter = trim((string) $request->input('numero', ''));
+            if ($numeroFilter !== '') {
+                $baseQuery->whereExists(function ($query) use ($numeroFilter) {
+                    $query->select(DB::raw('1'))
+                        ->from('detallesimcard as d')
+                        ->whereColumn('d.simCard_idsimCard', 's.idsimCard')
+                        ->where('d.numeroTelefonico_numeroTelefonico', 'like', '%' . $numeroFilter . '%');
+                });
             }
 
             $search = trim((string) $request->input('q', ''));
@@ -1211,30 +1513,15 @@ class LineasChipsController extends Controller
                     $query
                         ->where('s.idsimCard', 'like', $term)
                         ->orWhere('o.nombre', 'like', $term)
-                        ->orWhere('s.estado', 'like', $term);
+                        ->orWhere('s.estado', 'like', $term)
+                        ->orWhereExists(function ($query) use ($term) {
+                            $query->select(DB::raw('1'))
+                                ->from('detallesimcard as d')
+                                ->whereColumn('d.simCard_idsimCard', 's.idsimCard')
+                                ->where('d.numeroTelefonico_numeroTelefonico', 'like', $term);
+                        });
                 });
             }
-        }
-
-        $estadoFilter = trim((string) $request->input('estado', ''));
-        if ($estadoFilter !== '' && in_array($estadoFilter, ['0', '1'], true)) {
-            $baseQuery->where('s.estado', $estadoFilter);
-        }
-
-        $operadorFilter = trim((string) $request->input('operador', ''));
-        if ($operadorFilter !== '') {
-            $baseQuery->where('s.operador_idoperador', $operadorFilter);
-        }
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('s.idsimCard', 'like', $term)
-                    ->orWhere('o.nombre', 'like', $term)
-                    ->orWhere('s.estado', 'like', $term);
-            });
         }
 
         $rows = $baseQuery
@@ -1304,6 +1591,11 @@ class LineasChipsController extends Controller
             $baseQuery->whereDate('d.fechaAsignacion', $fechaAsignacionFilter);
         }
 
+        $estadoFilter = trim((string) $request->input('estado', ''));
+        if ($estadoFilter !== '' && in_array($estadoFilter, ['0', '1'], true)) {
+            $baseQuery->where('d.estado', $estadoFilter);
+        }
+
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
             $term = '%' . $search . '%';
@@ -1321,9 +1613,10 @@ class LineasChipsController extends Controller
                 'd.simCard_idsimCard',
                 'd.numeroTelefonico_numeroTelefonico',
                 'd.fechaAsignacion',
-                'd.estado'
+                'd.estado',
+                DB::raw('(SELECT o.nombre FROM operador as o JOIN simcard as s2 ON s2.operador_idoperador = o.idoperador WHERE s2.idsimCard = d.simCard_idsimCard LIMIT 1) as operador_nombre')
             )
-            ->where('d.estado', '0')
+            ->when($estadoFilter === '', fn($query) => $query->where('d.estado', '0'))
             ->orderByRaw("CASE WHEN d.estado = '0' THEN 0 ELSE 1 END")
             ->orderByDesc('d.fechaAsignacion')
             ->paginate($this->resolvePerPage($request))
@@ -1354,7 +1647,14 @@ class LineasChipsController extends Controller
                             }
                         }
                     })
-                    ->select('d.iddetalleSimCard', 'd.simCard_idsimCard', 'd.numeroTelefonico_numeroTelefonico', 'd.fechaAsignacion', 'd.estado');
+                    ->select(
+                        'd.iddetalleSimCard',
+                        'd.simCard_idsimCard',
+                        'd.numeroTelefonico_numeroTelefonico',
+                        'd.fechaAsignacion',
+                        'd.estado',
+                        DB::raw('(SELECT o.nombre FROM operador as o JOIN simcard as s2 ON s2.operador_idoperador = o.idoperador WHERE s2.idsimCard = d.simCard_idsimCard LIMIT 1) as operador_nombre')
+                    );
 
                 if (!empty($seenIds)) {
                     $query->whereNotIn('d.iddetalleSimCard', $seenIds);
@@ -1414,6 +1714,7 @@ class LineasChipsController extends Controller
             'columns' => [
                 ['key' => 'simCard_idsimCard', 'label' => 'SimCard', 'type' => 'text'],
                 ['key' => 'numeroTelefonico_numeroTelefonico', 'label' => 'Número telefónico', 'type' => 'text'],
+                ['key' => 'operador_nombre', 'label' => 'Operador', 'type' => 'text'],
                 ['key' => 'fechaAsignacion', 'label' => 'Fecha de asignación', 'type' => 'text'],
                 ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
             ],
@@ -1428,6 +1729,7 @@ class LineasChipsController extends Controller
             ],
             'historyColumns' => [
                 ['key' => 'simCard_idsimCard', 'label' => 'SimCard', 'type' => 'text'],
+                ['key' => 'operador_nombre', 'label' => 'Operador', 'type' => 'text'],
                 ['key' => 'numeroTelefonico_numeroTelefonico', 'label' => 'Número telefónico', 'type' => 'text'],
                 ['key' => 'fechaAsignacion', 'label' => 'Fecha de asignación', 'type' => 'text'],
                 ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
@@ -1450,6 +1752,16 @@ class LineasChipsController extends Controller
                     'label' => 'Fecha de asignación',
                     'type' => 'date',
                 ],
+                [
+                    'name' => 'estado',
+                    'label' => 'Estado',
+                    'type' => 'select',
+                    'options' => [
+                        ['value' => '0', 'label' => 'Activo'],
+                        ['value' => '1', 'label' => 'Inactivo'],
+                    ],
+                    'placeholder' => 'Todos',
+                ],
             ],
             'createRoute' => route('modules.lineas-chips.detallesimcard.create'),
             'editRoute' => '',
@@ -1462,13 +1774,13 @@ class LineasChipsController extends Controller
                 ->where('estado', '1')
                 ->select('numeroTelefonico', DB::raw('1 as isActive'))
                 ->get()
-                ->map(fn ($row) => [
+                ->map(fn($row) => [
                     'numero' => $row->numeroTelefonico,
                     'isActive' => $row->isActive,
                 ])
                 ->values()
                 ->toArray(),
-            'detallesimcardImportPreview' => session()->pull('detallesimcard_import_preview'),
+            'detallesimcardImportPreview' => null,
             'identifierKey' => 'iddetalleSimCard',
             'lockResource' => 'lineas_chips.detallesimcard',
         ]);
@@ -1492,7 +1804,7 @@ class LineasChipsController extends Controller
                     'options' => $this->simCardOptions(),
                     'placeholder' => 'Selecciona una SimCard',
                     'tomSelect' => true,
-                    'helpText' => 'Se muestran todas las SimCards. El registro anterior se inactivará automáticamente cuando se cree una nueva asignación.',
+                    'helpText' => 'Puede seleccionar una SimCard libre o una disponible que tenga una asignación vigente para reasignarla.',
                 ],
                 [
                     'name' => 'numeroTelefonico_numeroTelefonico',
@@ -1502,7 +1814,7 @@ class LineasChipsController extends Controller
                     'options' => $this->numeroTelefonicoOptions(),
                     'placeholder' => 'Selecciona un número telefónico',
                     'tomSelect' => true,
-                    'helpText' => 'Se muestran todos los números telefónicos. Solo se pueden seleccionar números activos.',
+                    'helpText' => 'Puede seleccionar un número libre o uno disponible para reasignar su SimCard. No se muestran números ligados a dispositivos activos.',
                 ],
                 [
                     'name' => 'fechaAsignacion',
@@ -1524,16 +1836,25 @@ class LineasChipsController extends Controller
             'fechaAsignacion' => ['nullable', 'date'],
         ]);
 
-        $this->assertDetalleSimCardPairIsUnique(
-            $validated['simCard_idsimCard'],
-            $validated['numeroTelefonico_numeroTelefonico']
-        );
-
         $validated['fechaAsignacion'] = self::normalizeFechaAsignacionForStorage($validated['fechaAsignacion'] ?? null)
             ?? Carbon::now()->format('Y-m-d H:i:s');
         $validated['estado'] = '0';
 
         $newId = DB::transaction(function () use ($validated): string {
+            DB::table('simcard')
+                ->where('idsimCard', $validated['simCard_idsimCard'])
+                ->lockForUpdate()
+                ->first();
+            DB::table('numerotelefonico')
+                ->where('numeroTelefonico', $validated['numeroTelefonico_numeroTelefonico'])
+                ->lockForUpdate()
+                ->first();
+
+            $this->assertDetalleSimCardPairIsUnique(
+                $validated['simCard_idsimCard'],
+                $validated['numeroTelefonico_numeroTelefonico']
+            );
+
             $previousAssignmentForNumber = DB::table('detallesimcard')
                 ->where('numeroTelefonico_numeroTelefonico', $validated['numeroTelefonico_numeroTelefonico'])
                 ->where('estado', '0')
@@ -1556,7 +1877,8 @@ class LineasChipsController extends Controller
 
                 DB::table('simcard')
                     ->where('idsimCard', (string) $previousAssignmentForNumber->simCard_idsimCard)
-                    ->update(['estado' => '0']);
+                    ->where('estado', '!=', '0')
+                    ->update(['estado' => '1']);
             }
 
             if ($previousAssignmentForSimCard) {
@@ -1566,16 +1888,17 @@ class LineasChipsController extends Controller
 
                 DB::table('numerotelefonico')
                     ->where('numeroTelefonico', (string) $previousAssignmentForSimCard->numeroTelefonico_numeroTelefonico)
-                    ->update(['estado' => '0']);
+                    ->where('estado', '!=', '0')
+                    ->update(['estado' => '1']);
             }
 
             DB::table('simcard')
                 ->where('idsimCard', $validated['simCard_idsimCard'])
-                ->update(['estado' => '1']);
+                ->update(['estado' => '2']);
 
             DB::table('numerotelefonico')
                 ->where('numeroTelefonico', $validated['numeroTelefonico_numeroTelefonico'])
-                ->update(['estado' => '1']);
+                ->update(['estado' => '2']);
 
             return $id;
         });
@@ -1640,6 +1963,16 @@ class LineasChipsController extends Controller
                 DB::table('simcard')
                     ->where('idsimCard', (string) $detalle->simCard_idsimCard)
                     ->delete();
+            } else {
+                DB::table('numerotelefonico')
+                    ->where('numeroTelefonico', (string) $detalle->numeroTelefonico_numeroTelefonico)
+                    ->where('estado', '!=', '0')
+                    ->update(['estado' => '1']);
+
+                DB::table('simcard')
+                    ->where('idsimCard', (string) $detalle->simCard_idsimCard)
+                    ->where('estado', '!=', '0')
+                    ->update(['estado' => '1']);
             }
 
             $this->publishResourceEvent('lineas_chips.detallesimcard', (string) $id, 'deleted');
@@ -1666,31 +1999,6 @@ class LineasChipsController extends Controller
 
         $selectedIds = (array) $request->input('selectedIds', []);
 
-        $simCardFilter = trim((string) $request->input('simcard', ''));
-        if ($simCardFilter !== '') {
-            $baseQuery->where('d.simCard_idsimCard', 'like', '%' . $simCardFilter . '%');
-        }
-
-        $numeroTelefonicoFilter = trim((string) $request->input('numeroTelefonico', ''));
-        if ($numeroTelefonicoFilter !== '') {
-            $baseQuery->where('d.numeroTelefonico_numeroTelefonico', 'like', '%' . $numeroTelefonicoFilter . '%');
-        }
-
-        $fechaAsignacionFilter = self::normalizeFechaAsignacionForInput($request->input('fechaAsignacion'));
-        if ($fechaAsignacionFilter !== null) {
-            $baseQuery->whereDate('d.fechaAsignacion', $fechaAsignacionFilter);
-        }
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('d.iddetalleSimCard', 'like', $term)
-                    ->orWhere('d.simCard_idsimCard', 'like', $term)
-                    ->orWhere('d.numeroTelefonico_numeroTelefonico', 'like', $term);
-            });
-        }
         if (!empty($selectedIds)) {
             $baseQuery->whereIn('d.iddetalleSimCard', $selectedIds);
         } else {
@@ -1709,6 +2017,11 @@ class LineasChipsController extends Controller
                 $baseQuery->whereDate('d.fechaAsignacion', $fechaAsignacionFilter);
             }
 
+            $estadoFilter = trim((string) $request->input('estado', ''));
+            if ($estadoFilter !== '' && in_array($estadoFilter, ['0', '1'], true)) {
+                $baseQuery->where('d.estado', $estadoFilter);
+            }
+
             $search = trim((string) $request->input('q', ''));
             if ($search !== '') {
                 $term = '%' . $search . '%';
@@ -1722,13 +2035,21 @@ class LineasChipsController extends Controller
         }
 
         $rows = $baseQuery
-            ->select('d.iddetalleSimCard', 'd.simCard_idsimCard', 'd.numeroTelefonico_numeroTelefonico', 'd.fechaAsignacion')
+            ->select(
+                'd.iddetalleSimCard',
+                'd.simCard_idsimCard',
+                'd.numeroTelefonico_numeroTelefonico',
+                'd.fechaAsignacion',
+                'd.estado',
+                DB::raw('(SELECT o.nombre FROM operador as o JOIN simcard as s2 ON s2.operador_idoperador = o.idoperador WHERE s2.idsimCard = d.simCard_idsimCard LIMIT 1) as operador_nombre')
+            )
             ->orderByRaw("CASE WHEN d.estado = '0' THEN 0 ELSE 1 END")
             ->orderBy('d.iddetalleSimCard')
             ->get();
 
         $rows->transform(function ($item) {
             $item->fechaAsignacion = self::normalizeFechaAsignacionForInput($item->fechaAsignacion) ?? '';
+            $item->estado = self::normalizeDetalleSimCardEstadoLabel($item->estado);
             return $item;
         });
 
@@ -1736,7 +2057,9 @@ class LineasChipsController extends Controller
             ['key' => 'iddetalleSimCard', 'label' => 'ID'],
             ['key' => 'simCard_idsimCard', 'label' => 'SimCard'],
             ['key' => 'numeroTelefonico_numeroTelefonico', 'label' => 'Número telefónico'],
+            ['key' => 'operador_nombre', 'label' => 'Operador'],
             ['key' => 'fechaAsignacion', 'label' => 'Fecha de asignación'],
+            ['key' => 'estado', 'label' => 'Estado'],
         ];
 
         $filename = 'detallesimcard_export_' . now()->format('Ymd_His') . '.' . $format;
@@ -1808,7 +2131,7 @@ class LineasChipsController extends Controller
         $latestActivePerDevice = DB::table('detnumerosdispositivo as d2')
             ->leftJoin('numerotelefonico as n2', 'n2.numeroTelefonico', '=', 'd2.numeroTelefonico_numeroTelefonico')
             ->select('d2.dispositivoCliente_iddispositivoCliente', DB::raw('MAX(d2.fechaAsignacion) as max_fecha'))
-            ->where('n2.estado', '1')
+            ->where('n2.estado', '!=', '0')
             ->groupBy('d2.dispositivoCliente_iddispositivoCliente');
 
         $items = $itemsQuery
@@ -1816,14 +2139,19 @@ class LineasChipsController extends Controller
                 $join->on('latest.dispositivoCliente_iddispositivoCliente', '=', 'd.dispositivoCliente_iddispositivoCliente');
                 $join->on('latest.max_fecha', '=', 'd.fechaAsignacion');
             })
-            ->where('n.estado', '1')
+            ->where('n.estado', '!=', '0')
             ->select(
                 'd.iddetNumerosDispositivo',
                 'd.dispositivoCliente_iddispositivoCliente',
+                'dc.marcaDispositivo',
+                'dc.modeloDispositivo',
                 'dc.vehiculo_placa',
+                DB::raw("(SELECT ds2.simCard_idsimCard FROM detallesimcard as ds2 WHERE ds2.numeroTelefonico_numeroTelefonico = d.numeroTelefonico_numeroTelefonico AND ds2.estado = '0' ORDER BY ds2.iddetalleSimCard DESC LIMIT 1) as simcard_id"),
+                DB::raw("(SELECT o.nombre FROM detallesimcard as ds3 LEFT JOIN simcard as s3 ON s3.idsimCard = ds3.simCard_idsimCard LEFT JOIN operador as o ON o.idoperador = s3.operador_idoperador WHERE ds3.numeroTelefonico_numeroTelefonico = d.numeroTelefonico_numeroTelefonico AND ds3.estado = '0' ORDER BY ds3.iddetalleSimCard DESC LIMIT 1) as operador_nombre"),
                 'd.numeroTelefonico_numeroTelefonico',
                 'd.fechaAsignacion',
-                DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as nombre_cliente'),'n.estado',
+                DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as nombre_cliente'),
+                'n.estado',
             )
             ->orderBy('d.iddetNumerosDispositivo', 'desc')
             ->paginate($this->resolvePerPage($request))
@@ -1847,7 +2175,11 @@ class LineasChipsController extends Controller
                 ->select(
                     'd.iddetNumerosDispositivo',
                     'd.dispositivoCliente_iddispositivoCliente',
+                    'dc.marcaDispositivo',
+                    'dc.modeloDispositivo',
                     'dc.vehiculo_placa',
+                    DB::raw("(SELECT ds2.simCard_idsimCard FROM detallesimcard as ds2 WHERE ds2.numeroTelefonico_numeroTelefonico = d.numeroTelefonico_numeroTelefonico AND ds2.estado = '0' ORDER BY ds2.iddetalleSimCard DESC LIMIT 1) as simcard_id"),
+                    DB::raw("(SELECT o.nombre FROM detallesimcard as ds3 LEFT JOIN simcard as s3 ON s3.idsimCard = ds3.simCard_idsimCard LEFT JOIN operador as o ON o.idoperador = s3.operador_idoperador WHERE ds3.numeroTelefonico_numeroTelefonico = d.numeroTelefonico_numeroTelefonico AND ds3.estado = '0' ORDER BY ds3.iddetalleSimCard DESC LIMIT 1) as operador_nombre"),
                     'd.numeroTelefonico_numeroTelefonico',
                     'd.fechaAsignacion',
                 )
@@ -1883,10 +2215,14 @@ class LineasChipsController extends Controller
             'items' => $items,
             'columns' => [
                 ['key' => 'dispositivoCliente_iddispositivoCliente', 'label' => 'Dispositivo', 'type' => 'text'],
+                ['key' => 'marcaDispositivo', 'label' => 'Marca', 'type' => 'text'],
+                ['key' => 'modeloDispositivo', 'label' => 'Modelo', 'type' => 'text'],
                 ['key' => 'vehiculo_placa', 'label' => 'Vehículo', 'type' => 'text'],
                 ['key' => 'numeroTelefonico_numeroTelefonico', 'label' => 'Número telefónico', 'type' => 'text'],
+                ['key' => 'simcard_id', 'label' => 'SimCard', 'type' => 'text'],
+                ['key' => 'operador_nombre', 'label' => 'Operador', 'type' => 'text'],
                 ['key' => 'nombre_cliente', 'label' => 'Cliente'],
-                ['key' => 'fechaAsignacion', 'label' => 'Fecha de asignación', 'type' => 'text'],
+                ['key' => 'fechaAsignacion', 'label' => 'Fecha de inicio', 'type' => 'text'],
             ],
             'exportRoutes' => [
                 'pdf' => route('modules.lineas-chips.numeros-dispositivo.export', ['format' => 'pdf']),
@@ -1894,15 +2230,20 @@ class LineasChipsController extends Controller
             ],
             'stats' => [
                 ['label' => 'Total de números de dispositivo', 'value' => (clone $baseQuery)->distinct('d.dispositivoCliente_iddispositivoCliente')->count('d.dispositivoCliente_iddispositivoCliente')],
-                ['label' => 'Dispositivos activos', 'value' => (clone $baseQuery)->where('n.estado', '1')->distinct('d.dispositivoCliente_iddispositivoCliente')->count('d.dispositivoCliente_iddispositivoCliente')],
-                ['label' => 'Números activos', 'value' => (clone $baseQuery)->where('n.estado', '1')->count()],
+                ['label' => 'Dispositivos activos', 'value' => (clone $baseQuery)->where('n.estado', '!=', '0')->distinct('d.dispositivoCliente_iddispositivoCliente')->count('d.dispositivoCliente_iddispositivoCliente')],
+                ['label' => 'Números activos', 'value' => (clone $baseQuery)->where('n.estado', '!=', '0')->count()],
             ],
             'historyColumns' => [
                 ['key' => 'dispositivoCliente_iddispositivoCliente', 'label' => 'Dispositivo', 'type' => 'text'],
+                ['key' => 'marcaDispositivo', 'label' => 'Marca', 'type' => 'text'],
+                ['key' => 'modeloDispositivo', 'label' => 'Modelo', 'type' => 'text'],
                 ['key' => 'vehiculo_placa', 'label' => 'Placa', 'type' => 'text'],
                 ['key' => 'numeroTelefonico_numeroTelefonico', 'label' => 'Número telefónico', 'type' => 'text'],
+                ['key' => 'simcard_id', 'label' => 'SimCard', 'type' => 'text'],
+                ['key' => 'operador_nombre', 'label' => 'Operador', 'type' => 'text'],
                 ['key' => 'fechaAsignacion', 'label' => 'Fecha de asignación', 'type' => 'text'],
             ],
+            'tableWrapperClass' => 'erp-numeros-dispositivo-table',
             'filters' => [
                 [
                     'name' => 'dispositivo',
@@ -2024,6 +2365,12 @@ class LineasChipsController extends Controller
                 ->with('error', 'No se encontró el número de dispositivo solicitado.');
         }
 
+        if ($this->numeroDispositivoTieneRelaciones($id)) {
+            return redirect()
+                ->route('modules.lineas-chips.numeros-dispositivo.index')
+                ->with('error', 'No se puede eliminar este número de dispositivo porque tiene relaciones o historial.');
+        }
+
         $relationCount = DB::table('detnumerosdispositivo')
             ->where('dispositivoCliente_iddispositivoCliente', $registro->dispositivoCliente_iddispositivoCliente)
             ->count();
@@ -2056,7 +2403,7 @@ class LineasChipsController extends Controller
             $selectedIds = [];
         }
 
-        $selectedIds = array_filter(array_map('intval', $selectedIds), fn ($id) => $id > 0);
+        $selectedIds = array_filter(array_map('intval', $selectedIds), fn($id) => $id > 0);
         if (empty($selectedIds)) {
             return redirect()
                 ->route('modules.lineas-chips.numeros-dispositivo.index')
@@ -2073,6 +2420,12 @@ class LineasChipsController extends Controller
                 return redirect()
                     ->route('modules.lineas-chips.numeros-dispositivo.index')
                     ->with('error', 'No se encontró el número de dispositivo seleccionado.');
+            }
+
+            if ($this->numeroDispositivoTieneRelaciones($id)) {
+                return redirect()
+                    ->route('modules.lineas-chips.numeros-dispositivo.index')
+                    ->with('error', 'No se puede eliminar el número de dispositivo ' . $id . ' porque tiene relaciones o historial.');
             }
 
             $relationCount = DB::table('detnumerosdispositivo')
@@ -2141,6 +2494,16 @@ class LineasChipsController extends Controller
                 });
             }
 
+            $vehiculoFilter = trim((string) $request->input('vehiculo', ''));
+            if ($vehiculoFilter !== '') {
+                $baseQuery->where('dc.vehiculo_placa', 'like', '%' . $vehiculoFilter . '%');
+            }
+
+            $clienteFilter = trim((string) $request->input('cliente', ''));
+            if ($clienteFilter !== '') {
+                $baseQuery->where('c.nombreComercial', 'like', '%' . $clienteFilter . '%');
+            }
+
             $numeroTelefonicoFilter = trim((string) $request->input('numeroTelefonico', ''));
             if ($numeroTelefonicoFilter !== '') {
                 $baseQuery->where('d.numeroTelefonico_numeroTelefonico', 'like', '%' . $numeroTelefonicoFilter . '%');
@@ -2159,47 +2522,12 @@ class LineasChipsController extends Controller
                         ->where('d.iddetNumerosDispositivo', 'like', $term)
                         ->orWhere('d.dispositivoCliente_iddispositivoCliente', 'like', $term)
                         ->orWhere('dc.vehiculo_placa', 'like', $term)
+                        ->orWhere('c.nombreComercial', 'like', $term)
                         ->orWhere('d.numeroTelefonico_numeroTelefonico', 'like', $term)
                         ->orWhere('dc.marcaDispositivo', 'like', $term)
                         ->orWhere('dc.modeloDispositivo', 'like', $term);
                 });
             }
-        }
-
-        $dispositivoFilter = trim((string) $request->input('dispositivo', ''));
-        if ($dispositivoFilter !== '') {
-            $baseQuery->where(function ($query) use ($dispositivoFilter) {
-                $term = '%' . $dispositivoFilter . '%';
-                $query
-                    ->where('d.dispositivoCliente_iddispositivoCliente', 'like', $term)
-                    ->orWhere('dc.vehiculo_placa', 'like', $term)
-                    ->orWhere('dc.marcaDispositivo', 'like', $term)
-                    ->orWhere('dc.modeloDispositivo', 'like', $term);
-            });
-        }
-
-        $numeroTelefonicoFilter = trim((string) $request->input('numeroTelefonico', ''));
-        if ($numeroTelefonicoFilter !== '') {
-            $baseQuery->where('d.numeroTelefonico_numeroTelefonico', 'like', '%' . $numeroTelefonicoFilter . '%');
-        }
-
-        $fechaAsignacionFilter = self::normalizeFechaAsignacionForInput($request->input('fechaAsignacion'));
-        if ($fechaAsignacionFilter !== null) {
-            $baseQuery->whereDate('d.fechaAsignacion', $fechaAsignacionFilter);
-        }
-
-        $search = trim((string) $request->input('q', ''));
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $baseQuery->where(function ($query) use ($term) {
-                $query
-                    ->where('d.iddetNumerosDispositivo', 'like', $term)
-                    ->orWhere('d.dispositivoCliente_iddispositivoCliente', 'like', $term)
-                    ->orWhere('dc.vehiculo_placa', 'like', $term)
-                    ->orWhere('d.numeroTelefonico_numeroTelefonico', 'like', $term)
-                    ->orWhere('dc.marcaDispositivo', 'like', $term)
-                    ->orWhere('dc.modeloDispositivo', 'like', $term);
-            });
         }
 
         $rows = $baseQuery
@@ -2209,7 +2537,8 @@ class LineasChipsController extends Controller
                 'dc.vehiculo_placa',
                 'd.numeroTelefonico_numeroTelefonico',
                 'd.fechaAsignacion',
-                DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as nombre_cliente'),'n.estado',
+                DB::raw('COALESCE(c.nombreComercial, c.razonSocial, c.idcliente) as nombre_cliente'),
+                'n.estado',
             )
             ->orderBy('d.iddetNumerosDispositivo')
             ->get();
@@ -2248,7 +2577,7 @@ class LineasChipsController extends Controller
         if ($manualNumbers !== '') {
             $manual = array_filter(
                 array_map('trim', explode(',', $manualNumbers)),
-                fn ($n) => $n !== ''
+                fn($n) => $n !== ''
             );
             $selectedNumbers = array_unique(array_merge($selectedNumbers, $manual));
         }
@@ -2346,7 +2675,7 @@ class LineasChipsController extends Controller
                 $rows = $sheet->toArray(null, true, true, true);
                 foreach ($rows as $row) {
                     $columns = array_map('trim', array_values($row));
-                    if (count(array_filter($columns, fn ($value) => $value !== '')) === 0) {
+                    if (count(array_filter($columns, fn($value) => $value !== '')) === 0) {
                         $records[] = [''];
                         continue;
                     }
@@ -2528,7 +2857,7 @@ class LineasChipsController extends Controller
                 $rows = $sheet->toArray(null, true, true, true);
                 foreach ($rows as $row) {
                     $columns = array_map('trim', array_values($row));
-                    if (count(array_filter($columns, fn ($value) => $value !== '')) === 0) {
+                    if (count(array_filter($columns, fn($value) => $value !== '')) === 0) {
                         continue;
                     }
                     $records[] = $columns;
@@ -2543,12 +2872,21 @@ class LineasChipsController extends Controller
             ];
 
             if (!empty($records)) {
-                $firstRow = array_map(fn ($value) => mb_strtolower(trim((string) $value)), $records[0]);
-                if (in_array('simcard', $firstRow, true) || in_array('operador', $firstRow, true) || in_array('numero', $firstRow, true) || in_array('número', $firstRow, true)) {
+                $firstRow = array_map(fn($value) => mb_strtolower(trim((string) $value)), $records[0]);
+                $isHeaderRow = false;
+                $headerKeywords = ['simcard', 'simcards', 'sim card', 'operador', 'operadores', 'operator', 'numero', 'número', 'numeros', 'números', 'telefono', 'teléfono', 'telefonos', 'teléfonos'];
+                foreach ($firstRow as $header) {
+                    if (in_array($header, $headerKeywords, true)) {
+                        $isHeaderRow = true;
+                        break;
+                    }
+                }
+
+                if ($isHeaderRow) {
                     $headerMap = array_flip($firstRow);
-                    $columnIndexes['simcard'] = $headerMap['simcard'] ?? $columnIndexes['simcard'];
-                    $columnIndexes['numero'] = $headerMap['numero'] ?? $headerMap['número'] ?? $columnIndexes['numero'];
-                    $columnIndexes['operador'] = $headerMap['operador'] ?? $columnIndexes['operador'];
+                    $columnIndexes['simcard'] = $headerMap['simcard'] ?? $headerMap['simcards'] ?? $headerMap['sim card'] ?? $columnIndexes['simcard'];
+                    $columnIndexes['numero'] = $headerMap['numero'] ?? $headerMap['número'] ?? $headerMap['numeros'] ?? $headerMap['números'] ?? $headerMap['telefono'] ?? $headerMap['teléfono'] ?? $columnIndexes['numero'];
+                    $columnIndexes['operador'] = $headerMap['operador'] ?? $headerMap['operadores'] ?? $headerMap['operator'] ?? $columnIndexes['operador'];
                     array_shift($records);
                 }
             }
@@ -2628,7 +2966,7 @@ class LineasChipsController extends Controller
                 $operatorName = trim((string) ($parts[$columnIndexes['operador']] ?? ''));
                 $numero = trim((string) ($parts[$columnIndexes['numero']] ?? ''));
                 $extraValues = array_slice($parts, max($columnIndexes['numero'], $columnIndexes['operador'], $columnIndexes['simcard']) + 1);
-                $hasExtraData = count(array_filter($extraValues, fn ($value) => $value !== '')) > 0;
+                $hasExtraData = count(array_filter($extraValues, fn($value) => $value !== '')) > 0;
 
                 if ($simcard === '' || $numero === '') {
                     $emptyCount++;
@@ -2742,7 +3080,7 @@ class LineasChipsController extends Controller
                 'token' => $token,
             ];
 
-            session(['detallesimcard_import_preview' => $preview]);
+            $this->storeImportPreview('detallesimcard', $preview);
 
             if ($request->expectsJson()) {
                 return response()->json([
@@ -2794,7 +3132,7 @@ class LineasChipsController extends Controller
     public function detallesimcardImportProcess(Request $request): RedirectResponse
     {
         $importToken = trim((string) $request->input('importToken', ''));
-        $preview = session('detallesimcard_import_preview');
+        $preview = $this->loadImportPreview('detallesimcard', $importToken);
 
         if (empty($preview) || ($preview['token'] ?? '') !== $importToken) {
             return redirect()
@@ -2806,6 +3144,9 @@ class LineasChipsController extends Controller
             $processedCount = 0;
             DB::transaction(function () use ($preview, &$processedCount) {
                 $defaultOperatorId = $this->getDefaultOperatorId();
+                $simcardRows = [];
+                $numeroRows = [];
+                $detalleRows = [];
 
                 foreach ($preview['allRows'] ?? [] as $row) {
                     if (empty($row['importable'])) {
@@ -2819,40 +3160,41 @@ class LineasChipsController extends Controller
                         continue;
                     }
 
-                    $pairExists = DB::table('detallesimcard')
-                        ->where('simCard_idsimCard', $simcard)
-                        ->where('numeroTelefonico_numeroTelefonico', $numero)
-                        ->exists();
-                    $simExists = DB::table('simcard')->where('idsimCard', $simcard)->exists();
-                    $numExists = DB::table('numerotelefonico')->where('numeroTelefonico', $numero)->exists();
-
-                    if ($pairExists || $simExists || $numExists || $operatorId === 0) {
+                    if ($operatorId === 0) {
                         continue;
                     }
 
-                    DB::table('simcard')->insert([
+                    $simcardRows[] = [
                         'idsimCard' => $simcard,
                         'estado' => '1',
                         'operador_idoperador' => $operatorId,
-                    ]);
-
-                    DB::table('numerotelefonico')->insert([
+                    ];
+                    $numeroRows[] = [
                         'numeroTelefonico' => $numero,
                         'estado' => '1',
-                    ]);
-
-                    DB::table('detallesimcard')->insert([
+                    ];
+                    $detalleRows[] = [
                         'simCard_idsimCard' => $simcard,
                         'numeroTelefonico_numeroTelefonico' => $numero,
                         'fechaAsignacion' => Carbon::now()->format('Y-m-d H:i:s'),
                         'estado' => '0',
-                    ]);
-
-                    $processedCount++;
+                    ];
                 }
+
+                foreach (array_chunk($simcardRows, 500) as $chunk) {
+                    DB::table('simcard')->insertOrIgnore($chunk);
+                }
+                foreach (array_chunk($numeroRows, 500) as $chunk) {
+                    DB::table('numerotelefonico')->insertOrIgnore($chunk);
+                }
+                foreach (array_chunk($detalleRows, 500) as $chunk) {
+                    DB::table('detallesimcard')->insertOrIgnore($chunk);
+                }
+
+                $processedCount = count($detalleRows);
             });
 
-            session()->forget('detallesimcard_import_preview');
+            $this->forgetImportPreview('detallesimcard', $importToken);
 
             return redirect()
                 ->route('modules.lineas-chips.detallesimcard.index')
@@ -2861,6 +3203,720 @@ class LineasChipsController extends Controller
             return redirect()
                 ->route('modules.lineas-chips.detallesimcard.index')
                 ->with('error', 'Error al importar: ' . $e->getMessage());
+        }
+    }
+
+    public function numerosTelefonicoImportPreview(Request $request): RedirectResponse|JsonResponse
+    {
+        $request->validate([
+            'importFile' => 'required|file|mimes:xlsx|max:5120',
+        ], [
+            'importFile.mimes' => 'Solo se aceptan archivos tipo xlsx.',
+        ]);
+
+        try {
+            $file = $request->file('importFile');
+            $previewRows = [];
+            $totalRows = 0;
+            $newRows = 0;
+            $emptyCount = 0;
+            $invalidCount = 0;
+            $fileDuplicates = 0;
+            $dbDuplicates = 0;
+
+            $extension = mb_strtolower(trim((string) $file->getClientOriginalExtension()));
+            $records = [];
+
+            if ($extension === 'xlsx') {
+                if (!class_exists(IOFactory::class)) {
+                    throw new \RuntimeException('La librería necesaria para procesar .xlsx no está instalada.');
+                }
+                $spreadsheet = IOFactory::load($file->getRealPath());
+                $sheet = $spreadsheet->getActiveSheet();
+                $rows = $sheet->toArray(null, true, true, true);
+                foreach ($rows as $row) {
+                    $columns = array_map('trim', array_values($row));
+                    if (count(array_filter($columns, fn($value) => $value !== '')) === 0) {
+                        continue;
+                    }
+                    $records[] = $columns;
+                }
+            }
+
+            $numeroColIndex = 0;
+            $planColIndex = 1;
+            $precioColIndex = 2;
+            if (!empty($records)) {
+                $firstRow = array_map(fn($value) => mb_strtolower(trim((string) $value)), $records[0]);
+                $isHeaderRow = false;
+                foreach ($firstRow as $idx => $header) {
+                    if (
+                        in_array($header, [
+                            'numero',
+                            'número',
+                            'numeros',
+                            'números',
+                            'telefono',
+                            'teléfono',
+                            'telefonos',
+                            'teléfonos',
+                            'numerotelefonico',
+                            'númerotelefonico',
+                            'numero telefonico',
+                            'número telefónico',
+                            'celular',
+                            'celulares',
+                            'linea',
+                            'línea',
+                            'lineas',
+                            'líneas',
+                            'movil',
+                            'móvil',
+                            'num',
+                            'n°',
+                            'no'
+                        ], true)
+                    ) {
+                        $numeroColIndex = $idx;
+                        $isHeaderRow = true;
+                    }
+                    if (in_array($header, ['plan', 'planes', 'nombre plan'], true)) {
+                        $planColIndex = $idx;
+                        $isHeaderRow = true;
+                    }
+                    if (in_array($header, ['precio', 'precios', 'valor', 'importe'], true)) {
+                        $precioColIndex = $idx;
+                        $isHeaderRow = true;
+                    }
+                }
+
+                $firstVal = $firstRow[$numeroColIndex] ?? $firstRow[0] ?? '';
+                if (!$isHeaderRow && $firstVal !== '' && (!is_numeric($firstVal) || preg_match('/[a-zA-Z]/', $firstVal))) {
+                    $isHeaderRow = true;
+                }
+
+                if ($isHeaderRow) {
+                    array_shift($records);
+                }
+            }
+
+            $numeros = [];
+            foreach ($records as $parts) {
+                $numero = trim((string) ($parts[$numeroColIndex] ?? ''));
+                if ($numero !== '') {
+                    $numeros[$numero] = true;
+                }
+            }
+
+            $numExistsSet = [];
+            if (!empty($numeros)) {
+                $numeroExists = DB::table('numerotelefonico')
+                    ->whereIn('numeroTelefonico', array_keys($numeros))
+                    ->pluck('numeroTelefonico')
+                    ->all();
+                foreach ($numeroExists as $num) {
+                    $numExistsSet[(string) $num] = true;
+                }
+            }
+
+            $seenInFile = [];
+            $lineNumber = 1;
+
+            foreach ($records as $parts) {
+                $numero = trim((string) ($parts[$numeroColIndex] ?? ''));
+                $plan = trim((string) ($parts[$planColIndex] ?? ''));
+                $precioRaw = trim((string) ($parts[$precioColIndex] ?? ''));
+
+                if ($numero === '' || $plan === '' || $precioRaw === '') {
+                    $emptyCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => 'S/',
+                        'status' => 'Fila vacía o incompleta (Numero, Plan y Precio son obligatorios)',
+                        'importable' => false,
+                        'importType' => 'numero',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                if (mb_strlen($numero) < 9 || mb_strlen($numero) > 30 || !preg_match(self::SAFE_TEXT_REGEX, $numero)) {
+                    $invalidCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => 'S/',
+                        'status' => 'Inválido (formato o longitud de número incorrecto)',
+                        'importable' => false,
+                        'importType' => 'numero',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                [$precio, $moneda] = $this->normalizeNumeroPrecio($precioRaw);
+                if ($precio === null) {
+                    $invalidCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => $moneda,
+                        'status' => 'Inválido (precio no numérico)',
+                        'importable' => false,
+                        'importType' => 'numero',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                $totalRows++;
+
+                if (isset($seenInFile[$numero])) {
+                    $fileDuplicates++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precio,
+                        'moneda' => $moneda,
+                        'status' => 'Duplicado en archivo',
+                        'importable' => false,
+                        'importType' => 'numero',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+                $seenInFile[$numero] = true;
+
+                if (isset($numExistsSet[$numero])) {
+                    $dbDuplicates++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precio,
+                        'moneda' => $moneda,
+                        'status' => 'Existe en BD',
+                        'importable' => false,
+                        'importType' => 'numero',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                $newRows++;
+                $previewRows[] = [
+                    'line' => $lineNumber,
+                    'numero' => $numero,
+                    'plan' => $plan,
+                    'precio' => $precio,
+                    'moneda' => $moneda,
+                    'status' => 'Nuevo',
+                    'importable' => true,
+                    'importType' => 'numero',
+                ];
+                $lineNumber++;
+            }
+
+            $token = hash('sha256', microtime() . random_bytes(16));
+            $processRoute = route('modules.lineas-chips.numeros-telefonico.import.process');
+
+            $preview = [
+                'importType' => 'numero',
+                'buttonLabel' => 'Cargar números',
+                'processRoute' => $processRoute,
+                'csrfToken' => csrf_token(),
+                'candidateCount' => $totalRows,
+                'newRows' => $newRows,
+                'emptyRows' => $emptyCount,
+                'invalidRows' => $invalidCount,
+                'fileDuplicateRows' => $fileDuplicates,
+                'duplicateExistingRows' => $dbDuplicates,
+                'previewRows' => array_slice($previewRows, 0, 10),
+                'allRows' => $previewRows,
+                'token' => $token,
+            ];
+
+            $this->storeImportPreview('numero', $preview);
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Archivo validado correctamente. Revise la previsualización y confirme la carga.',
+                    'preview' => $preview,
+                ]);
+            }
+
+            return redirect()
+                ->route('modules.lineas-chips.numeros-telefonico.index')
+                ->with([
+                    'importPreview' => $preview,
+                    'showImportModal' => true,
+                ]);
+        } catch (ValidationException $e) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'El archivo no es válido. Revisa el contenido y vuelve a intentarlo.',
+                    'errors' => $e->errors(),
+                ], 422);
+            }
+
+            return redirect()
+                ->route('modules.lineas-chips.numeros-telefonico.index')
+                ->withErrors($e->errors())
+                ->with('error', 'El archivo no es válido. Revisa el contenido y vuelve a intentarlo.')
+                ->with('showImportModal', true);
+        } catch (\Throwable $e) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error al procesar el archivo: ' . $e->getMessage(),
+                ], 500);
+            }
+
+            return redirect()
+                ->route('modules.lineas-chips.numeros-telefonico.index')
+                ->with('error', 'Error al procesar el archivo: ' . $e->getMessage());
+        }
+    }
+
+    public function numerosTelefonicoImportProcess(Request $request): RedirectResponse
+    {
+        $importToken = trim((string) $request->input('importToken', ''));
+        $preview = $this->loadImportPreview('numero', $importToken);
+
+        if (empty($preview) || ($preview['token'] ?? '') !== $importToken) {
+            return redirect()
+                ->route('modules.lineas-chips.numeros-telefonico.index')
+                ->with('error', 'Token de importación inválido o expirado.');
+        }
+
+        try {
+            $processedCount = 0;
+            DB::transaction(function () use ($preview, &$processedCount) {
+                $numeroRows = [];
+                $precioRows = [];
+
+                foreach ($preview['allRows'] ?? [] as $row) {
+                    if (empty($row['importable'])) {
+                        continue;
+                    }
+
+                    $numero = trim((string) ($row['numero'] ?? ''));
+                    $plan = trim((string) ($row['plan'] ?? ''));
+                    $precioRaw = trim((string) ($row['precio'] ?? ''));
+                    if ($numero === '') {
+                        continue;
+                    }
+
+                    [$precio, $moneda] = $this->resolveNumeroImportPrecio(
+                        $precioRaw,
+                        (string) ($row['moneda'] ?? '')
+                    );
+                    if ($plan === '' || $precio === null) {
+                        continue;
+                    }
+
+                    $numeroRows[] = [
+                        'numeroTelefonico' => $numero,
+                        'plan' => $plan,
+                        'estado' => '1',
+                    ];
+                    $precioRows[] = [
+                        'numeroTelefonico_numeroTelefonico' => $numero,
+                        'precio' => $precio,
+                        'moneda' => $moneda,
+                        'fecha' => Carbon::now()->format('Y-m-d H:i:s'),
+                    ];
+                }
+
+                foreach (array_chunk($numeroRows, 500) as $chunk) {
+                    DB::table('numerotelefonico')->insertOrIgnore($chunk);
+                }
+                foreach (array_chunk($precioRows, 500) as $chunk) {
+                    DB::table('detalle_precionumero')->insertOrIgnore($chunk);
+                }
+
+                $processedCount = count($numeroRows);
+            });
+
+            $this->publishResourceEvent('lineas_chips.numero_telefonico', '*', 'created');
+            $this->forgetImportPreview('numero', $importToken);
+
+            return redirect()
+                ->route('modules.lineas-chips.numeros-telefonico.index')
+                ->with('success', "Se importaron $processedCount números telefónicos correctamente.");
+        } catch (\Exception $e) {
+            return redirect()
+                ->route('modules.lineas-chips.numeros-telefonico.index')
+                ->with('error', 'Error al importar: ' . $e->getMessage());
+        }
+    }
+
+    public function simcardImportPreview(Request $request): RedirectResponse|JsonResponse
+    {
+        $request->validate([
+            'importFile' => 'required|file|mimes:xlsx|max:5120',
+        ], [
+            'importFile.mimes' => 'Solo se aceptan archivos tipo xlsx.',
+        ]);
+
+        try {
+            $file = $request->file('importFile');
+            $previewRows = [];
+            $totalRows = 0;
+            $newRows = 0;
+            $emptyCount = 0;
+            $invalidCount = 0;
+            $fileDuplicates = 0;
+            $dbDuplicates = 0;
+
+            $extension = mb_strtolower(trim((string) $file->getClientOriginalExtension()));
+            $records = [];
+
+            if ($extension === 'xlsx') {
+                if (!class_exists(IOFactory::class)) {
+                    throw new \RuntimeException('La librería necesaria para procesar .xlsx no está instalada.');
+                }
+                $spreadsheet = IOFactory::load($file->getRealPath());
+                $sheet = $spreadsheet->getActiveSheet();
+                $rows = $sheet->toArray(null, true, true, true);
+                foreach ($rows as $row) {
+                    $columns = array_map('trim', array_values($row));
+                    if (count(array_filter($columns, fn($value) => $value !== '')) === 0) {
+                        continue;
+                    }
+                    $records[] = $columns;
+                }
+            }
+
+            $columnIndexes = [
+                'simcard' => 0,
+                'operador' => 1,
+            ];
+
+            if (!empty($records)) {
+                $firstRow = array_map(fn($value) => mb_strtolower(trim((string) $value)), $records[0]);
+                $isHeaderRow = false;
+                $headerKeywords = ['simcard', 'simcards', 'idsimcard', 'sim card', 'sim', 'iccid', 'operador', 'operadores', 'operator', 'chip', 'chips'];
+                foreach ($firstRow as $header) {
+                    if (in_array($header, $headerKeywords, true)) {
+                        $isHeaderRow = true;
+                        break;
+                    }
+                }
+
+                $firstSim = $firstRow[$columnIndexes['simcard']] ?? $firstRow[0] ?? '';
+                if (!$isHeaderRow && $firstSim !== '' && (in_array($firstSim, $headerKeywords, true) || !is_numeric($firstSim))) {
+                    $isHeaderRow = true;
+                }
+
+                if ($isHeaderRow) {
+                    $headerMap = array_flip($firstRow);
+                    $columnIndexes['simcard'] = $headerMap['simcard'] ?? $headerMap['idsimcard'] ?? $headerMap['sim card'] ?? $headerMap['simcards'] ?? $columnIndexes['simcard'];
+                    $columnIndexes['operador'] = $headerMap['operador'] ?? $headerMap['operadores'] ?? $headerMap['operator'] ?? $columnIndexes['operador'];
+                    array_shift($records);
+                }
+            }
+
+            $operatorNames = [];
+            $simcards = [];
+            foreach ($records as $parts) {
+                $simcard = trim((string) ($parts[$columnIndexes['simcard']] ?? ''));
+                $operatorName = trim((string) ($parts[$columnIndexes['operador']] ?? ''));
+
+                if ($simcard !== '') {
+                    $simcards[$simcard] = true;
+                }
+                if ($operatorName !== '') {
+                    $operatorNames[mb_strtolower($operatorName)] = true;
+                }
+            }
+
+            $operatorMap = [];
+            if (!empty($operatorNames)) {
+                $lowerOperatorNames = array_keys($operatorNames);
+                $operators = DB::table('operador')
+                    ->select('idoperador', 'nombre')
+                    ->whereIn(DB::raw('LOWER(nombre)'), $lowerOperatorNames)
+                    ->get();
+
+                foreach ($operators as $operator) {
+                    $operatorMap[mb_strtolower(trim((string) $operator->nombre))] = (int) $operator->idoperador;
+                }
+            }
+
+            $simExistsSet = [];
+            if (!empty($simcards)) {
+                $simExists = DB::table('simcard')
+                    ->whereIn('idsimCard', array_keys($simcards))
+                    ->pluck('idsimCard')
+                    ->all();
+                foreach ($simExists as $simId) {
+                    $simExistsSet[(string) $simId] = true;
+                }
+            }
+
+            $defaultOperatorId = $this->getDefaultOperatorId();
+            $seenInFile = [];
+            $lineNumber = 1;
+
+            foreach ($records as $parts) {
+                $simcard = trim((string) ($parts[$columnIndexes['simcard']] ?? ''));
+                $operatorName = trim((string) ($parts[$columnIndexes['operador']] ?? ''));
+
+                if ($simcard === '') {
+                    $emptyCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'status' => 'Fila vacía o incompleta',
+                        'importable' => false,
+                        'importType' => 'simcard',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                if (mb_strlen($simcard) < 10 || mb_strlen($simcard) > 50 || !preg_match(self::SAFE_TEXT_REGEX, $simcard)) {
+                    $invalidCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'status' => 'Inválido (formato o longitud de SimCard incorrecto)',
+                        'importable' => false,
+                        'importType' => 'simcard',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                $totalRows++;
+
+                if (isset($seenInFile[$simcard])) {
+                    $fileDuplicates++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'status' => 'Duplicado en archivo',
+                        'importable' => false,
+                        'importType' => 'simcard',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+                $seenInFile[$simcard] = true;
+
+                $operatorId = null;
+                if ($operatorName !== '') {
+                    $operatorId = $operatorMap[mb_strtolower($operatorName)] ?? null;
+                }
+                if ($operatorId === null) {
+                    $operatorId = $defaultOperatorId;
+                }
+
+                if ($operatorId === null) {
+                    $invalidCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'status' => 'Inválido (sin operador en BD)',
+                        'importable' => false,
+                        'importType' => 'simcard',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                if (isset($simExistsSet[$simcard])) {
+                    $dbDuplicates++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'status' => 'Existe en BD',
+                        'importable' => false,
+                        'importType' => 'simcard',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                $newRows++;
+                $previewRows[] = [
+                    'line' => $lineNumber,
+                    'simcard' => $simcard,
+                    'operador' => $operatorName,
+                    'status' => 'Nuevo',
+                    'importable' => true,
+                    'importType' => 'simcard',
+                    'operatorId' => $operatorId,
+                ];
+                $lineNumber++;
+            }
+
+            $token = hash('sha256', microtime() . random_bytes(16));
+            $processRoute = route('modules.lineas-chips.simcard.import.process');
+
+            $preview = [
+                'importType' => 'simcard',
+                'buttonLabel' => 'Cargar SimCards',
+                'processRoute' => $processRoute,
+                'csrfToken' => csrf_token(),
+                'candidateCount' => $totalRows,
+                'newRows' => $newRows,
+                'emptyRows' => $emptyCount,
+                'invalidRows' => $invalidCount,
+                'fileDuplicateRows' => $fileDuplicates,
+                'duplicateExistingRows' => $dbDuplicates,
+                'previewRows' => array_slice($previewRows, 0, 10),
+                'allRows' => $previewRows,
+                'token' => $token,
+            ];
+
+            $this->storeImportPreview('simcard', $preview);
+
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Archivo validado correctamente. Revise la previsualización y confirme la carga.',
+                    'preview' => $preview,
+                ]);
+            }
+
+            return redirect()
+                ->route('modules.lineas-chips.simcard.index')
+                ->with([
+                    'importPreview' => $preview,
+                    'showImportModal' => true,
+                ]);
+        } catch (ValidationException $e) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'El archivo no es válido. Revisa el contenido y vuelve a intentarlo.',
+                    'errors' => $e->errors(),
+                ], 422);
+            }
+
+            return redirect()
+                ->route('modules.lineas-chips.simcard.index')
+                ->withErrors($e->errors())
+                ->with('error', 'El archivo no es válido. Revisa el contenido y vuelve a intentarlo.')
+                ->with('showImportModal', true);
+        } catch (\Throwable $e) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error al procesar el archivo: ' . $e->getMessage(),
+                ], 500);
+            }
+
+            return redirect()
+                ->route('modules.lineas-chips.simcard.index')
+                ->with('error', 'Error al procesar el archivo: ' . $e->getMessage());
+        }
+    }
+
+    public function simcardImportProcess(Request $request): RedirectResponse
+    {
+        $importToken = trim((string) $request->input('importToken', ''));
+        $preview = $this->loadImportPreview('simcard', $importToken);
+
+        if (empty($preview) || ($preview['token'] ?? '') !== $importToken) {
+            return redirect()
+                ->route('modules.lineas-chips.simcard.index')
+                ->with('error', 'Token de importación inválido o expirado.');
+        }
+
+        try {
+            $processedCount = 0;
+            DB::transaction(function () use ($preview, &$processedCount) {
+                $defaultOperatorId = $this->getDefaultOperatorId();
+                $simcardRows = [];
+
+                foreach ($preview['allRows'] ?? [] as $row) {
+                    if (empty($row['importable'])) {
+                        continue;
+                    }
+
+                    $simcard = trim((string) ($row['simcard'] ?? ''));
+                    $operatorId = isset($row['operatorId']) ? (int) $row['operatorId'] : $defaultOperatorId;
+                    if ($simcard === '' || $operatorId === 0) {
+                        continue;
+                    }
+
+                    $simcardRows[] = [
+                        'idsimCard' => $simcard,
+                        'estado' => '1',
+                        'operador_idoperador' => $operatorId,
+                    ];
+                }
+
+                foreach (array_chunk($simcardRows, 500) as $chunk) {
+                    DB::table('simcard')->insertOrIgnore($chunk);
+                }
+                $processedCount = count($simcardRows);
+            });
+
+            $this->publishResourceEvent('lineas_chips.simcard', '*', 'created');
+            $this->forgetImportPreview('simcard', $importToken);
+
+            return redirect()
+                ->route('modules.lineas-chips.simcard.index')
+                ->with('success', "Se importaron $processedCount SimCards correctamente.");
+        } catch (\Exception $e) {
+            return redirect()
+                ->route('modules.lineas-chips.simcard.index')
+                ->with('error', 'Error al importar: ' . $e->getMessage());
+        }
+    }
+
+    private function storeImportPreview(string $type, array $preview): void
+    {
+        $token = trim((string) ($preview['token'] ?? ''));
+        if (!preg_match('/^[a-f0-9]{64}$/', $token)) {
+            throw new \RuntimeException('Token de importación inválido.');
+        }
+
+        Storage::disk('local')->put(
+            "import-previews/{$type}/{$token}.json",
+            json_encode($preview, JSON_THROW_ON_ERROR)
+        );
+    }
+
+    private function loadImportPreview(string $type, string $token): ?array
+    {
+        if (!preg_match('/^[a-f0-9]{64}$/', $token)) {
+            return null;
+        }
+
+        $path = "import-previews/{$type}/{$token}.json";
+        if (!Storage::disk('local')->exists($path)) {
+            return null;
+        }
+
+        $preview = json_decode(Storage::disk('local')->get($path), true);
+
+        return is_array($preview) ? $preview : null;
+    }
+
+    private function forgetImportPreview(string $type, string $token): void
+    {
+        if (preg_match('/^[a-f0-9]{64}$/', $token)) {
+            Storage::disk('local')->delete("import-previews/{$type}/{$token}.json");
         }
     }
 
@@ -2875,7 +3931,7 @@ class LineasChipsController extends Controller
             ->get()
             ->mapWithKeys(function ($row): array {
                 $label = trim((string) ($row->nombre ?? ''));
-                $display = $label !== '' ? ( $label) : (string) $row->idoperador;
+                $display = $label !== '' ? ($label) : (string) $row->idoperador;
                 return [(string) $row->idoperador => $display];
             })
             ->all();
@@ -3028,7 +4084,7 @@ class LineasChipsController extends Controller
         $marca = trim((string) ($registro->marcaDispositivo ?? ''));
         $modelo = trim((string) ($registro->modeloDispositivo ?? ''));
 
-        $partes = array_values(array_filter([$id, $placa, $marca, $modelo], fn ($item) => $item !== ''));
+        $partes = array_values(array_filter([$id, $placa, $marca, $modelo], fn($item) => $item !== ''));
         if ($partes === []) {
             return null;
         }
@@ -3048,7 +4104,7 @@ class LineasChipsController extends Controller
             ->mapWithKeys(function ($row) use ($currentId): array {
                 $id = (string) ($row->iddispositivoCliente ?? '');
                 $placa = trim((string) ($row->vehiculo_placa ?? ''));
-    
+
                 $suffix = trim(implode(' ', array_filter([$placa])));
 
                 if ($currentId !== null && $id === $currentId) {
@@ -3166,23 +4222,50 @@ class LineasChipsController extends Controller
     /**
      * @return array<string, string>
      */
+    /**
+     * @return array<string, string>
+     */
     private function simCardOptions(?string $currentId = null): array
     {
-        return DB::table('simcard')
-            ->select('idsimCard', 'estado')
-            ->where('estado', '1')
+        return DB::table('simcard as s')
+            ->select('s.idsimCard', 's.estado')
+            ->where(function ($query) use ($currentId) {
+                $query->where(function ($query) {
+                    $query->where(function ($query) {
+                        $query->where('s.estado', '1')
+                            ->whereNotExists(function ($query) {
+                                $query->select(DB::raw(1))
+                                    ->from('detallesimcard as ds')
+                                    ->whereColumn('ds.simCard_idsimCard', 's.idsimCard')
+                                    ->where('ds.estado', '0');
+                            });
+                    })->orWhere(function ($query) {
+                        $query->where('s.estado', '2')
+                            ->whereExists(function ($query) {
+                                $query->select(DB::raw(1))
+                                    ->from('detallesimcard as ds')
+                                    ->whereColumn('ds.simCard_idsimCard', 's.idsimCard')
+                                    ->where('ds.estado', '0')
+                                    ->whereNotExists(function ($query) {
+                                        $query->select(DB::raw(1))
+                                            ->from('detnumerosdispositivo as dn')
+                                            ->join('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'dn.dispositivoCliente_iddispositivoCliente')
+                                            ->whereColumn('dn.numeroTelefonico_numeroTelefonico', 'ds.numeroTelefonico_numeroTelefonico')
+                                            ->where('dc.estado', '1');
+                                    });
+                            });
+                    });
+                });
+                if ($currentId !== null && $currentId !== '') {
+                    $query->orWhere('s.idsimCard', $currentId);
+                }
+            })
             ->orderBy('idsimCard')
             ->get()
             ->mapWithKeys(function ($row) use ($currentId): array {
                 $id = (string) ($row->idsimCard ?? '');
-                $isActive = self::normalizeEstado((string) ($row->estado ?? null)) === '1';
-                $label = $id;
-
-                if ($isActive) {
-                    $label .= ' (activo)';
-                } else {
-                    $label .= ' (inactivo)';
-                }
+                $st = self::normalizeEstado((string) ($row->estado ?? null));
+                $label = $id . ' (' . self::normalizeEstadoLabel($st) . ')';
 
                 if ($currentId !== null && $id === $currentId) {
                     $label .= ' (actual)';
@@ -3198,21 +4281,45 @@ class LineasChipsController extends Controller
      */
     private function numeroTelefonicoOptions(?string $currentNumero = null): array
     {
-        return DB::table('numerotelefonico')
-            ->select('numeroTelefonico', 'estado')
-            ->where('estado', '1')
+        return DB::table('numerotelefonico as n')
+            ->select('n.numeroTelefonico', 'n.estado')
+            ->where(function ($query) use ($currentNumero) {
+                $query->where(function ($query) {
+                    $query->where(function ($query) {
+                        $query->where('n.estado', '1')
+                            ->whereNotExists(function ($query) {
+                                $query->select(DB::raw(1))
+                                    ->from('detallesimcard as ds')
+                                    ->whereColumn('ds.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
+                                    ->where('ds.estado', '0');
+                            });
+                    })->orWhere(function ($query) {
+                        $query->where('n.estado', '2')
+                            ->whereExists(function ($query) {
+                                $query->select(DB::raw(1))
+                                    ->from('detallesimcard as ds')
+                                    ->whereColumn('ds.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
+                                    ->where('ds.estado', '0');
+                            });
+                    });
+                });
+                if ($currentNumero !== null && $currentNumero !== '') {
+                    $query->orWhere('n.numeroTelefonico', $currentNumero);
+                }
+            })
+            ->whereNotExists(function ($query) {
+                $query->select(DB::raw(1))
+                    ->from('detnumerosdispositivo as dn')
+                    ->join('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'dn.dispositivoCliente_iddispositivoCliente')
+                    ->whereColumn('dn.numeroTelefonico_numeroTelefonico', 'n.numeroTelefonico')
+                    ->where('dc.estado', '1');
+            })
             ->orderBy('numeroTelefonico')
             ->get()
             ->mapWithKeys(function ($row) use ($currentNumero): array {
                 $numero = (string) ($row->numeroTelefonico ?? '');
-                $isActive = self::normalizeEstado((string) ($row->estado ?? null)) === '1';
-                $label = $numero;
-
-                if ($isActive) {
-                    $label .= ' (activo)';
-                } else {
-                    $label .= ' (inactivo)';
-                }
+                $st = self::normalizeEstado((string) ($row->estado ?? null));
+                $label = $numero . ' (' . self::normalizeEstadoLabel($st) . ')';
 
                 if ($currentNumero !== null && $numero === $currentNumero) {
                     $label .= ' (actual)';
@@ -3232,45 +4339,62 @@ class LineasChipsController extends Controller
             ->where('numeroTelefonico', $numeroTelefonico)
             ->value('estado');
 
-        $errors = [];
-
-        if (self::normalizeEstado((string) $simEstado) !== '1') {
-            $errors['simCard_idsimCard'] = 'Este simcard está inactivo, por favor actívalo para guardarlo.';
-        }
-
-        if (self::normalizeEstado((string) $numeroEstado) !== '1') {
-            $errors['numeroTelefonico_numeroTelefonico'] = 'Este número está inactivo, por favor actívalo para guardarlo.';
-        }
-
-        if ($errors !== []) {
-            throw ValidationException::withMessages($errors);
-        }
-
         $currentSimDetalle = DB::table('detallesimcard')
             ->where('simCard_idsimCard', $simCardId)
+            ->where('estado', '0')
             ->orderByDesc('iddetalleSimCard')
             ->first();
 
         $currentNumeroDetalle = DB::table('detallesimcard')
             ->where('numeroTelefonico_numeroTelefonico', $numeroTelefonico)
+            ->where('estado', '0')
             ->orderByDesc('iddetalleSimCard')
             ->first();
 
+        $simEstado = self::normalizeEstado((string) $simEstado);
+        $numeroEstado = self::normalizeEstado((string) $numeroEstado);
         $simActive = $currentSimDetalle && $this->isDetalleSimCardVigente($currentSimDetalle);
         $numeroActive = $currentNumeroDetalle && $this->isDetalleSimCardVigente($currentNumeroDetalle);
+        $errors = [];
 
-        if ($simActive && $numeroActive) {
-            if ($currentSimDetalle->iddetalleSimCard === $currentNumeroDetalle->iddetalleSimCard) {
-                throw ValidationException::withMessages([
-                    'simCard_idsimCard' => 'Este par de SimCard y número telefónico ya está asignado actualmente.',
-                    'numeroTelefonico_numeroTelefonico' => 'Este par de SimCard y número telefónico ya está asignado actualmente.',
-                ]);
-            }
-
+        if (
+            $currentSimDetalle
+            && $currentNumeroDetalle
+            && (int) $currentSimDetalle->iddetalleSimCard === (int) $currentNumeroDetalle->iddetalleSimCard
+        ) {
             throw ValidationException::withMessages([
-                'simCard_idsimCard' => 'No se puede crear la asignación porque ese simcard ya tienen una relación activa.',
-                'numeroTelefonico_numeroTelefonico' => 'No se puede crear la asignación porque ese número ya tienen una relación activa.',
+                'numeroTelefonico_numeroTelefonico' => 'Esta SimCard ya está asignada a este número.',
             ]);
+        }
+
+        if (!(($simEstado === '1' && !$currentSimDetalle) || ($simEstado === '2' && $simActive))) {
+            $errors['simCard_idsimCard'] = 'La SimCard debe estar Libre o Disponible con una asignación vigente para poder asignarla.';
+        }
+
+        if (!(($numeroEstado === '1' && !$currentNumeroDetalle) || ($numeroEstado === '2' && $numeroActive))) {
+            $errors['numeroTelefonico_numeroTelefonico'] = 'El número debe estar Libre o Disponible con una asignación vigente para poder asignarlo.';
+        }
+
+        $numeroEnDispositivoActivo = DB::table('detnumerosdispositivo as dn')
+            ->join('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'dn.dispositivoCliente_iddispositivoCliente')
+            ->where('dn.numeroTelefonico_numeroTelefonico', $numeroTelefonico)
+            ->where('dc.estado', '1')
+            ->exists();
+        $numeroAnteriorEnDispositivoActivo = $currentSimDetalle && DB::table('detnumerosdispositivo as dn')
+            ->join('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'dn.dispositivoCliente_iddispositivoCliente')
+            ->where('dn.numeroTelefonico_numeroTelefonico', (string) $currentSimDetalle->numeroTelefonico_numeroTelefonico)
+            ->where('dc.estado', '1')
+            ->exists();
+
+        if ($numeroEnDispositivoActivo) {
+            $errors['numeroTelefonico_numeroTelefonico'] = 'No se puede reasignar un número ligado a un dispositivo activo.';
+        }
+        if ($numeroAnteriorEnDispositivoActivo) {
+            $errors['simCard_idsimCard'] = 'No se puede mover una SimCard cuyo número actual está ligado a un dispositivo activo.';
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
         }
     }
 
@@ -3283,7 +4407,7 @@ class LineasChipsController extends Controller
         $isActive = self::normalizeEstado((string) $estado) === '1';
         if ($isActive && $this->hasSimCardDetalleHistory($simCardId)) {
             throw ValidationException::withMessages([
-                'simCard_idsimCard' => 'La simcard seleccionada ya está activa. Debe estar inactiva para asignarla.',
+                'simCard_idsimCard' => 'La simcard seleccionada ya está activa. Debe estar libre para asignarla.',
             ]);
         }
     }
@@ -3297,7 +4421,7 @@ class LineasChipsController extends Controller
         $isActive = self::normalizeEstado((string) $estado) === '1';
         if ($isActive && $this->hasNumeroDetalleHistory($numeroTelefonico)) {
             throw ValidationException::withMessages([
-                'numeroTelefonico_numeroTelefonico' => 'El número seleccionado ya está activo. Debe estar inactivo para asignarlo.',
+                'numeroTelefonico_numeroTelefonico' => 'El número seleccionado ya está activo. Debe estar libre para asignarlo.',
             ]);
         }
     }
@@ -3315,7 +4439,7 @@ class LineasChipsController extends Controller
             ->where('numeroTelefonico', $numeroTelefonico)
             ->value('estado');
 
-        if (self::normalizeEstado((string) $estadoSimCard) !== '1' || self::normalizeEstado((string) $estadoNumero) !== '1') {
+        if (self::normalizeEstado((string) $estadoSimCard) === '0' || self::normalizeEstado((string) $estadoNumero) === '0') {
             return false;
         }
 
@@ -3345,6 +4469,27 @@ class LineasChipsController extends Controller
             ->where('numeroTelefonico_numeroTelefonico', $numeroTelefonico)
             ->where('estado', '1')
             ->exists();
+    }
+
+    private function numeroDispositivoTieneRelaciones(int $id): bool
+    {
+        $registro = DB::table('detnumerosdispositivo')
+            ->where('iddetNumerosDispositivo', $id)
+            ->first(['dispositivoCliente_iddispositivoCliente']);
+
+        if (!$registro) {
+            return false;
+        }
+
+        return DB::table('historial_dispositivocliente')
+            ->where('detNumerosDispositivo_iddetNumerosDispositivo', $id)
+            ->exists()
+            || DB::table('detalleoperacion')
+                ->where('detNumerosDispositivo_iddetNumerosDispositivo', $id)
+                ->exists()
+            || DB::table('detalle_serviciodispositivo')
+                ->where('dispositivoCliente_iddispositivoCliente', $registro->dispositivoCliente_iddispositivoCliente)
+                ->exists();
     }
 
     private function canDeleteNumeroWithSimcard(string $numeroTelefonico): bool
@@ -3440,6 +4585,77 @@ class LineasChipsController extends Controller
             ->doesntExist();
     }
 
+    /**
+     * @return array{0: string|null, 1: string}
+     */
+    private function resolveNumeroImportPrecio(string $value, ?string $monedaPreferida = null): array
+    {
+        [$precio, $moneda] = $this->normalizeNumeroPrecio($value);
+
+        $desired = trim((string) ($monedaPreferida ?? ''));
+        if ($precio !== null && in_array($desired, ['S/', '$'], true)) {
+            return [$precio, $desired];
+        }
+
+        return [$precio, $moneda];
+    }
+
+    private function normalizeNumeroPrecio(string $value): array
+    {
+        $raw = trim($value);
+        $moneda = str_contains($raw, '$') ? '$' : 'S/';
+        $numeric = preg_replace('/[^0-9,.-]/', '', $raw) ?? '';
+
+        if ($numeric === '' || !preg_match('/\d/', $numeric)) {
+            return [null, $moneda];
+        }
+
+        $lastComma = strrpos($numeric, ',');
+        $lastDot = strrpos($numeric, '.');
+        if ($lastComma !== false && $lastDot !== false) {
+            if ($lastComma > $lastDot) {
+                $numeric = str_replace('.', '', $numeric);
+                $numeric = str_replace(',', '.', $numeric);
+            } else {
+                $numeric = str_replace(',', '', $numeric);
+            }
+        } elseif ($lastComma !== false) {
+            $numeric = str_replace(',', '.', $numeric);
+        }
+
+        if (!is_numeric($numeric) || (float) $numeric < 0) {
+            return [null, $moneda];
+        }
+
+        return [number_format((float) $numeric, 2, '.', ''), $moneda];
+    }
+
+    private function upsertNumeroPrecio(string $numeroTelefonico, string $precio, string $moneda): void
+    {
+        $detail = DB::table('detalle_precionumero')
+            ->where('numeroTelefonico_numeroTelefonico', $numeroTelefonico)
+            ->orderByDesc('iddetalle_precionumero')
+            ->first();
+
+        $payload = [
+            'precio' => $precio,
+            'moneda' => $moneda,
+            'fecha' => Carbon::now()->format('Y-m-d H:i:s'),
+        ];
+
+        if ($detail) {
+            DB::table('detalle_precionumero')
+                ->where('iddetalle_precionumero', $detail->iddetalle_precionumero)
+                ->update($payload);
+            return;
+        }
+
+        DB::table('detalle_precionumero')->insert([
+            'numeroTelefonico_numeroTelefonico' => $numeroTelefonico,
+            ...$payload,
+        ]);
+    }
+
     private static function normalizeEstado(string|null $estado): string
     {
         $normalized = trim((string) $estado);
@@ -3449,7 +4665,15 @@ class LineasChipsController extends Controller
 
         $lowerValue = mb_strtolower($normalized);
 
-        if (in_array($lowerValue, ['1', 'activo', 'a'], true)) {
+        if (in_array($lowerValue, ['3', 'en uso', 'uso'], true)) {
+            return '3';
+        }
+
+        if (in_array($lowerValue, ['2', 'disponible', 'disp'], true)) {
+            return '2';
+        }
+
+        if (in_array($lowerValue, ['1', 'libre', 'activo', 'a'], true)) {
             return '1';
         }
 
@@ -3462,7 +4686,12 @@ class LineasChipsController extends Controller
 
     private static function normalizeEstadoLabel(string|null $estado): string
     {
-        return self::normalizeEstado($estado) === '1' ? 'Activo' : 'Inactivo';
+        return match (self::normalizeEstado($estado)) {
+            '3' => 'En Uso',
+            '2' => 'Disponible',
+            '1' => 'Libre',
+            default => 'Inactivo',
+        };
     }
 
     private static function normalizeDetalleSimCardEstadoLabel(string|null $estado): string

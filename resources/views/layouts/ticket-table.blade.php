@@ -197,8 +197,8 @@
                             </div>
 
                             <div class="ticket-filters-actions">
-                                <button type="submit" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 bg-primary border-primary text-white">
-                                    Aplicar
+                                <button type="submit" class="erp-btn-primary transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 bg-primary border-primary text-white">
+                                    <i data-lucide="list-filter" aria-hidden="true"></i> Aplicar
                                 </button>
                                 <a href="{{ url()->current() }}" data-list-clear="true" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none border-secondary text-slate-500">
                                     Limpiar
@@ -460,6 +460,16 @@
         .ticket-stats-white .box .stat-value {
             font-size: 2.25rem; /* más grande */
             line-height: 1;
+        }
+        
+        .erp-btn-primary svg {
+            width: 14px;
+            height: 14px;
+            stroke: currentColor;
+            stroke-width: 2.2;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
         }
 
         .ticket-table-white {

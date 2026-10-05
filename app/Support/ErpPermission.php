@@ -17,6 +17,11 @@ class ErpPermission
             'ventas.cotizaciones',
             'ventas.personal',
         ],
+        'finanzas' => [
+            'finanzas.estado_cuenta',
+            'finanzas.bancos',
+            'finanzas.nota_creditos',
+        ],
         'clientes' => [
             'clientes.cliente',
             'clientes.credenciales',
@@ -67,6 +72,8 @@ class ErpPermission
             'lineas_chips.numero_dispositivo',
             'lineas_chips.cargar_numeros',
             'lineas_chips.bajar_numeros',
+            'lineas_chips.cargar_numeros_solo',
+            'lineas_chips.cargar_simcard_solo',
         ],
     ];
 
@@ -77,6 +84,9 @@ class ErpPermission
         'vehiculo' => 'vehiculos',
         'vehiculos' => 'vehiculos',
         'cuentasporcobrar' => 'cuentasporcobrar',
+        'cuentasporpagar' => 'cuentasporpagar',
+        'cuentas-por-pagar' => 'cuentasporpagar',
+        'finanzas' => 'finanzas.bancos',
         'dispositivo-cliente' => 'dispositivo_cliente',
         'servicio-cliente' => 'servicio_cliente',
         'servicio_cliente' => 'servicio_cliente',
@@ -265,6 +275,11 @@ class ErpPermission
         ['prefix' => 'cuenta-por-cobrar', 'permission' => 'cuentasporcobrar'],
         ['prefix' => 'cuentas por cobrar', 'permission' => 'cuentasporcobrar'],
         ['prefix' => 'cuenta por cobrar', 'permission' => 'cuentasporcobrar'],
+        ['prefix' => 'cuentasporpagar', 'permission' => 'cuentasporpagar'],
+        ['prefix' => 'cuentas-por-pagar', 'permission' => 'cuentasporpagar'],
+        ['prefix' => 'cuenta-por-pagar', 'permission' => 'cuentasporpagar'],
+        ['prefix' => 'cuentas por pagar', 'permission' => 'cuentasporpagar'],
+        ['prefix' => 'cuenta por pagar', 'permission' => 'cuentasporpagar'],
         ['prefix' => 'configuracion.', 'containsAny' => ['tipo_gasto', 'tipogasto', 'gasto'], 'permission' => 'configuracion.tipo_gasto'],
         ['prefix' => 'configuracion.', 'containsAny' => ['tipo_cobro', 'tipocobro', 'cobro'], 'permission' => 'configuracion.tipo_cobro'],
         ['prefix' => 'configuracion.', 'containsAny' => ['tipo_pedido', 'tipopedido', 'pedido'], 'permission' => 'configuracion.tipo_pedido'],
@@ -311,7 +326,7 @@ class ErpPermission
 
     public static function allPermissionKeys(): array
     {
-        $permissionKeys = ['inicio', 'tickets', 'almacen', 'personal', 'roles', 'usuarios', 'vehiculos', 'dispositivo_cliente', 'servicio_cliente', 'cuentasporcobrar'];
+        $permissionKeys = ['inicio', 'tickets', 'almacen', 'personal', 'roles', 'usuarios', 'vehiculos', 'dispositivo_cliente', 'servicio_cliente', 'cuentasporcobrar', 'cuentasporpagar', 'finanzas'];
 
         foreach (self::MODULE_CHILDREN as $children) {
             $permissionKeys = array_merge($permissionKeys, $children);
@@ -367,6 +382,15 @@ class ErpPermission
         $module = $segments[1] ?? null;
         $resource = $segments[2] ?? '';
 
+        if ($module === 'finanzas') {
+            return match ($resource) {
+                'estado-cuenta', 'estado_cuenta' => 'finanzas.estado_cuenta',
+                'bancos', 'banco' => 'finanzas.bancos',
+                'nota-creditos', 'nota_creditos' => 'finanzas.nota_creditos',
+                default => 'finanzas',
+            };
+        }
+
         if (isset(self::FIXED_ROUTE_MODULES[$module])) {
             return self::FIXED_ROUTE_MODULES[$module];
         }
@@ -392,6 +416,15 @@ class ErpPermission
         }
 
         if ($module === 'lineas-chips' || $module === 'lineas_chips') {
+            $routeTail = implode('.', array_slice($segments, 3));
+            if ($resource === 'numeros-telefonico' && str_starts_with($routeTail, 'import.')) {
+                return 'lineas_chips.cargar_numeros_solo';
+            }
+
+            if ($resource === 'simcard' && str_starts_with($routeTail, 'import.')) {
+                return 'lineas_chips.cargar_simcard_solo';
+            }
+
             return self::LINEAS_CHIPS_ROUTE_RULES[$resource] ?? 'lineas_chips';
         }
 
@@ -418,6 +451,11 @@ class ErpPermission
             'ventas.cotizaciones', 'ventas.cotizacion', 'cotizaciones', 'cotizacion' => 'ventas.cotizaciones',
             'ventas.personal', 'ventas.dni_personal', 'ventas.dnipersonal', 'ventas.dni-personal' => 'ventas.personal',
             'cuentasporcobrar', 'cuentas-por-cobrar', 'cuenta-por-cobrar', 'cuentas por cobrar', 'cuenta por cobrar' => 'cuentasporcobrar',
+            'cuentasporpagar', 'cuentas-por-pagar', 'cuenta-por-pagar', 'cuentas por pagar', 'cuenta por pagar' => 'cuentasporpagar',
+            'finanzas' => 'finanzas',
+            'finanzas.estado_cuenta', 'finanzas.estado-cuenta', 'estado_cuenta', 'estado-cuenta' => 'finanzas.estado_cuenta',
+            'finanzas.bancos', 'finanzas.banco', 'bancos', 'banco' => 'finanzas.bancos',
+            'finanzas.nota_creditos', 'finanzas.nota-creditos', 'nota_creditos', 'nota-creditos' => 'finanzas.nota_creditos',
             'clientes.cliente', 'clientes.clientes', 'clientes.direccion', 'clientes.direcciones', 'clientes.contacto', 'clientes.contactos' => 'clientes.cliente',
             'cliente', 'clientes', 'direccioncliente', 'direccion cliente' => 'clientes',
             'clientes.credenciales', 'clientes.credencial' => 'clientes.credenciales',
@@ -433,6 +471,8 @@ class ErpPermission
             'lineas_chips.numero_dispositivo', 'lineas-chips.numero-dispositivo', 'lineas_chips.numeros_dispositivo', 'lineas-chips.numeros-dispositivo', 'numeros_dispositivo', 'numeros-dispositivo', 'numero_dispositivo', 'numero-dispositivo' => 'lineas_chips.numero_dispositivo',
             'lineas_chips.cargar_numeros', 'lineas-chips.cargar-numeros', 'cargar_numeros', 'cargar-numeros', 'cargar numeros' => 'lineas_chips.cargar_numeros',
             'lineas_chips.bajar_numeros', 'lineas-chips.bajar-numeros', 'bajar_numeros', 'bajar-numeros', 'bajar numeros' => 'lineas_chips.bajar_numeros',
+            'lineas_chips.cargar_numeros_solo', 'lineas-chips.cargar-numeros-solo', 'cargar_numeros_solo', 'cargar-numeros-solo' => 'lineas_chips.cargar_numeros_solo',
+            'lineas_chips.cargar_simcard_solo', 'lineas-chips.cargar-simcard-solo', 'cargar_simcard_solo', 'cargar-simcard-solo' => 'lineas_chips.cargar_simcard_solo',
             'almacen' => 'almacen',
             'almacen.almacen' => 'almacen.almacen',
             'almacen.elemento_almacen', 'almacen.elementoalmacen', 'almacen.elemento-almacen' => 'almacen.elemento_almacen',
@@ -546,6 +586,7 @@ class ErpPermission
             'crear', 'create', 'store', 'new' => 'crear',
             'editar', 'edit', 'update', 'actualizar' => 'editar',
             'eliminar', 'delete', 'destroy', 'remove' => 'eliminar',
+            'dar de baja', 'dar_de_baja', 'dar-de-baja', 'baja' => 'dar_de_baja',
             'aprobar', 'approve' => 'aprobar',
             'anular', 'cancel', 'canceled', 'cancelar' => 'anular',
             'exportar', 'export', 'download', 'descargar', 'xlsx', 'pdf' => 'exportar',
@@ -570,6 +611,8 @@ class ErpPermission
             str_contains($routeNameLower, 'modules.lineas-chips.detallesimcard.import.')
             || str_contains($routeNameLower, 'modules.lineas-chips.detallesimcard.preview.export')
             || str_contains($routeNameLower, 'modules.lineas-chips.detallesimcard.bulk-deactivate')
+            || str_contains($routeNameLower, 'modules.lineas-chips.numeros-telefonico.import.')
+            || str_contains($routeNameLower, 'modules.lineas-chips.simcard.import.')
         ) {
             return 'ver';
         }
@@ -613,6 +656,10 @@ class ErpPermission
             return 'anular';
         }
 
+        if (in_array($last, ['dar-de-baja-servicios', 'dar_de_baja_servicios', 'dar-de-baja'], true)) {
+            return 'dar_de_baja';
+        }
+
         if (in_array($last, ['index', 'export', 'opciones', 'lock-status'], true)) {
             return 'ver';
         }
@@ -644,6 +691,12 @@ class ErpPermission
             'ventas.cotizaciones' => 'modules.ventas.cotizaciones.index',
             // Cuentas por Cobrar
             'cuentasporcobrar' => 'modules.cuentasporcobrar',
+            // Cuentas por Pagar
+            'cuentasporpagar' => 'modules.cuentasporpagar',
+            // Banco / Caja
+            'finanzas.estado_cuenta' => 'modules.finanzas.estado-cuenta.index',
+            'finanzas.bancos' => 'modules.finanzas.bancos.index',
+            'finanzas.nota_creditos' => 'modules.finanzas.nota-creditos.index',
             // Planificación
             'planificacion' => 'modules.planificacion',
             // Clientes

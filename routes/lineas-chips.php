@@ -12,6 +12,8 @@ Route::middleware('erp.module:lineas_chips')->group(function () {
     Route::post('/modulos/lineas-chips/numeros-telefonico/export/{format}', [LineasChipsController::class, 'numerosTelefonicoExport'])->name('modules.lineas-chips.numeros-telefonico.export.post')->where('format', 'pdf|xlsx');
     Route::get('/modulos/lineas-chips/numeros-telefonico/crear', [LineasChipsController::class, 'numerosTelefonicoCreate'])->name('modules.lineas-chips.numeros-telefonico.create');
     Route::post('/modulos/lineas-chips/numeros-telefonico', [LineasChipsController::class, 'numerosTelefonicoStore'])->name('modules.lineas-chips.numeros-telefonico.store');
+    Route::post('/modulos/lineas-chips/numeros-telefonico/import/preview', [LineasChipsController::class, 'numerosTelefonicoImportPreview'])->name('modules.lineas-chips.numeros-telefonico.import.preview');
+    Route::post('/modulos/lineas-chips/numeros-telefonico/import/process', [LineasChipsController::class, 'numerosTelefonicoImportProcess'])->name('modules.lineas-chips.numeros-telefonico.import.process');
     Route::delete('/modulos/lineas-chips/numeros-telefonico/bulk-destroy', [LineasChipsController::class, 'numerosTelefonicoBulkDestroy'])->name('modules.lineas-chips.numeros-telefonico.bulk-destroy');
     Route::get('/modulos/lineas-chips/numeros-telefonico/{id}/editar', [LineasChipsController::class, 'numerosTelefonicoEdit'])->name('modules.lineas-chips.numeros-telefonico.edit');
     Route::put('/modulos/lineas-chips/numeros-telefonico/{id}', [LineasChipsController::class, 'numerosTelefonicoUpdate'])->name('modules.lineas-chips.numeros-telefonico.update');
@@ -30,6 +32,8 @@ Route::middleware('erp.module:lineas_chips')->group(function () {
     Route::post('/modulos/lineas-chips/simcard/export/{format}', [LineasChipsController::class, 'simcardExport'])->name('modules.lineas-chips.simcard.export.post')->where('format', 'pdf|xlsx');
     Route::get('/modulos/lineas-chips/simcard/crear', [LineasChipsController::class, 'simcardCreate'])->name('modules.lineas-chips.simcard.create');
     Route::post('/modulos/lineas-chips/simcard', [LineasChipsController::class, 'simcardStore'])->name('modules.lineas-chips.simcard.store');
+    Route::post('/modulos/lineas-chips/simcard/import/preview', [LineasChipsController::class, 'simcardImportPreview'])->name('modules.lineas-chips.simcard.import.preview');
+    Route::post('/modulos/lineas-chips/simcard/import/process', [LineasChipsController::class, 'simcardImportProcess'])->name('modules.lineas-chips.simcard.import.process');
     Route::get('/modulos/lineas-chips/simcard/{id}/editar', [LineasChipsController::class, 'simcardEdit'])->name('modules.lineas-chips.simcard.edit');
     Route::put('/modulos/lineas-chips/simcard/{id}', [LineasChipsController::class, 'simcardUpdate'])->name('modules.lineas-chips.simcard.update');
     Route::delete('/modulos/lineas-chips/simcard/bulk-destroy', [BulkDestroyController::class, 'destroy'])->name('modules.lineas-chips.simcard.bulk-destroy');

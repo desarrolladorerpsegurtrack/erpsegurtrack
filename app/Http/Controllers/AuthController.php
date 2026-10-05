@@ -33,7 +33,7 @@ class AuthController extends Controller
     public function login(Request $request): RedirectResponse
     {
         $credentials = $request->validate([
-            'usuario' => ['required', 'string', 'min:2', 'max:20', 'regex:/^[A-Za-z0-9._-]+$/'],
+            'usuario' => ['required', 'string', 'min:2', 'max:30', 'regex:/^[A-Za-z0-9._ -]+$/'],
             'password' => ['required', 'string', 'min:8', 'max:350'],
         ]);
 

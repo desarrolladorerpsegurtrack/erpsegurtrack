@@ -68,6 +68,8 @@
             'usuarios' => ['title' => 'Usuarios', 'route' => 'modules.usuarios', 'icon' => 'user-square'],
             'usuario_personal' => ['title' => 'Usuario y Personal', 'route' => 'modules.personal', 'icon' => 'users'],
             'cuentasporcobrar' => ['title' => 'Cuentas por Cobrar', 'route' => 'modules.cuentasporcobrar', 'icon' => 'credit-card'],
+            'cuentasporpagar' => ['title' => 'Cuentas por Pagar', 'route' => 'modules.cuentasporpagar', 'icon' => 'credit-card'],
+            'finanzas' => ['title' => 'Banco / Caja', 'route' => 'modules.finanzas.bancos.index', 'icon' => 'landmark'],
             'planificacion' => ['title' => 'Planificación', 'route' => 'modules.planificacion', 'icon' => 'layout'],
             'clientes' => ['title' => 'Clientes', 'route' => 'modules.clientes', 'icon' => 'building-2'],
             'lineas_chips' => ['title' => 'Lineas y Chips', 'route' => 'modules.lineas-chips', 'icon' => 'smartphone'],
@@ -119,6 +121,12 @@
         $visibleVentas = [
             'planes_servicios' => $hasAnyAction('ventas.planes_servicios'),
             'cotizaciones' => $hasAnyAction('ventas.cotizaciones'),
+        ];
+
+        $visibleFinanzas = [
+            'estado_cuenta' => $hasAnyAction('finanzas.estado_cuenta'),
+            'bancos' => $hasAnyAction('finanzas.bancos'),
+            'nota_creditos' => $hasAnyAction('finanzas.nota_creditos'),
         ];
 
         $visibleConfiguracion = [
@@ -181,6 +189,12 @@
         }
         if ($hasAnyAction('cuentasporcobrar')) {
             $visibleModules[] = 'cuentasporcobrar';
+        }
+        if ($hasAnyAction('cuentasporpagar')) {
+            $visibleModules[] = 'cuentasporpagar';
+        }
+        if ($hasAnyAction('finanzas') || collect($visibleFinanzas)->contains(true)) {
+            $visibleModules[] = 'finanzas';
         }
         if ($hasAnyAction('planificacion')) {
             $visibleModules[] = 'planificacion';
@@ -283,9 +297,12 @@
                                         href="javascript:;" aria-label="Pantalla completa" title="Pantalla completa">
                                         <i data-lucide="expand" class="stroke-[1] h-[18px] w-[18px]"></i>
                                     </a>
-                                    <a class="rounded-full p-2 hover:bg-slate-100" data-tw-toggle="modal"
-                                        data-tw-target="#notifications-panel" href="javascript:;">
+                                    <a class="relative rounded-full p-2 hover:bg-slate-100" data-tw-toggle="modal"
+                                        data-tw-target="#notifications-panel" href="javascript:;"
+                                        id="notifications-bell-btn" title="Notificaciones">
                                         <i data-lucide="bell" class="stroke-[1] h-[18px] w-[18px]"></i>
+                                        <span id="notifications-badge" style="font-size: 10px;"
+                                            class="hidden absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-danger font-bold text-white shadow-sm">0</span>
                                     </a>
                                 </div>
 
@@ -299,7 +316,7 @@
                                                 class="flex h-full w-full items-center justify-center text-sm font-semibold">{{ $userInitials ?? 'US' }}</span>
                                         @endif
                                     </button>
-                                    <div data-transition="" data-selector=".show"   
+                                    <div data-transition="" data-selector=".show"
                                         data-enter="transition-all ease-linear duration-150"
                                         data-enter-from="absolute !mt-5 invisible opacity-0 translate-y-1"
                                         data-enter-to="!mt-1 visible opacity-100 translate-y-0"
@@ -434,7 +451,56 @@
                                                     class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
                                                 <div class="side-menu__link__title">{{ $link['title'] }}</div>
                                             </a>
-                                        </li></li>
+                                        </li>
+                                        </li>
+                                    @elseif($module === 'finanzas')
+                                        @php
+                                            $isFinanzasActive = request()->routeIs('modules.finanzas*');
+                                        @endphp
+                                        <li>
+                                            <a href="javascript:;"
+                                                class="side-menu__link {{ $isFinanzasActive ? 'side-menu__link--active' : '' }} [&.side-menu__link--active]:side-menu__link--open"
+                                                data-tw-toggle="collapse" data-tw-target="#side-menu-finanzas">
+                                                <i data-lucide="{{ $link['icon'] }}"
+                                                    class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                <div class="side-menu__link__title">{{ $link['title'] }}</div>
+                                                <i data-lucide="chevron-down"
+                                                    class="stroke-[1] w-5 h-5 side-menu__link__chevron"></i>
+                                            </a>
+                                            <ul id="side-menu-finanzas"
+                                                class="side-menu__ul-collapse {{ $isFinanzasActive ? '' : 'hidden' }}">
+                                                @if($visibleFinanzas['estado_cuenta'])
+                                                    <li>
+                                                        <a href="{{ route('modules.finanzas.estado-cuenta.index') }}"
+                                                            class="side-menu__link {{ request()->routeIs('modules.finanzas.estado-cuenta*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right"
+                                                                class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Estado de cuenta</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                                @if($visibleFinanzas['bancos'])
+                                                    <li>
+                                                        <a href="{{ route('modules.finanzas.bancos.index') }}"
+                                                            class="side-menu__link {{ request()->routeIs('modules.finanzas.bancos*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right"
+                                                                class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Banco</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                                @if($visibleFinanzas['nota_creditos'])
+                                                    <li>
+                                                        <a href="{{ route('modules.finanzas.nota-creditos.index') }}"
+                                                            class="side-menu__link {{ request()->routeIs('modules.finanzas.nota-creditos*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right"
+                                                                class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Nota de créditos</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                            </ul>
+                                        </li>
                                     @elseif($module === 'planificacion')
                                         <li>
                                             <a href="{{ route('modules.planificacion') }}"
@@ -1231,7 +1297,7 @@
             </div>
 
             <div id="quick-search" aria-hidden="true" tabindex="-1"
-                class="modal group bg-gradient-to-b from-theme-1/50 via-theme-2/50 to-black/50 transition-[visibility,opacity] w-screen h-screen fixed left-0 top-0 overflow-y-hidden z-[60] [&:not(.show)]:duration-[0s,0.2s] [&:not(.show)]:delay-[0.2s,0s] [&:not(.show)]:invisible [&:not(.show)]:opacity-0 [&.show]:visible [&.show]:opacity-100 [&.show]:duration-[0s,0.1s]">
+                class="modal group transition-[visibility,opacity] w-screen h-screen fixed left-0 top-0 [&:not(.show)]:duration-[0s,0.2s] [&:not(.show)]:delay-[0.2s,0s] [&:not(.show)]:invisible [&:not(.show)]:opacity-0 [&.show]:visible [&.show]:opacity-100 [&.show]:duration-[0s,0.4s]">
                 <div
                     class="relative mx-auto my-2 w-[95%] scale-95 transition-transform group-[.show]:scale-100 sm:mt-40 sm:w-[600px] lg:w-[700px]">
                     <div class="relative">
@@ -1285,156 +1351,30 @@
                 </div>
             </div>
 
-            <div data-tw-backdrop="" aria-hidden="true" tabindex="-1" id="notifications-panel"
-                class="modal group bg-gradient-to-b from-theme-1/50 via-theme-2/50 to-black/50 transition-[visibility,opacity] w-screen h-screen fixed left-0 top-0 [&:not(.show)]:duration-[0s,0.2s] [&:not(.show)]:delay-[0.2s,0s] [&:not(.show)]:invisible [&:not(.show)]:opacity-0 [&.show]:visible [&.show]:opacity-100 [&.show]:duration-[0s,0.4s]">
+            <div data-tw-backdrop="" tabindex="-1" id="notifications-panel"
+                class="modal group transition-[visibility,opacity] w-screen h-screen fixed left-0 top-0 [&:not(.show)]:duration-[0s,0.2s] [&:not(.show)]:delay-[0.2s,0s] [&:not(.show)]:invisible [&:not(.show)]:opacity-0 [&.show]:visible [&.show]:opacity-100 [&.show]:duration-[0s,0.4s]">
                 <div
-                    class="ml-auto h-screen flex flex-col bg-white relative shadow-md transition-[margin-right] duration-[0.6s] -mr-[100%] group-[.show]:mr-0 sm:w-[460px] w-72 rounded-[0.75rem_0_0_0.75rem/1.1rem_0_0_1.1rem]">
-                    <a class="absolute inset-y-0 left-0 right-auto my-auto -ml-[60px] flex h-8 w-8 items-center justify-center rounded-full border border-white/90 bg-white/5 text-white/90 transition-all hover:rotate-180 hover:scale-105 hover:bg-white/10 focus:outline-none sm:-ml-[105px] sm:h-14 sm:w-14"
+                    class="ml-auto h-screen flex flex-col bg-white relative shadow-2xl transition-[margin-right] duration-[0.6s] -mr-[100%] group-[.show]:mr-0 sm:w-[460px] w-72 rounded-[0.75rem_0_0_0.75rem]">
+                    <a class="absolute inset-y-0 left-0 right-auto my-auto -ml-[60px] flex h-8 w-8 items-center justify-center rounded-full border border-white/90 bg-white/10 text-white transition-all hover:rotate-180 hover:scale-105 hover:bg-white/20 focus:outline-none sm:-ml-[105px] sm:h-14 sm:w-14"
                         data-tw-dismiss="modal" href="javascript:;">
-                        <i data-lucide="x" class="stroke-[1] h-8 w-8"></i>
+                        <i data-lucide="x" class="stroke-[1.5] h-8 w-8"></i>
                     </a>
-                    <div class="flex items-center border-b border-slate-200/60 px-6 py-5">
-                        <h2 class="mr-auto text-base font-medium">Notificaciones</h2>
-                        <button
-                            class="transition duration-200 border shadow-sm items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-secondary text-slate-500 [&:hover:not(:disabled)]:bg-secondary/20 hidden sm:flex">
-                            <i data-lucide="shield-check" class="stroke-[1] mr-2 h-4 w-4"></i>
+                    <div class="flex items-center border-b border-slate-200/80 px-6 py-5 bg-slate-50/50">
+                        <h2 class="mr-auto text-base font-bold text-slate-800 flex items-center gap-2">
+                            <i data-lucide="bell" class="h-4 w-4 text-[#c1121f]"></i> Notificaciones
+                        </h2>
+                        <button id="btn-mark-all-read"
+                            class="transition duration-200 border shadow-xs items-center justify-center py-1.5 px-3 rounded-lg font-semibold text-xs cursor-pointer border-slate-200 text-slate-600 bg-white hover:bg-slate-100 hover:text-slate-900 flex gap-1.5">
+                            <i data-lucide="check-check" class="stroke-[1.8] h-3.5 w-3.5 text-emerald-600"></i>
                             Marcar todo como leído
                         </button>
                     </div>
                     <div class="overflow-y-auto flex-1 p-0">
-                        <div class="flex flex-col gap-0.5 p-3">
-                            <a class="flex items-center rounded-xl px-3 py-2.5 hover:bg-slate-100/80" href="#">
-                                <div>
-                                    <div
-                                        class="image-fit h-11 w-11 overflow-hidden rounded-full border-2 border-slate-200/70">
-                                    </div>
-                                </div>
-                                <div class="sm:ml-5">
-                                    <div class="font-medium">Publicó una actualización de estado</div>
-                                    <div class="mt-0.5 text-slate-500">Compartió novedades del proyecto</div>
-                                    <div class="mt-1.5 text-xs text-slate-500">Dom mar 2021</div>
-                                </div>
-                            </a>
-
-                            <a class="flex items-center rounded-xl px-3 py-2.5 hover:bg-slate-100/80" href="#">
-                                <div>
-                                    <div
-                                        class="image-fit h-11 w-11 overflow-hidden rounded-full border-2 border-slate-200/70">
-                                    </div>
-                                </div>
-                                <div class="sm:ml-5">
-                                    <div class="font-medium">Tarea completada: revisar propuesta del proyecto</div>
-                                    <div class="mt-0.5 text-slate-500">Revisó y dejó comentarios</div>
-                                    <div class="my-3.5 w-40 rounded-[0.6rem] border bg-slate-50/80 p-1 sm:w-56">
-                                        <div class="grid grid-cols-3 overflow-hidden rounded-[0.6rem]">
-                                            <div
-                                                class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                            </div>
-                                            <div
-                                                class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                            </div>
-                                            <div
-                                                class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="mt-1.5 text-xs text-slate-500">Sáb oct 2022</div>
-                                </div>
-                            </a>
-
-                            <a class="flex items-center rounded-xl px-3 py-2.5 hover:bg-slate-100/80" href="#">
-                                <div>
-                                    <div
-                                        class="image-fit h-11 w-11 overflow-hidden rounded-full border-2 border-slate-200/70">
-                                    </div>
-                                </div>
-                                <div class="sm:ml-5">
-                                    <div class="font-medium">Inicio de sesión exitoso</div>
-                                    <div class="mt-0.5 text-slate-500">Accedió al panel</div>
-                                    <div class="my-3.5 w-40 rounded-[0.6rem] border bg-slate-50/80 p-1 sm:w-56">
-                                        <div class="grid grid-cols-3 overflow-hidden rounded-[0.6rem]">
-                                            <div
-                                                class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                            </div>
-                                            <div
-                                                class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                            </div>
-                                            <div
-                                                class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="mt-1.5 text-xs text-slate-500">Lun jun 2021</div>
-                                </div>
-                            </a>
-
-                            <a class="flex items-center rounded-xl px-3 py-2.5 hover:bg-slate-100/80" href="#">
-                                <div>
-                                    <div
-                                        class="image-fit h-11 w-11 overflow-hidden rounded-full border-2 border-slate-200/70">
-                                    </div>
-                                </div>
-                                <div class="sm:ml-5">
-                                    <div class="font-medium">Cerró sesión</div>
-                                    <div class="mt-0.5 text-slate-500">Salió del panel</div>
-                                    <div class="my-3.5 w-40 rounded-[0.6rem] border bg-slate-50/80 p-1 sm:w-56">
-                                        <div class="grid grid-cols-3 overflow-hidden rounded-[0.6rem]">
-                                            <div
-                                                class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                            </div>
-                                            <div
-                                                class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                            </div>
-                                            <div
-                                                class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="mt-1.5 text-xs text-slate-500">Mar feb 2022</div>
-                                </div>
-                            </a>
-
-                            <a class="flex items-center rounded-xl px-3 py-2.5 hover:bg-slate-100/80" href="#">
-                                <div>
-                                    <div
-                                        class="image-fit h-11 w-11 overflow-hidden rounded-full border-2 border-slate-200/70">
-                                    </div>
-                                </div>
-                                <div class="sm:ml-5">
-                                    <div class="font-medium">Subió grabaciones de audio</div>
-                                    <div class="mt-0.5 text-slate-500">Grabó episodios del podcast</div>
-                                    <div class="mt-1.5 text-xs text-slate-500">Mar nov 2022</div>
-                                </div>
-                                <div
-                                    class="ml-auto h-2 w-2 flex-none rounded-full border border-primary/40 bg-primary/40">
-                                </div>
-                            </a>
-
-                            <a class="flex items-center rounded-xl px-3 py-2.5 hover:bg-slate-100/80" href="#">
-                                <div>
-                                    <div
-                                        class="image-fit h-11 w-11 overflow-hidden rounded-full border-2 border-slate-200/70">
-                                    </div>
-                                </div>
-                                <div class="sm:ml-5">
-                                    <div class="font-medium">Subió imágenes</div>
-                                    <div class="mt-0.5 text-slate-500">Agregó capturas del proyecto</div>
-                                    <div class="my-3.5 w-40 rounded-[0.6rem] border bg-slate-50/80 p-1 sm:w-56">
-                                        <div class="grid grid-cols-3 overflow-hidden rounded-[0.6rem]">
-                                            <div
-                                                class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                            </div>
-                                            <div
-                                                class="image-fit h-12 cursor-pointer overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                            </div>
-                                            <div
-                                                class="image-fit h-12 cursor-poi  nter overflow-hidden border border-slate-100 saturate-[.6] hover:saturate-100 sm:h-16">
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="mt-1.5 text-xs text-slate-500">Jue dic 2020</div>
-                                </div>
-                            </a>
+                        <div id="notifications-list-container" class="flex flex-col gap-1 py-2 px-3">
+                            <div class="p-8 text-center text-slate-400">
+                                <i data-lucide="bell-off" class="mx-auto mb-2 h-8 w-8 stroke-[1]"></i>
+                                <p class="text-sm font-medium">No tienes notificaciones pendientes.</p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1449,40 +1389,236 @@
         </div>
 
         <!-- Plantilla de notificación (oculta) -->
-        <div id="notification-template" class="hidden toastify-notification w-100px max-w-xl rounded-lg bg-white shadow-lg p-3 flex items-center justify-between gap-4">
+        <div id="notification-template"
+            class="hidden toastify-notification w-100px max-w-xl rounded-lg bg-white shadow-lg p-3 flex items-center justify-between gap-4">
             <div class="flex items-center gap-3">
-                <div class="text-sm font-medium text-slate-900" id="notification-template-text">Tienes una nueva gestión para atender.</div>
-                <a href="{{ route('modules.tickets') }}" id="notification-template-action" data-default-url="{{ route('modules.tickets') }}" class="toastify-notification-action inline-flex items-center justify-center px-3 py-2 text-primary font-semibold hover:bg-red-50">Atenderlo</a>
-            </div> 
+                <div class="text-sm font-medium text-slate-900" id="notification-template-text">Tienes una nueva gestión
+                    para atender.</div>
+                <a href="{{ route('modules.tickets') }}" id="notification-template-action"
+                    data-default-url="{{ route('modules.tickets') }}"
+                    class="toastify-notification-action inline-flex items-center justify-center px-3 py-2 text-primary font-semibold hover:bg-red-50">Atenderlo</a>
+            </div>
         </div>
         <style>
-            .toastify.toastify-right.toastify-top {
-                border-left: 4px solid #c1121f !important;
-                padding: 0.85rem 1rem !important;
-                display: flex !important;
-                align-items: center !important;
-                justify-content: space-between !important;
-                gap: 1rem !important;
-                top: 15px !important;
-                right: 15px !important;
-                left: auto !important;
-                min-width: 360px !important;
+            #notifications-panel {
+                background-color: rgba(0, 0, 0, 0.6) !important;
             }
-
-            .toastify-close:hover {
-                color: #111827 !important;
+            #quick-search {
+                background-color: rgba(0, 0, 0, 0.7) !important;
+            }
+            .toastify {
+                padding: 0 !important;
+                background: transparent !important;
+                box-shadow: none !important;
             }
             .toastify .toast-close {
-                color: #000000 !important; 
-                opacity: 0.7;            
+                color: #94a3b8 !important;
+                font-size: 16px !important;
+                position: absolute !important;
+                top: 10px !important;
+                right: 12px !important;
+                opacity: 0.7 !important;
             }
-
             .toastify .toast-close:hover {
-                opacity: 1;
+                color: #0f172a !important;
+                opacity: 1 !important;
             }
         </style>
-    @stack('modals')
-    @stack('scripts')
+
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                const badgeEl = document.getElementById('notifications-badge');
+                const containerEl = document.getElementById('notifications-list-container');
+                const markAllBtn = document.getElementById('btn-mark-all-read');
+                const toastReminderMs = 2 * 60 * 60 * 1000;
+                const currentUser = document.querySelector('meta[name="erp-current-user"]')?.content || 'guest';
+                const toastQueue = [];
+                const queuedToastIds = new Set();
+                let toastShowing = false;
+
+                // Desenfoque seguro al ocultar modal para evitar advertencias de accesibilidad aria-hidden
+                document.addEventListener('hide.tw.modal', function () {
+                    if (document.activeElement) {
+                        document.activeElement.blur();
+                    }
+                });
+
+                function fetchNotifications() {
+                    fetch('{{ route("api.notificaciones.index") }}', {
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Accept': 'application/json'
+                        }
+                    })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (!data || !data.success) return;
+
+                            const count = data.count || 0;
+                            const items = [...(data.items || [])].sort((first, second) => {
+                                const firstDays = Number.isFinite(Number(first.dias_restantes))
+                                    ? Number(first.dias_restantes)
+                                    : Number.POSITIVE_INFINITY;
+                                const secondDays = Number.isFinite(Number(second.dias_restantes))
+                                    ? Number(second.dias_restantes)
+                                    : Number.POSITIVE_INFINITY;
+                                return firstDays - secondDays;
+                            });
+
+                            // Actualizar Badge en la Campana
+                            if (badgeEl) {
+                                if (count > 0) {
+                                    badgeEl.textContent = count > 99 ? '99+' : count;
+                                    badgeEl.classList.remove('hidden');
+                                } else {
+                                    badgeEl.classList.add('hidden');
+                                }
+                            }
+
+                            // Renderizar Lista en el Panel Lateral
+                            if (containerEl) {
+                                if (items.length === 0) {
+                                    containerEl.innerHTML = `
+                                        <div class="p-8 text-center text-slate-400">
+                                            <i data-lucide="bell-off" class="mx-auto mb-2 h-8 w-8 stroke-[1]"></i>
+                                            <p class="text-sm font-medium">No tienes notificaciones pendientes.</p>
+                                        </div>
+                                    `;
+                                    if (window.lucide) window.lucide.createIcons();
+                                } else {
+                                    containerEl.innerHTML = items.map(item => `
+                                        <a class="notification-item flex items-start gap-3 rounded-xl px-3.5 py-3 hover:bg-slate-100/90 transition cursor-pointer border border-slate-100 bg-slate-100 shadow-2xs"
+                                           data-id="${item.id}"
+                                           data-url="${item.url}">
+                                            <div class="flex-none mt-0.5">
+                                               <div class="flex-none p-2 bg-slate-50 text-danger rounded-lg flex items-center justify-center mt-0.5 border border-red-100 shadow-2xs">
+                                                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                                    </svg>
+                                                </div>
+                                            </div>
+                                            <div class="flex-1 min-w-0">
+                                                <div class="font-bold text-xs text-slate-800 line-clamp-1">${item.titulo}</div>
+                                                <div class="mt-0.5 text-xs font-medium text-slate-600 leading-snug">${item.mensaje.replace(/(Vence en \d+ días?)/i, '<strong class="font-extrabold text-slate-800">$1</strong>')}</div>
+                                                <div class="mt-1 text-[10px] text-slate-400 font-semibold">${item.fecha_display || item.fecha_completa}</div>
+                                            </div>
+                                        </a>
+                                    `).join('');
+                                    if (window.lucide) window.lucide.createIcons();
+
+                                    containerEl.querySelectorAll('.notification-item').forEach(el => {
+                                        el.addEventListener('click', function (e) {
+                                            e.preventDefault();
+                                            const notifId = this.dataset.id;
+                                            const targetUrl = this.dataset.url;
+                                            window.location.href = targetUrl;
+                                        });
+                                    });
+                                }
+                            }
+
+                            enqueueToastNotifications(items);
+                        })
+                        .catch(err => console.error('Error fetching notifications:', err));
+                }
+
+                function enqueueToastNotifications(items) {
+                    const now = Date.now();
+
+                    items
+                        .filter(item => item.group_key || item.servicio_id)
+                        .filter(item => {
+                            const notificationKey = item.group_key || item.servicio_id;
+                            const toastKey = `erp-service-toast:${currentUser}:${notificationKey}`;
+                            const lastShown = Number(localStorage.getItem(toastKey) || 0);
+                            return now - lastShown >= toastReminderMs;
+                        })
+                        .filter(item => !queuedToastIds.has(String(item.id)))
+                        .forEach(item => {
+                            queuedToastIds.add(String(item.id));
+                            toastQueue.push(item);
+                        });
+
+                    showNextToast();
+                }
+
+                function showNextToast() {
+                    if (toastShowing || toastQueue.length === 0 || typeof Toastify !== 'function') return;
+
+                    const item = toastQueue.shift();
+                    toastShowing = true;
+                    const notificationKey = item.group_key || item.servicio_id;
+                    localStorage.setItem(`erp-service-toast:${currentUser}:${notificationKey}`, String(Date.now()));
+                    showToastNotification(item, () => {
+                        queuedToastIds.delete(String(item.id));
+                        toastShowing = false;
+                        setTimeout(showNextToast, 250);
+                    });
+                }
+
+                function showToastNotification(item, onFinished) {
+                    if (typeof Toastify !== 'function') {
+                        onFinished();
+                        return;
+                    }
+
+                    const toastNode = document.createElement('div');
+                    toastNode.className = 'custom-toast-card flex items-start gap-3.5 p-4 rounded-xl text-slate-800 relative shadow-2xl';
+                    toastNode.style.cssText = 'background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-left: 5px solid #c1121f !important; min-width: 330px; max-width: 380px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;';
+                    toastNode.innerHTML = `
+                        <div class="flex-none p-2 bg-red-50 text-[#c1121f] rounded-lg flex items-center justify-center mt-0.5 border border-red-100 shadow-2xs">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                            </svg>
+                        </div>
+                        <div class="flex-1 min-w-0 pr-3">
+                            <div class="flex items-center justify-between gap-2 mb-1">
+                                <span class="text-[10px] font-extrabold uppercase tracking-wider text-[#c1121f]">Alerta de Servicio</span>
+                                <span class="text-[10px] font-semibold text-slate-400">Ahora</span>
+                            </div>
+                            <p class="text-xs font-semibold text-slate-700 leading-snug mb-3">${item.mensaje.replace(/(Vence en \d+ días?)/i, '<strong class="font-extrabold text-slate-800">$1</strong>')}</p>
+                            <div class="flex items-center justify-end">
+                                <button type="button" class="btn-toast-action inline-flex items-center gap-1.5 px-3 py-1.5 bg-danger hover:bg-[#a00e1a] text-white text-xs font-bold rounded-lg shadow-xs transition-all duration-150 transform hover:scale-[1.02] cursor-pointer">
+                                    <span>Revisar</span>
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+
+                    toastNode.querySelector('.btn-toast-action').addEventListener('click', function (e) {
+                        e.stopPropagation();
+                        window.location.href = item.url;
+                    });
+
+                    Toastify({
+                        node: toastNode,
+                        duration: 10000,
+                        close: true,
+                        gravity: 'top',
+                        position: 'right',
+                        stopOnFocus: true,
+                        offset: { x: 20, y: 70 },
+                        callback: onFinished,
+                        style: {
+                            background: '#ffffff',
+                            backgroundColor: '#ffffff',
+                            boxShadow: 'none',
+                            padding: '0'
+                        }
+                    }).showToast();
+                }
+
+                // Cargar notificaciones inmediatamente
+                fetchNotifications();
+
+                // Consultar cada 30 segundos en segundo plano
+                setInterval(fetchNotifications, 30000);
+            });
+        </script>
+
+        @stack('modals')
+        @stack('scripts')
 </body>
 
 </html>

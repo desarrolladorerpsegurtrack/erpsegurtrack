@@ -1508,7 +1508,7 @@
                         @csrf
                         <input type="hidden" name="download_after_save" id="download-after-save" value="0">
                         <input type="hidden" name="include_image" id="include-image-flag" value="{{ ($mode ?? '') === 'create' ? '0' : '1' }}">
-                        <input type="hidden" name="group_confirm" id="group-confirm-flag" value="0">
+                        <input type="hidden" name="group_confirm" id="group-confirm-flag" value="{{ !empty($copyAsGroup) ? '1' : '0' }}">
                         <input type="hidden" name="tipoDocumentoIDCliente" id="tipo-documento-id-cliente" value="">
                         @if($mode === 'edit')
                             @method('PUT')
@@ -2098,7 +2098,7 @@
                         <hr class="my-6 border-slate-200">
 
                         <!-- DATOS GENERALES -->
-                        <div id="datos-generales-global" class="{{ ($mode === 'edit') ? '' : 'hidden' }}">
+                        <div id="datos-generales-global" class="hidden">
                             @php
                                 $f_vig = null; $f_fp = null; $f_mon = null; $f_com = null;
                                 foreach($fields as $ff) {
@@ -2415,6 +2415,7 @@
                                 let tomSelectInstance = null;
                                 let tempItems = []; // For modal
                                 const oldCotizaciones = @json(old('cotizaciones', []));
+                                const copyGroupFields = @json($copyGroupFields ?? []);
                                 const groupGeneralOptions = {
                                     vigencias: @json($f_vig['optionsData'] ?? []),
                                     formasPago: @json($f_fp['optionsData'] ?? []),
@@ -2567,18 +2568,14 @@
                                     if (oldGroup[fieldName] !== undefined && oldGroup[fieldName] !== null) {
                                         return oldGroup[fieldName];
                                     }
-                                    // Si existe un registro global (p. ej. copia desde otra cotización),
-                                    // usar sus valores como iniciales independientemente del modo.
-                                    if (globalRecord) {
-                                        return globalRecord[fieldName] ?? defaultValue;
+                                    const copiedGroup = copyGroupFields[safeTipo] || {};
+                                    if (copiedGroup[fieldName] !== undefined && copiedGroup[fieldName] !== null) {
+                                        return copiedGroup[fieldName];
                                     }
                                     return defaultValue;
                                 }
 
                                 function renderGroupGeneralFields(safeTipo) {
-                                    if (isEditMode) {
-                                        return '';
-                                    }
                                     const prefix = `cotizaciones[${safeTipo}][`;
                                     const suffix = ']';
 
@@ -3035,7 +3032,6 @@
                                 }
 
                                 function getGroupKey(tipo_nombre) {
-                                    if (isEditMode) return 'UNICA';
                                     let tipo = (tipo_nombre || '').toUpperCase().trim();
                                     if (tipo.includes('SERVIC')) return 'SERVICIOS TÉCNICOS';
                                     if (tipo.includes('PLAN')) return 'PLANES';
@@ -3044,7 +3040,6 @@
                                 }
 
                                 function getSafeTipo(tipo) {
-                                    if (isEditMode) return 'unica';
                                     return tipo.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
                                 }
 
@@ -3060,18 +3055,19 @@
                                     wrapper.id = `group-wrapper-${safeTipo}`;
                                     wrapper.className = 'border border-slate-200 rounded-md bg-white shadow-sm overflow-hidden';
                                     
-                                    const headerTitle = isEditMode ? 'Detalle de la Cotización' : `Cotización: ${tipo}`;
-                                    const sumPrefix = isEditMode ? '' : `cotizaciones[${safeTipo}][`;
-                                    const sumSuffix = isEditMode ? '' : ']';
+                                    const headerTitle = `Cotización: ${tipo}`;
+                                    const sumPrefix = `cotizaciones[${safeTipo}][`;
+                                    const sumSuffix = ']';
 
                                     // Default values from DB if editing, else 0
-                                    let initDescGlobal = isEditMode && globalRecord ? (globalRecord.descuento || 0) : 0;
-                                    let initIgvGlobal = isEditMode && globalRecord ? (globalRecord.igv || 18) : 18;
+                                    let initDescGlobal = Number(getGroupFieldValue(safeTipo, 'descuento', 0)) || 0;
+                                    let initIgvGlobal = Number(getGroupFieldValue(safeTipo, 'igv', 18)) || 18;
                                     
                                     wrapper.innerHTML = `
                                         <div class="bg-slate-100 px-4 py-3 border-b border-slate-200 font-bold text-slate-800 flex justify-between items-center">
                                             <span>${headerTitle}</span>
-                                            ${!isEditMode ? `<input type="hidden" name="cotizaciones[${safeTipo}][tipo_nombre]" value="${tipo}">` : ''}
+                                            <input type="hidden" name="cotizaciones[${safeTipo}][tipo_nombre]" value="${tipo}">
+                                            ${copyGroupFields[safeTipo]?.source_nroCotizacion ? `<input type="hidden" name="cotizaciones[${safeTipo}][source_nroCotizacion]" value="${escapeHtml(copyGroupFields[safeTipo].source_nroCotizacion)}">` : ''}
                                         </div>
                                         <div class="p-0 overflow-x-auto">
                                             <table class="px-1 w-full text-left text-sm text-slate-600 min-w-[640px] border-separate border-spacing-0" style="table-layout: fixed;">
@@ -3100,7 +3096,7 @@
                                                     <label class="text-xs text-slate-500 tracking-wider">IGV Total</label>
                                                     <input type="text" name="${sumPrefix}igv${sumSuffix}" readonly class="form-control text-sm font-medium bg-transparent px-2 py-1 text-right h-8 summary-igv" value="${initIgvGlobal}">
                                                 </div>
-                                                ${!isEditMode ? `<input type="hidden" name="cotizaciones[${safeTipo}][subtotal]" class="summary-subtotal" value="0">` : ''}
+                                                <input type="hidden" name="cotizaciones[${safeTipo}][subtotal]" class="summary-subtotal" value="0">
                                                 <div class="flex flex-col gap-1 w-full sm:w-32">
                                                     <label class="text-xs text-slate-700 tracking-wider">Total</label>
                                                     <input type="number" min="0" step="0.01" name="${sumPrefix}total${sumSuffix}" class="form-control text-base font-bold text-emerald-700 bg-transparent px-2 py-1 text-right h-8 summary-total" value="0" ${formReadOnly ? 'readonly' : ''}>
@@ -3110,7 +3106,6 @@
                                         ${renderGroupGeneralFields(safeTipo)}
                                     `;
                                     container.appendChild(wrapper);
-                                    syncGlobalVigenciaToGroups();
                                     if (datosGeneralesPlaceholder) {
                                         datosGeneralesPlaceholder.classList.add('hidden');
                                     }
@@ -3310,7 +3305,7 @@
                                     if(!tbody) return;
                                     
                                     const rows = tbody.querySelectorAll('.group-row');
-                                    const inputPrefix = isEditMode ? 'detalle' : `cotizaciones[${safeTipo}][detalle]`;
+                                    const inputPrefix = `cotizaciones[${safeTipo}][detalle]`;
                                     
                                     rows.forEach((row, i) => {
                                         // Product select
@@ -3442,6 +3437,10 @@
                                         const opt = almacenOptions.find(o => o.idalmacen == almacenId);
                                         
                                         const tipo = getGroupKey(opt ? opt.tipo_nombre : '');
+                                        const safeTipo = getSafeTipo(tipo);
+                                        if (d.group_fields) {
+                                            copyGroupFields[safeTipo] = d.group_fields;
+                                        }
                                         
                                         const itemData = {
                                             id: almacenId,
@@ -3539,10 +3538,12 @@
                         const titleEl = modal.querySelector('#delete-confirmation-title');
                         const msgEl = modal.querySelector('#delete-confirmation-message');
                         const submitBtn = modal.querySelector('#delete-confirmation-submit');
-                        const closeBtns = Array.from(modal.querySelectorAll('[data-delete-modal-close]'));
+                        const cancelBtn = modal.querySelector('[data-delete-modal-cancel]');
+                        const closeBtns = Array.from(modal.querySelectorAll('[data-delete-modal-close]:not([data-delete-modal-cancel])'));
                         if (titleEl) titleEl.textContent = title;
                         if (msgEl) msgEl.textContent = message;
                         if (submitBtn) submitBtn.textContent = submitText;
+                        if (cancelBtn) cancelBtn.textContent = cancelText;
                         modal.style.display = 'flex';
                         modal.style.justifyContent = 'center';
                         // Use center alignment on larger screens, but align to top on small devices
@@ -3560,12 +3561,16 @@
                                 modal.style.display = 'none';
                                 document.body.style.overflow = '';
                                 closeBtns.forEach(b => b.removeEventListener('click', onCancel));
-                                submitBtn.removeEventListener('click', onConfirm);
+                                if (cancelBtn) cancelBtn.removeEventListener('click', onCancel);
+                                if (submitBtn) submitBtn.removeEventListener('click', onConfirm);
+                                closeBtns.forEach(b => b.removeEventListener('click', onClose));
                             };
                             const onCancel = () => { cleanup(); resolve(false); };
+                            const onClose = () => { cleanup(); resolve(null); };
                             const onConfirm = () => { cleanup(); resolve(true); };
-                            closeBtns.forEach(b => b.addEventListener('click', onCancel));
-                            submitBtn.addEventListener('click', onConfirm);
+                            closeBtns.forEach(b => b.addEventListener('click', onClose));
+                            if (cancelBtn) cancelBtn.addEventListener('click', onCancel);
+                            if (submitBtn) submitBtn.addEventListener('click', onConfirm);
                         });
                     };
                 </script>
@@ -3597,7 +3602,7 @@
                         </svg>
                         Guardando datos...
                     </span>
-                    <button type="button" data-delete-modal-close style="min-width:120px;padding:10px 18px;border-radius:10px;border:1px solid #e6e9ee;background:#ffffff;color:#374151;font-weight:600;">Cancelar</button>
+                    <button type="button" data-delete-modal-close data-delete-modal-cancel style="min-width:120px;padding:10px 18px;border-radius:10px;border:1px solid #e6e9ee;background:#ffffff;color:#374151;font-weight:600;">Cancelar</button>
                     <button type="button" id="delete-confirmation-submit" style="min-width:120px;padding:10px 18px;border-radius:10px;background:#ef4444;color:#ffffff;font-weight:600;border:none;">Guardar cambios</button>
                 </div>
             </div>
@@ -5132,11 +5137,12 @@
                 }
 
                 // If creating and multiple cotizaciones are present, ask whether to group them
-                if (isCreateMode) {
+                        if (isCreateMode) {
                     try {
                         const groupWrappers = document.querySelectorAll('[id^="group-wrapper-"]');
                         const groupCount = groupWrappers ? groupWrappers.length : 0;
-                        if (groupCount >= 2 && !mainForm.dataset.groupDecision) {
+                                const copyAsGroup = mainForm.querySelector('#group-confirm-flag')?.value === '1';
+                                if (groupCount >= 2 && !copyAsGroup && !mainForm.dataset.groupDecision) {
                             // Pause submit and ask user
                             event.preventDefault();
                             unlockSubmit(event.submitter);
@@ -5147,6 +5153,9 @@
                                 submitText: 'Sí',
                                 cancelText: 'No'
                             }).then((confirmed) => {
+                                if (confirmed === null) {
+                                    return;
+                                }
                                 let input = mainForm.querySelector('input[name="group_confirm"]');
                                 if (!input) {
                                     input = document.createElement('input');

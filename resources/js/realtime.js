@@ -198,16 +198,7 @@ window.ERPRealtime = {
 
                 if (payload?.type === 'resource.changed') {
                     if (payload.resource === this.currentListResource && this.listMode) {
-                        if (payload.usuario === this.currentUser && payload.action === 'attend') {
-                            return;
-                        }
-
-                        this.notify(`Actualización en tiempo real: ${payload.action} en ${payload.resource}.`, 'info');
-                        if (typeof window.ERPListRefresh === 'function') {
-                            window.ERPListRefresh();
-                        } else {
-                            window.location.reload();
-                        }
+                        return;
                     }
 
                     if (payload.resource === this.currentResource && payload.id === this.currentResourceId && payload.usuario !== this.currentUser) {

@@ -31,19 +31,30 @@ class ServicioClienteController extends Controller
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
             $term = '%' . $search . '%';
-            $query->where(function ($builder) use ($term) {
+            $periodoSearchValue = $this->periodoSearchValue($search);
+            $query->where(function ($builder) use ($term, $periodoSearchValue) {
                 $builder
                     ->where('sc.idservicioCliente', 'like', $term)
                     ->orWhere('sc.cliente_idcliente', 'like', $term)
                     ->orWhere('sc.vehiculo_placa', 'like', $term)
                     ->orWhere('sc.estado', 'like', $term)
                     ->orWhere('sc.docReferencia', 'like', $term)
+                    ->orWhereExists(function ($q) use ($term) {
+                        $q->from('detalle_serviciodispositivo as dsd')
+                            ->whereColumn('dsd.servicioCliente_idservicioCliente', 'sc.idservicioCliente')
+                            ->where('dsd.dispositivoCliente_iddispositivoCliente', 'like', $term);
+                    })
                     ->orWhere('c.nombreComercial', 'like', $term)
                     ->orWhere('c.razonSocial', 'like', $term)
                     ->orWhere('v.marca', 'like', $term)
                     ->orWhere('v.modelo', 'like', $term)
                     ->orWhere('a.detalle', 'like', $term)
+                    ->orWhere('a.periodo', 'like', $term)
                     ->orWhere('p.nombrePlataforma', 'like', $term);
+
+                if ($periodoSearchValue !== null) {
+                    $builder->orWhere('a.periodo', $periodoSearchValue);
+                }
             });
         }
 
@@ -53,15 +64,26 @@ class ServicioClienteController extends Controller
             $term = '%' . $clienteText . '%';
             $query->where(function ($b) use ($term) {
                 $b->where('sc.cliente_idcliente', 'like', $term)
-                  ->orWhere('c.nombreComercial', 'like', $term)
-                  ->orWhere('c.razonSocial', 'like', $term);
+                    ->orWhere('c.nombreComercial', 'like', $term)
+                    ->orWhere('c.razonSocial', 'like', $term);
+            });
+        }
+
+        $grupoText = trim((string) $request->input('grupo', ''));
+        if ($grupoText !== '') {
+            $term = '%' . $grupoText . '%';
+            $query->whereExists(function ($groupQuery) use ($term) {
+                $groupQuery->select(DB::raw(1))
+                    ->from('detallegrupocliente as dgc')
+                    ->join('grupocliente as gc', 'gc.idgrupoCliente', '=', 'dgc.grupoCliente_idgrupoCliente')
+                    ->whereColumn('dgc.cliente_idcliente', 'sc.cliente_idcliente')
+                    ->where('gc.nombreGrupo', 'like', $term);
             });
         }
 
         $almacenText = trim((string) $request->input('almacen_idalmacen', ''));
         if ($almacenText !== '') {
-            $term = '%' . $almacenText . '%';
-            $query->where('a.detalle', 'like', $term);
+            $this->applyServicioFilter($query, $almacenText);
         }
 
         $vehiculoText = trim((string) $request->input('vehiculo', ''));
@@ -69,8 +91,8 @@ class ServicioClienteController extends Controller
             $term = '%' . $vehiculoText . '%';
             $query->where(function ($b) use ($term) {
                 $b->where('sc.vehiculo_placa', 'like', $term)
-                  ->orWhere('v.marca', 'like', $term)
-                  ->orWhere('v.modelo', 'like', $term);
+                    ->orWhere('v.marca', 'like', $term)
+                    ->orWhere('v.modelo', 'like', $term);
             });
         }
 
@@ -79,17 +101,23 @@ class ServicioClienteController extends Controller
             $query->where('sc.estado', $estadoFilter);
         }
 
+        $montoFilter = trim((string) $request->input('monto', ''));
+        if ($montoFilter !== '') {
+            $query->where('sc.monto', $montoFilter);
+        }
+
         $fechaFrom = $request->input('fechaInicio_from');
         if ($fechaFrom) {
-            $query->whereDate('sc.fechaInicio', '>=', $fechaFrom);
+            $query->whereDate('sc.fechaInicio', '=', $fechaFrom);
         }
 
-        $fechaTo = $request->input('fechaInicio_to');
+        $fechaTo = $request->input('fecheVencimiento_to', $request->input('fechaInicio_to'));
         if ($fechaTo) {
-            $query->whereDate('sc.fechaInicio', '<=', $fechaTo);
+            $query->whereDate('sc.fecheVencimiento', '=', $fechaTo);
         }
 
-        $items = $query->orderByDesc('sc.idservicioCliente')
+        $items = $query->orderByRaw("CASE WHEN LOWER(TRIM(sc.estado)) = 'activo' THEN 0 ELSE 1 END ASC")
+            ->orderByDesc('sc.fechaInicio')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
 
@@ -118,7 +146,7 @@ class ServicioClienteController extends Controller
                 }
 
                 // Normalizar estado para la columna tipo 'status': 1 => activo, 0 => inactivo
-                $estadoRaw = strtolower(trim((string)($row->estado ?? '')));
+                $estadoRaw = strtolower(trim((string) ($row->estado ?? '')));
                 $row->estado = $estadoRaw === 'activo' || $estadoRaw === '1' || $estadoRaw === 'true' ? 1 : 0;
 
                 // Formatear monto con símbolo de moneda
@@ -138,7 +166,7 @@ class ServicioClienteController extends Controller
             'singularTitle' => 'Servicio Cliente',
             'items' => $items,
             'columns' => [
-                ['key' => 'cliente_nombre', 'label' => 'Cliente', 'type' => 'text'],
+                ['key' => 'cliente_nombre', 'label' => 'Cliente', 'type' => 'text', 'integratorKey' => 'flag_integrador'],
                 ['key' => 'vehiculo_placa', 'label' => 'Vehículo', 'type' => 'text'],
                 ['key' => 'almacen_detalle', 'label' => 'Servicio', 'type' => 'text'],
                 ['key' => 'plataforma', 'label' => 'Plataforma', 'type' => 'text'],
@@ -157,6 +185,12 @@ class ServicioClienteController extends Controller
                     'type' => 'text',
                     'label' => 'Cliente',
                     'placeholder' => 'Escribe cliente',
+                ],
+                [
+                    'name' => 'grupo',
+                    'type' => 'text',
+                    'label' => 'Grupo Cliente',
+                    'placeholder' => 'Escribe grupo cliente',
                 ],
                 [
                     'name' => 'almacen_idalmacen',
@@ -181,15 +215,21 @@ class ServicioClienteController extends Controller
                     'placeholder' => 'Todos',
                 ],
                 [
+                    'name' => 'monto',
+                    'type' => 'text',
+                    'label' => 'Monto',
+                    'placeholder' => 'Ej. 20',
+                ],
+                [
                     'name' => 'fechaInicio_from',
                     'type' => 'date',
-                    'label' => 'Fecha inicio desde',
+                    'label' => 'Fecha inicio',
                     'placeholder' => 'YYYY-MM-DD',
                 ],
                 [
-                    'name' => 'fechaInicio_to',
+                    'name' => 'fecheVencimiento_to',
                     'type' => 'date',
-                    'label' => 'Fecha inicio hasta',
+                    'label' => 'Fecha fin',
                     'placeholder' => 'YYYY-MM-DD',
                 ],
             ],
@@ -213,7 +253,7 @@ class ServicioClienteController extends Controller
             abort(404);
         }
 
-         // Soportar exportación por selección (selectedIds[] enviado por POST)
+        // Soportar exportación por selección (selectedIds[] enviado por POST)
         $selectedIds = $request->input('selectedIds', []);
 
         $columns = [
@@ -239,6 +279,11 @@ class ServicioClienteController extends Controller
 
             // Formatear fechas para exportación
             $rows = $rows->map(function ($r) {
+                $periodo = $this->formatPeriodo($r->almacen_periodo ?? null);
+                if ($periodo !== '' && !str_ends_with((string) $r->almacen_detalle, ' - ' . $periodo)) {
+                    $r->almacen_detalle = trim((string) $r->almacen_detalle . ' - ' . $periodo);
+                }
+
                 try {
                     $r->fechaInicio = $r->fechaInicio ? Carbon::parse($r->fechaInicio)->locale('es')->isoFormat('D MMM, YYYY') : '';
                 } catch (\Exception $e) {
@@ -275,6 +320,11 @@ class ServicioClienteController extends Controller
 
         // Formatear fechas para exportación en el conjunto completo
         $rows = $rows->map(function ($r) {
+            $periodo = $this->formatPeriodo($r->almacen_periodo ?? null);
+            if ($periodo !== '' && !str_ends_with((string) $r->almacen_detalle, ' - ' . $periodo)) {
+                $r->almacen_detalle = trim((string) $r->almacen_detalle . ' - ' . $periodo);
+            }
+
             try {
                 $r->fechaInicio = $r->fechaInicio ? Carbon::parse($r->fechaInicio)->locale('es')->isoFormat('D MMM, YYYY') : '';
             } catch (\Exception $e) {
@@ -434,13 +484,50 @@ class ServicioClienteController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        $isIntegrador = $this->clienteEsIntegrador((string) $request->input('cliente_idcliente', ''));
+
+        $numeroRules = [
+            'nullable',
+            'string',
+            'max:30',
+        ];
+
+        if (!$isIntegrador) {
+            $numeroRules = array_merge($numeroRules, [
+                'required',
+                'exists:numerotelefonico,numeroTelefonico',
+                Rule::exists('numerotelefonico', 'numeroTelefonico')->where(fn($query) => $query->where('estado', '2')),
+                Rule::exists('numerotelefonico', 'numeroTelefonico')->where(function ($query) {
+                    $query->whereNotExists(function ($subquery) {
+                        $subquery->select(DB::raw(1))
+                            ->from('detnumerosdispositivo as dn')
+                            ->join('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'dn.dispositivoCliente_iddispositivoCliente')
+                            ->whereColumn('dn.numeroTelefonico_numeroTelefonico', 'numerotelefonico.numeroTelefonico')
+                            ->where('dc.estado', '1')
+                            ->whereNotExists(function ($newer) {
+                                $newer->select(DB::raw(1))
+                                    ->from('detnumerosdispositivo as newer_dn')
+                                    ->whereColumn('newer_dn.dispositivoCliente_iddispositivoCliente', 'dn.dispositivoCliente_iddispositivoCliente')
+                                    ->whereColumn('newer_dn.iddetNumerosDispositivo', '>', 'dn.iddetNumerosDispositivo');
+                            });
+                    })->whereExists(function ($subquery) {
+                        $subquery->select(DB::raw(1))
+                            ->from('detallesimcard as ds')
+                            ->whereColumn('ds.numeroTelefonico_numeroTelefonico', 'numerotelefonico.numeroTelefonico')
+                            ->where('ds.estado', '0');
+                    });
+                }),
+            ]);
+        }
+
         $rules = [
             'cliente_idcliente' => [
                 'required',
                 'exists:cliente,idcliente',
-                Rule::unique('serviciocliente')->where(fn ($query) => $query
+                Rule::unique('serviciocliente')->where(fn($query) => $query
                     ->where('vehiculo_placa', $request->input('vehiculo_placa'))
-                    ->where('almacen_idalmacen', $request->input('almacen_idalmacen'))),
+                    ->where('almacen_idalmacen', $request->input('almacen_idalmacen'))
+                    ->where('estado', 'activo')),
             ],
             'dispositivoCliente_iddispositivoCliente' => [
                 'required',
@@ -456,17 +543,7 @@ class ServicioClienteController extends Controller
                         return;
                     }
                     $estado = (int) $stockDevice->estado;
-                    $inStock = in_array($estado, [1, 2, 4], true);
-                    $isInactiveForClient = false;
-                    if ($clienteId !== null && $clienteId !== '') {
-                        $isInactiveForClient = DB::table('dispositivocliente as dc')
-                            ->join('vehiculo as v', 'v.placa', '=', 'dc.vehiculo_placa')
-                            ->where('dc.iddispositivoCliente', $value)
-                            ->where('dc.estado', '0')
-                            ->where('v.cliente_idcliente', $clienteId)
-                            ->exists();
-                    }
-                    if (!$inStock && !$isInactiveForClient) {
+                    if (!$this->deviceIsAvailableForClient((string) $value, (string) $clienteId, $estado)) {
                         $fail('El ID Dispositivo seleccionado no está disponible.');
                         return;
                     }
@@ -477,30 +554,26 @@ class ServicioClienteController extends Controller
                         $fail('El ID Dispositivo seleccionado ya está en uso por otro servicio activo.');
                         return;
                     }
+                    $hasAnotherActiveService = DB::table('detalle_serviciodispositivo as dsd')
+                        ->join('serviciocliente as sc', 'sc.idservicioCliente', '=', 'dsd.servicioCliente_idservicioCliente')
+                        ->where('dsd.dispositivoCliente_iddispositivoCliente', $value)
+                        ->where('dsd.estado', 1)
+                        ->where('sc.estado', 'activo')
+                        ->exists();
+                    if ($hasAnotherActiveService) {
+                        $fail('El ID Dispositivo seleccionado ya está asignado a otro servicio activo.');
+                    }
                 },
             ],
-            'numeroTelefonico_numeroTelefonico' => [
-                'required',
-                'string',
-                'exists:numerotelefonico,numeroTelefonico',
-                Rule::exists('numerotelefonico', 'numeroTelefonico')->where(fn ($query) => $query->where('estado', '1')),
-                Rule::exists('numerotelefonico', 'numeroTelefonico')->where(function ($query) {
-                    $query->whereNotExists(function ($subquery) {
-                        $subquery->select(DB::raw(1))
-                            ->from('detnumerosdispositivo as dn')
-                            ->whereColumn('dn.numeroTelefonico_numeroTelefonico', 'numerotelefonico.numeroTelefonico');
-                    })->whereExists(function ($subquery) {
-                        $subquery->select(DB::raw(1))
-                            ->from('detallesimcard as ds')
-                            ->whereColumn('ds.numeroTelefonico_numeroTelefonico', 'numerotelefonico.numeroTelefonico')
-                            ->where('ds.estado', '0');
-                    });
-                }),
-                Rule::unique('detnumerosdispositivo', 'numeroTelefonico_numeroTelefonico'),
-            ],
+            'numeroTelefonico_numeroTelefonico' => $numeroRules,
             'vehiculo_placa' => [
                 'required',
-                Rule::exists('vehiculo', 'placa')->where(fn ($query) => $query->where('cliente_idcliente', $request->input('cliente_idcliente'))),
+                function ($attribute, $value, $fail) use ($request) {
+                    $clienteId = (string) $request->input('cliente_idcliente', '');
+                    if ($clienteId === '' || !$this->vehicleIsAllowedForClient((string) $value, $clienteId)) {
+                        $fail('El vehículo seleccionado no pertenece al cliente o a otro cliente del mismo grupo.');
+                    }
+                },
             ],
             'almacen_idalmacen' => ['required', 'exists:almacen,idalmacen'],
             'fechaInicio' => ['required', 'date_format:Y-m-d'],
@@ -535,9 +608,15 @@ class ServicioClienteController extends Controller
 
         $validated = $request->validate($rules, $messages, $attributes);
 
+        $periodoServicio = $this->getPeriodoServicio($validated['almacen_idalmacen'] ?? null);
+        if ($periodoServicio !== null && $validated['fechaInicio'] !== null && $validated['fechaInicio'] !== '') {
+            $validated['fecheVencimiento'] = $this->calculateFecheVencimiento((string) $validated['fechaInicio'], $periodoServicio);
+        }
+
         $validated['vehiculo_placa'] = Str::upper(trim($validated['vehiculo_placa']));
+        $validated['numeroTelefonico_numeroTelefonico'] = $this->normalizeOptionalPhone($validated['numeroTelefonico_numeroTelefonico'] ?? null);
         $deviceId = trim((string) $validated['dispositivoCliente_iddispositivoCliente']);
-        $phoneNumber = trim((string) $validated['numeroTelefonico_numeroTelefonico']);
+        $phoneNumber = $this->normalizeOptionalPhone($validated['numeroTelefonico_numeroTelefonico'] ?? null);
         $fechaServicio = Carbon::createFromFormat('Y-m-d', $validated['fechaInicio'])->format('Y-m-d H:i:s');
         $usuario = (string) $request->session()->get('erp_auth.usuario', 'anonimo');
         $device = DB::table('elementoalmacen as ea')
@@ -554,130 +633,189 @@ class ServicioClienteController extends Controller
 
         try {
             $id = DB::transaction(function () use ($validated, $deviceId, $phoneNumber, $fechaServicio, $usuario, $device, $request) {
-            $stockDevice = DB::table('elementoalmacen')
-                ->where('imei', $deviceId)
-                ->lockForUpdate()
-                ->first();
-
-            if (!$stockDevice) {
-                throw new \RuntimeException('device_unavailable');
-            }
-
-            $currentState = (int) $stockDevice->estado;
-            $inStock = in_array($currentState, [1, 2, 4], true);
-            $isInactiveForClient = false;
-            if ($validated['cliente_idcliente'] !== null && $validated['cliente_idcliente'] !== '') {
-                $isInactiveForClient = DB::table('dispositivocliente as dc')
-                    ->join('vehiculo as v', 'v.placa', '=', 'dc.vehiculo_placa')
-                    ->where('dc.iddispositivoCliente', $deviceId)
-                    ->where('dc.estado', '0')
-                    ->where('v.cliente_idcliente', $validated['cliente_idcliente'])
-                    ->exists();
-            }
-
-            if (!$inStock && !$isInactiveForClient) {
-                throw new \RuntimeException('device_unavailable');
-            }
-
-            if (DB::table('detnumerosdispositivo')->where('numeroTelefonico_numeroTelefonico', $phoneNumber)->exists()
-                || !DB::table('detallesimcard')->where('numeroTelefonico_numeroTelefonico', $phoneNumber)->where('estado', '0')->exists()) {
-                throw new \RuntimeException('phone_unavailable');
-            }
-
-            if (DB::table('serviciocliente')
-                ->where('cliente_idcliente', $validated['cliente_idcliente'])
-                ->where('vehiculo_placa', $validated['vehiculo_placa'])
-                ->where('almacen_idalmacen', $validated['almacen_idalmacen'])
-                ->exists()) {
-                throw new \RuntimeException('service_duplicate');
-            }
-
-            unset($validated['dispositivoCliente_iddispositivoCliente'], $validated['numeroTelefonico_numeroTelefonico']);
-            $serviceId = DB::table('serviciocliente')->insertGetId($validated);
-
-            DB::table('dispositivocliente')->updateOrInsert(
-                ['iddispositivoCliente' => $deviceId],
-                [
-                    'vehiculo_placa' => $validated['vehiculo_placa'],
-                    'marcaDispositivo' => $device->nombreMarca ?? null,
-                    'modeloDispositivo' => $device->nombreModelo ?? null,
-                    'fechaInstalacion' => $fechaServicio,
-                    'fechaBaja' => $validated['estado'] === 'inactivo' ? $fechaServicio : null,
-                    'estado' => $validated['estado'] === 'activo' ? '1' : '0',
-                ]
-            );
-
-            DB::table('detnumerosdispositivo')->insert([
-                'dispositivoCliente_iddispositivoCliente' => $deviceId,
-                'numeroTelefonico_numeroTelefonico' => $phoneNumber,
-                'fechaAsignacion' => $fechaServicio,
-            ]);
-
-            DB::table('historial_servicio')->insert([
-                'usuario_usuario' => $usuario,
-                'servicioCliente_idservicioCliente' => $serviceId,
-                'fecha_accion' => $fechaServicio,
-                'motivo' => 'Creacion',
-                'descripcion' => 'Creacion de servicio',
-                'doc_referencia' => $validated['docReferencia'] ?? null,
-            ]);
-
-            DB::table('detalle_serviciodispositivo')->insert([
-                'servicioCliente_idservicioCliente' => $serviceId,
-                'vehiculo_placa' => $validated['vehiculo_placa'],
-                'dispositivoCliente_iddispositivoCliente' => $deviceId,
-                'fecha' => $fechaServicio,
-                'observacion' => $validated['estado'] === 'inactivo' ? ($request->input('comentario_baja') ?? null) : null,
-                'estado' => $validated['estado'] === 'activo' ? 1 : 0,
-            ]);
-
-            $nextStateMap = [1 => 6, 2 => 3, 4 => 5];
-            $nextState = $nextStateMap[$currentState] ?? $currentState;
-            DB::table('elementoalmacen')->where('imei', $deviceId)->update(['estado' => $nextState]);
-
-            // Handle deactivation logic if service is registered as inactivo
-            if ($validated['estado'] === 'inactivo') {
-                $activeSimPair = DB::table('detallesimcard')
-                    ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
-                    ->where('estado', '0')
+                $stockDevice = DB::table('elementoalmacen')
+                    ->where('imei', $deviceId)
+                    ->lockForUpdate()
                     ->first();
 
-                if ($activeSimPair) {
-                    DB::table('detallesimcard')
-                        ->where('iddetalleSimCard', $activeSimPair->iddetalleSimCard)
-                        ->update(['estado' => '1']);
-
-                    DB::table('simcard')
-                        ->where('idsimCard', $activeSimPair->simCard_idsimCard)
-                        ->update(['estado' => '0']);
+                if (!$stockDevice) {
+                    throw new \RuntimeException('device_unavailable');
                 }
 
-                DB::table('numerotelefonico')
-                    ->where('numeroTelefonico', $phoneNumber)
-                    ->update(['estado' => '1']);
+                $currentState = (int) $stockDevice->estado;
+                if (!$this->deviceIsAvailableForClient($deviceId, (string) $validated['cliente_idcliente'], $currentState)) {
+                    throw new \RuntimeException('device_unavailable');
+                }
 
-                $deviceState = (int) $nextState;
-                if ($deviceState === 3 || $deviceState === 2) {
-                    DB::table('elementoalmacen')
-                        ->where('imei', $deviceId)
-                        ->update(['estado' => 2]);
-                } elseif (in_array($deviceState, [0, 5, 6], true)) {
-                    DB::table('elementoalmacen')
-                        ->where('imei', $deviceId)
-                        ->update(['estado' => 0]);
+                if ($phoneNumber !== null && $phoneNumber !== '') {
+                    $hasActiveDeviceLink = DB::table('detnumerosdispositivo as dn')
+                        ->join('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'dn.dispositivoCliente_iddispositivoCliente')
+                        ->where('dn.numeroTelefonico_numeroTelefonico', $phoneNumber)
+                        ->where('dc.estado', '1')
+                        ->whereNotExists(function ($newer) {
+                            $newer->select(DB::raw(1))
+                                ->from('detnumerosdispositivo as newer_dn')
+                                ->whereColumn('newer_dn.dispositivoCliente_iddispositivoCliente', 'dn.dispositivoCliente_iddispositivoCliente')
+                                ->whereColumn('newer_dn.iddetNumerosDispositivo', '>', 'dn.iddetNumerosDispositivo');
+                        })
+                        ->exists();
+                    if (
+                        $hasActiveDeviceLink
+                        || !DB::table('detallesimcard')->where('numeroTelefonico_numeroTelefonico', $phoneNumber)->where('estado', '0')->exists()
+                    ) {
+                        throw new \RuntimeException('phone_unavailable');
+                    }
+                }
+
+                if (
+                    DB::table('serviciocliente')
+                        ->where('cliente_idcliente', $validated['cliente_idcliente'])
+                        ->where('vehiculo_placa', $validated['vehiculo_placa'])
+                        ->where('almacen_idalmacen', $validated['almacen_idalmacen'])
+                        ->where('estado', 'activo')
+                        ->exists()
+                ) {
+                    throw new \RuntimeException('service_duplicate');
+                }
+
+                unset($validated['dispositivoCliente_iddispositivoCliente'], $validated['numeroTelefonico_numeroTelefonico']);
+                $serviceId = DB::table('serviciocliente')->insertGetId($validated);
+
+                $estadoServicio = strtolower(trim((string) ($validated['estado'] ?? '')));
+                if ($estadoServicio === 'activo' || $estadoServicio === '1' || $estadoServicio === 'true') {
+                    app(\App\Services\CxcService::class)->crearCobroDesdeServicio(array_merge($validated, [
+                        'idservicioCliente' => $serviceId,
+                    ]));
+                }
+
+                DB::table('dispositivocliente')->updateOrInsert(
+                    ['iddispositivoCliente' => $deviceId],
+                    [
+                        'vehiculo_placa' => $validated['vehiculo_placa'],
+                        'marcaDispositivo' => $device->nombreMarca ?? null,
+                        'modeloDispositivo' => $device->nombreModelo ?? null,
+                        'fechaInstalacion' => $fechaServicio,
+                        'fechaBaja' => $validated['estado'] === 'inactivo' ? $fechaServicio : null,
+                        'estado' => $validated['estado'] === 'activo' ? '1' : '0',
+                    ]
+                );
+
+                if ($phoneNumber !== null && $phoneNumber !== '') {
+                    DB::table('detnumerosdispositivo')->insert([
+                        'dispositivoCliente_iddispositivoCliente' => $deviceId,
+                        'numeroTelefonico_numeroTelefonico' => $phoneNumber,
+                        'fechaAsignacion' => $fechaServicio,
+                    ]);
+
+                    if ($validated['estado'] === 'activo') {
+                        DB::table('numerotelefonico')
+                            ->where('numeroTelefonico', $phoneNumber)
+                            ->where('estado', '!=', '0')
+                            ->update(['estado' => '3']);
+
+                        $activeSimPair = DB::table('detallesimcard')
+                            ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
+                            ->where('estado', '0')
+                            ->first();
+
+                        if ($activeSimPair) {
+                            DB::table('simcard')
+                                ->where('idsimCard', $activeSimPair->simCard_idsimCard)
+                                ->where('estado', '!=', '0')
+                                ->update(['estado' => '3']);
+                        }
+                    }
                 }
 
                 DB::table('historial_servicio')->insert([
                     'usuario_usuario' => $usuario,
+                    'serv_usuario' => $usuario,
                     'servicioCliente_idservicioCliente' => $serviceId,
                     'fecha_accion' => $fechaServicio,
-                    'motivo' => 'Dado de baja',
-                    'descripcion' => $request->input('comentario_baja') ?? 'Servicio dado de baja',
+                    'motivo' => 'Creacion',
+                    'descripcion' => 'Creacion de servicio',
                     'doc_referencia' => $validated['docReferencia'] ?? null,
+                    'dispositivo' => $deviceId,
+                    'numerotelefono' => $phoneNumber,
                 ]);
-            }
 
-            return $serviceId;
+                DB::table('detalle_serviciodispositivo')->insert([
+                    'servicioCliente_idservicioCliente' => $serviceId,
+                    'vehiculo_placa' => $validated['vehiculo_placa'],
+                    'dispositivoCliente_iddispositivoCliente' => $deviceId,
+                    'fecha' => $fechaServicio,
+                    'observacion' => $validated['estado'] === 'inactivo' ? ($request->input('comentario_baja') ?? null) : null,
+                    'estado' => $validated['estado'] === 'activo' ? 1 : 0,
+                ]);
+
+                $nextStateMap = [1 => 6, 2 => 3, 4 => 5, 0 => 6];
+                $nextState = $nextStateMap[$currentState] ?? $currentState;
+                DB::table('elementoalmacen')->where('imei', $deviceId)->update(['estado' => $nextState]);
+
+                // Handle deactivation logic if service is registered as inactivo
+                if ($validated['estado'] === 'inactivo') {
+                    if ($phoneNumber !== null && $phoneNumber !== '') {
+                        $mantenerSim = $request->input('mantener_sim', 'si');
+                        if ($mantenerSim === 'no') {
+                            $activeSimPair = DB::table('detallesimcard')
+                                ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
+                                ->where('estado', '0')
+                                ->first();
+
+                            if ($activeSimPair) {
+                                DB::table('detallesimcard')
+                                    ->where('iddetalleSimCard', $activeSimPair->iddetalleSimCard)
+                                    ->update(['estado' => '1']);
+
+                                DB::table('simcard')
+                                    ->where('idsimCard', $activeSimPair->simCard_idsimCard)
+                                    ->where('estado', '!=', '0')
+                                    ->update(['estado' => '1']);
+                            }
+
+                            DB::table('numerotelefonico')
+                                ->where('numeroTelefonico', $phoneNumber)
+                                ->where('estado', '!=', '0')
+                                ->update(['estado' => '1']);
+                        } else {
+                            DB::table('numerotelefonico')
+                                ->where('numeroTelefonico', $phoneNumber)
+                                ->where('estado', '!=', '0')
+                                ->update(['estado' => '2']);
+
+                            $activeSimPair = DB::table('detallesimcard')
+                                ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
+                                ->where('estado', '0')
+                                ->first();
+
+                            if ($activeSimPair) {
+                                DB::table('simcard')
+                                    ->where('idsimCard', $activeSimPair->simCard_idsimCard)
+                                    ->where('estado', '!=', '0')
+                                    ->update(['estado' => '2']);
+                            }
+                        }
+                    }
+
+                    $inactiveState = $this->stateAfterServiceDeactivation($currentState);
+                    DB::table('elementoalmacen')
+                        ->where('imei', $deviceId)
+                        ->update(['estado' => $inactiveState]);
+
+                    DB::table('historial_servicio')->insert([
+                        'usuario_usuario' => $usuario,
+                        'serv_usuario' => $usuario,
+                        'servicioCliente_idservicioCliente' => $serviceId,
+                        'fecha_accion' => $fechaServicio,
+                        'motivo' => 'Dado de baja',
+                        'descripcion' => $request->input('comentario_baja') ?? 'Servicio dado de baja',
+                        'doc_referencia' => $validated['docReferencia'] ?? null,
+                        'dispositivo' => $deviceId,
+                        'numerotelefono' => $phoneNumber,
+                    ]);
+                }
+
+                return $serviceId;
             });
         } catch (\RuntimeException $exception) {
             $message = match ($exception->getMessage()) {
@@ -701,29 +839,49 @@ class ServicioClienteController extends Controller
             return redirect()->route('modules.servicio-cliente')->with('error', 'No se encontró el servicio solicitado.');
         }
 
+        if ($record->estado === 'inactivo') {
+            $record->numeroTelefonico_numeroTelefonico = null;
+        }
+
+        $periodo = $this->formatPeriodo($record->almacen_periodo ?? null);
+        $servicioLabel = trim((string) ($record->almacen_detalle ?? $record->almacen_idalmacen));
+        if ($periodo !== '' && !str_ends_with($servicioLabel, ' - ' . $periodo)) {
+            $servicioLabel = trim($servicioLabel . ' - ' . $periodo);
+        }
+        $integratorValue = strtolower(str_replace('í', 'i', trim((string) ($record->flag_integrador ?? ''))));
+        $isIntegrador = in_array($integratorValue, ['si', '1', 'true', 'on', 'yes', 'y'], true);
+        $modalidadServicio = stripos((string) ($record->almacen_detalle ?? ''), 'COMODATO') !== false
+            ? 'COMODATO'
+            : 'VENTA';
+
         $fields = [
             [
-                'name' => 'cliente_idcliente',
-                'type' => 'select',
+                'name' => 'cliente_display',
+                'type' => 'text',
                 'label' => 'Cliente',
-                'required' => true,
-                'tomSelect' => true,
-                'optionsData' => $this->clienteOptions(),
-                'optionKey' => 'idcliente',
-                'optionLabel' => 'cliente_label',
-                'placeholder' => 'Selecciona cliente',
-                'disabled' => true,
+                'value' => $record->cliente_nombre ?? $record->cliente_idcliente,
+                'readonly' => true,
+            ],
+            [
+                'name' => 'cliente_idcliente',
+                'type' => 'hidden',
+                'value' => $record->cliente_idcliente,
+            ],
+            [
+                'name' => 'vehiculo_display',
+                'type' => 'text',
+                'label' => 'Vehículo',
+                'value' => trim(implode(' - ', array_filter([
+                    $record->vehiculo_placa,
+                    $record->vehiculo_marca ?? null,
+                    $record->vehiculo_modelo ?? null,
+                ]))),
+                'readonly' => true,
             ],
             [
                 'name' => 'vehiculo_placa',
-                'type' => 'select',
-                'label' => 'Vehículo',
-                'required' => true,
-                'tomSelect' => true,
-                'optionsData' => $this->vehiculoOptions((string) $record->cliente_idcliente),
-                'optionKey' => 'placa',
-                'optionLabel' => 'vehiculo_label',
-                'placeholder' => 'Selecciona vehículo',
+                'type' => 'hidden',
+                'value' => $record->vehiculo_placa,
             ],
             [
                 'name' => 'dispositivoCliente_iddispositivoCliente',
@@ -738,22 +896,22 @@ class ServicioClienteController extends Controller
                 'name' => 'numeroTelefonico_numeroTelefonico',
                 'type' => 'select',
                 'label' => 'Número telefónico',
-                'required' => true,
+                'required' => !$isIntegrador && $record->estado === 'activo',
                 'tomSelect' => true,
                 'options' => $this->numeroTelefonicoOptions((string) $record->numeroTelefonico_numeroTelefonico),
                 'placeholder' => 'Selecciona número telefónico',
             ],
             [
-                'name' => 'almacen_idalmacen',
-                'type' => 'select',
+                'name' => 'servicio_display',
+                'type' => 'text',
                 'label' => 'Servicio',
-                'required' => true,
-                'tomSelect' => true,
-                'optionsData' => $this->almacenOptions(),
-                'optionKey' => 'idalmacen',
-                'optionLabel' => 'detalle',
-                'placeholder' => 'Selecciona servicio',
-                'disabled' => true,
+                'value' => $servicioLabel,
+                'readonly' => true,
+            ],
+            [
+                'name' => 'almacen_idalmacen',
+                'type' => 'hidden',
+                'value' => $record->almacen_idalmacen,
             ],
             [
                 'name' => 'fechaInicio',
@@ -805,6 +963,10 @@ class ServicioClienteController extends Controller
             ],
         ];
 
+        if ($isIntegrador) {
+            $fields = array_values(array_filter($fields, fn(array $field): bool => $field['name'] !== 'numeroTelefonico_numeroTelefonico'));
+        }
+
         if ($record->estado === 'inactivo') {
             $comentarioBaja = DB::table('historial_servicio')
                 ->where('servicioCliente_idservicioCliente', $id)
@@ -830,12 +992,14 @@ class ServicioClienteController extends Controller
                 'hs.fecha_accion',
                 'hs.motivo',
                 'hs.descripcion',
+                DB::raw('COALESCE(hs.serv_usuario, hs.usuario_usuario) as usuario'),
                 DB::raw("CONCAT(COALESCE(c.nombreComercial, c.razonSocial, c.idcliente)) as cliente"),
                 'sc.vehiculo_placa as vehiculo',
                 'a.detalle as servicio',
                 'a.periodo as servicio_periodo',
-                DB::raw('(select dsd.dispositivoCliente_iddispositivoCliente from detalle_serviciodispositivo as dsd where dsd.servicioCliente_idservicioCliente = sc.idservicioCliente order by dsd.iddetalle_serviciodispositivo desc limit 1) as dispositivo'),
-                DB::raw('(select dnd.numeroTelefonico_numeroTelefonico from detnumerosdispositivo as dnd where dnd.dispositivoCliente_iddispositivoCliente = (select dsd.dispositivoCliente_iddispositivoCliente from detalle_serviciodispositivo as dsd where dsd.servicioCliente_idservicioCliente = sc.idservicioCliente order by dsd.iddetalle_serviciodispositivo desc limit 1) order by dnd.iddetNumerosDispositivo desc limit 1) as numero'),
+                'hs.dispositivo',
+                'hs.numerotelefono as numero',
+                'hs.doc_referencia',
             ])
             ->where('hs.servicioCliente_idservicioCliente', $id)
             ->orderByDesc('hs.idhistorial_servicio')
@@ -847,7 +1011,7 @@ class ServicioClienteController extends Controller
                     try {
                         $dt = \Carbon\Carbon::parse($raw);
                         $months = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.'];
-                        $formatted = sprintf('%s %s %s', $dt->format('d'), $months[$dt->month - 1], $dt->format('Y'));  
+                        $formatted = sprintf('%s %s %s', $dt->format('d'), $months[$dt->month - 1], $dt->format('Y'));
                     } catch (\Throwable $e) {
                         $formatted = (string) $raw;
                     }
@@ -874,15 +1038,19 @@ class ServicioClienteController extends Controller
             'moduleTitle' => 'Módulo Servicio Cliente',
             'mode' => 'edit',
             'formAction' => route('modules.servicio-cliente.update', $id),
-            'backRoute' => $request->query('return_route') === 'modules.clientes'
-                ? route('modules.clientes')
-                : route('modules.servicio-cliente'),
+            'backRoute' => match ($request->query('return_route')) {
+                'modules.clientes' => route('modules.clientes'),
+                'modules.cuentasporcobrar' => route('modules.cuentasporcobrar'),
+                default => route('modules.servicio-cliente'),
+            },
             'return_route' => $request->query('return_route'),
             'record' => $record,
+            'modalidadServicio' => $modalidadServicio,
             'readOnly' => true,
             'fields' => $fields,
             'extraSections' => $extraSections,
             'clienteOptionMeta' => $this->clienteOptionMeta(),
+            'isIntegrador' => $isIntegrador,
             'servicioOptionMeta' => $this->servicioOptionMeta(),
             'vehiculosUrl' => route('modules.servicio-cliente.vehiculos'),
         ] + $this->prepareLockViewData(self::LOCK_RESOURCE, (string) $id));
@@ -907,77 +1075,42 @@ class ServicioClienteController extends Controller
             return $redirect;
         }
 
-        $rules = [
-            'cliente_idcliente' => [
-                'required',
-                'exists:cliente,idcliente',
-                Rule::unique('serviciocliente')->ignore($id, 'idservicioCliente')->where(fn ($query) => $query
-                    ->where('vehiculo_placa', $request->input('vehiculo_placa'))
-                    ->where('almacen_idalmacen', $request->input('almacen_idalmacen'))),
-            ],
-            'dispositivoCliente_iddispositivoCliente' => [
-                'required',
-                'string',
-                'max:20',
-                function ($attribute, $value, $fail) use ($request, $id) {
-                    $clienteId = $request->input('cliente_idcliente');
-                    $currentDevice = DB::table('detalle_serviciodispositivo')
-                        ->where('servicioCliente_idservicioCliente', $id)
-                        ->orderBy('iddetalle_serviciodispositivo', 'desc')
-                        ->value('dispositivoCliente_iddispositivoCliente');
-                    if ($currentDevice !== null && $value === $currentDevice) {
-                        return;
-                    }
-                    $stockDevice = DB::table('elementoalmacen')
-                        ->where('imei', $value)
-                        ->first();
-                    if (!$stockDevice) {
-                        $fail('El ID Dispositivo seleccionado no existe.');
-                        return;
-                    }
-                    $estado = (int) $stockDevice->estado;
-                    $inStock = in_array($estado, [1, 2, 4], true);
-                    $isInactiveForClient = false;
-                    if ($clienteId !== null && $clienteId !== '') {
-                        $isInactiveForClient = DB::table('dispositivocliente as dc')
-                            ->join('vehiculo as v', 'v.placa', '=', 'dc.vehiculo_placa')
-                            ->where('dc.iddispositivoCliente', $value)
-                            ->where('dc.estado', '0')
-                            ->where('v.cliente_idcliente', $clienteId)
-                            ->exists();
-                    }
-                    if (!$inStock && !$isInactiveForClient) {
-                        $fail('El ID Dispositivo seleccionado no está disponible.');
-                        return;
-                    }
-                    $existingDc = DB::table('dispositivocliente')
-                        ->where('iddispositivoCliente', $value)
-                        ->first();
-                    if ($existingDc && (string) $existingDc->estado !== '0') {
-                        $fail('El ID Dispositivo seleccionado ya está en uso por otro servicio activo.');
-                        return;
-                    }
-                },
-            ],
-            'numeroTelefonico_numeroTelefonico' => [
-                'required',
-                'string',
+        $this->normalizeDateRequestForValidation($request, 'fechaInicio');
+        $this->normalizeDateRequestForValidation($request, 'fecheVencimiento');
+
+        $isIntegrador = $this->clienteEsIntegrador((string) $request->input('cliente_idcliente', ''));
+        $numeroRules = ['nullable', 'string', 'max:30'];
+        $requiresPhone = !$isIntegrador && $request->input('estado', $existingRecord->estado) === 'activo';
+        $currentServiceWasActive = $existingRecord->estado === 'activo';
+
+        if (!$isIntegrador) {
+            $numeroRules = array_merge($numeroRules, [
                 'exists:numerotelefonico,numeroTelefonico',
-                Rule::exists('numerotelefonico', 'numeroTelefonico')->where(fn ($query) => $query->where('estado', '1')),
-                Rule::exists('numerotelefonico', 'numeroTelefonico')->where(function ($query) use ($id) {
+                Rule::exists('numerotelefonico', 'numeroTelefonico')->where(fn($query) => $query->whereIn('estado', ['2', '3'])),
+                Rule::exists('numerotelefonico', 'numeroTelefonico')->where(function ($query) use ($id, $currentServiceWasActive) {
                     $currentDevice = DB::table('detalle_serviciodispositivo')
                         ->where('servicioCliente_idservicioCliente', $id)
                         ->orderBy('iddetalle_serviciodispositivo', 'desc')
                         ->value('dispositivoCliente_iddispositivoCliente');
-                    $currentNumero = $currentDevice ? DB::table('detnumerosdispositivo')
+                    $currentNumero = $currentServiceWasActive && $currentDevice ? DB::table('detnumerosdispositivo')
                         ->where('dispositivoCliente_iddispositivoCliente', $currentDevice)
+                        ->orderByDesc('fechaAsignacion')
+                        ->orderByDesc('iddetNumerosDispositivo')
                         ->value('numeroTelefonico_numeroTelefonico') : null;
 
                     $query->where(function ($q) use ($currentNumero) {
                         $q->whereNotExists(function ($subquery) {
                             $subquery->select(DB::raw(1))
                                 ->from('detnumerosdispositivo as dn')
-                                ->whereColumn('dn.numeroTelefonico_numeroTelefonico', 'numerotelefonico.numeroTelefonico');
+                                ->join('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'dn.dispositivoCliente_iddispositivoCliente')
+                                ->whereColumn('dn.numeroTelefonico_numeroTelefonico', 'numerotelefonico.numeroTelefonico')
+                                ->where('dc.estado', '1')
+                                ->whereNotExists(function ($newer) {
+                                    $newer->select(DB::raw(1))
+                                        ->from('detnumerosdispositivo as newer_dn')
+                                        ->whereColumn('newer_dn.dispositivoCliente_iddispositivoCliente', 'dn.dispositivoCliente_iddispositivoCliente')
+                                        ->whereColumn('newer_dn.iddetNumerosDispositivo', '>', 'dn.iddetNumerosDispositivo');
+                                });
                         });
                         if ($currentNumero) {
                             $q->orWhere('numerotelefonico.numeroTelefonico', $currentNumero);
@@ -994,30 +1127,117 @@ class ServicioClienteController extends Controller
                         }
                     });
                 }),
-                function ($attribute, $value, $fail) use ($id) {
+                function ($attribute, $value, $fail) use ($id, $currentServiceWasActive) {
                     $currentDevice = DB::table('detalle_serviciodispositivo')
                         ->where('servicioCliente_idservicioCliente', $id)
                         ->orderBy('iddetalle_serviciodispositivo', 'desc')
                         ->value('dispositivoCliente_iddispositivoCliente');
-                    $currentNumero = $currentDevice ? DB::table('detnumerosdispositivo')
+                    $currentNumero = $currentServiceWasActive && $currentDevice ? DB::table('detnumerosdispositivo')
                         ->where('dispositivoCliente_iddispositivoCliente', $currentDevice)
+                        ->orderByDesc('fechaAsignacion')
+                        ->orderByDesc('iddetNumerosDispositivo')
                         ->value('numeroTelefonico_numeroTelefonico') : null;
 
                     if ($currentNumero !== null && $value === $currentNumero) {
                         return;
                     }
 
-                    $exists = DB::table('detnumerosdispositivo')
-                        ->where('numeroTelefonico_numeroTelefonico', $value)
+                    $exists = DB::table('detnumerosdispositivo as dn')
+                        ->join('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'dn.dispositivoCliente_iddispositivoCliente')
+                        ->where('dn.numeroTelefonico_numeroTelefonico', $value)
+                        ->where('dc.estado', '1')
+                        ->whereNotExists(function ($newer) {
+                            $newer->select(DB::raw(1))
+                                ->from('detnumerosdispositivo as newer_dn')
+                                ->whereColumn('newer_dn.dispositivoCliente_iddispositivoCliente', 'dn.dispositivoCliente_iddispositivoCliente')
+                                ->whereColumn('newer_dn.iddetNumerosDispositivo', '>', 'dn.iddetNumerosDispositivo');
+                        })
                         ->exists();
                     if ($exists) {
-                        $fail('El número telefónico ya está asignado a otro dispositivo.');
+                        $fail('El número telefónico ya está asignado a otro dispositivo activo.');
                     }
                 }
+            ]);
+            if ($requiresPhone) {
+                array_unshift($numeroRules, 'required');
+            }
+        }
+
+        $rules = [
+            'cliente_idcliente' => [
+                'required',
+                'exists:cliente,idcliente',
+                Rule::unique('serviciocliente')->ignore($id, 'idservicioCliente')->where(fn($query) => $query
+                    ->where('vehiculo_placa', $request->input('vehiculo_placa'))
+                    ->where('almacen_idalmacen', $request->input('almacen_idalmacen'))
+                    ->where('estado', 'activo')),
             ],
+            'dispositivoCliente_iddispositivoCliente' => [
+                'required',
+                'string',
+                'max:20',
+                function ($attribute, $value, $fail) use ($request, $id) {
+                    $clienteId = $request->input('cliente_idcliente');
+                    $currentDevice = DB::table('detalle_serviciodispositivo')
+                        ->where('servicioCliente_idservicioCliente', $id)
+                        ->orderBy('iddetalle_serviciodispositivo', 'desc')
+                        ->value('dispositivoCliente_iddispositivoCliente');
+                    if ($currentDevice !== null && $value === $currentDevice) {
+                        if ($request->input('estado') === 'activo') {
+                            $hasAnotherActiveService = DB::table('detalle_serviciodispositivo as dsd')
+                                ->join('serviciocliente as sc', 'sc.idservicioCliente', '=', 'dsd.servicioCliente_idservicioCliente')
+                                ->where('dsd.dispositivoCliente_iddispositivoCliente', $value)
+                                ->where('dsd.servicioCliente_idservicioCliente', '<>', $id)
+                                ->where('dsd.estado', 1)
+                                ->where('sc.estado', 'activo')
+                                ->exists();
+                            if ($hasAnotherActiveService) {
+                                $fail('El ID Dispositivo seleccionado ya está asignado a otro servicio activo.');
+                                return;
+                            }
+                        }
+                        return;
+                    }
+                    $stockDevice = DB::table('elementoalmacen')
+                        ->where('imei', $value)
+                        ->first();
+                    if (!$stockDevice) {
+                        $fail('El ID Dispositivo seleccionado no existe.');
+                        return;
+                    }
+                    $estado = (int) $stockDevice->estado;
+                    if (!$this->deviceIsAvailableForClient((string) $value, (string) $clienteId, $estado)) {
+                        $fail('El ID Dispositivo seleccionado no está disponible.');
+                        return;
+                    }
+                    $existingDc = DB::table('dispositivocliente')
+                        ->where('iddispositivoCliente', $value)
+                        ->first();
+                    if ($existingDc && (string) $existingDc->estado !== '0') {
+                        $fail('El ID Dispositivo seleccionado ya está en uso por otro servicio activo.');
+                        return;
+                    }
+                    $hasAnotherActiveService = DB::table('detalle_serviciodispositivo as dsd')
+                        ->join('serviciocliente as sc', 'sc.idservicioCliente', '=', 'dsd.servicioCliente_idservicioCliente')
+                        ->where('dsd.dispositivoCliente_iddispositivoCliente', $value)
+                        ->where('dsd.servicioCliente_idservicioCliente', '<>', $id)
+                        ->where('dsd.estado', 1)
+                        ->where('sc.estado', 'activo')
+                        ->exists();
+                    if ($hasAnotherActiveService) {
+                        $fail('El ID Dispositivo seleccionado ya está asignado a otro servicio activo.');
+                    }
+                },
+            ],
+            'numeroTelefonico_numeroTelefonico' => $numeroRules,
             'vehiculo_placa' => [
                 'required',
-                Rule::exists('vehiculo', 'placa')->where(fn ($query) => $query->where('cliente_idcliente', $request->input('cliente_idcliente'))),
+                function ($attribute, $value, $fail) use ($request) {
+                    $clienteId = (string) $request->input('cliente_idcliente', '');
+                    if ($clienteId === '' || !$this->vehicleIsAllowedForClient((string) $value, $clienteId)) {
+                        $fail('El vehículo seleccionado no pertenece al cliente o a otro cliente del mismo grupo.');
+                    }
+                },
             ],
             'almacen_idalmacen' => ['required', 'exists:almacen,idalmacen'],
             'fechaInicio' => ['nullable', 'date_format:Y-m-d'],
@@ -1057,28 +1277,68 @@ class ServicioClienteController extends Controller
         $validated = $request->validate($rules, $messages, $attributes);
 
         $validated['vehiculo_placa'] = Str::upper(trim($validated['vehiculo_placa']));
+        $validated['numeroTelefonico_numeroTelefonico'] = $this->normalizeOptionalPhone($validated['numeroTelefonico_numeroTelefonico'] ?? null);
         $deviceId = trim((string) $request->input('dispositivoCliente_iddispositivoCliente'));
-        $phoneNumber = trim((string) $request->input('numeroTelefonico_numeroTelefonico'));
+        $phoneNumber = $this->normalizeOptionalPhone($validated['numeroTelefonico_numeroTelefonico'] ?? null);
+        $serviceUpdates = $this->changedServiceFields($validated, $existingRecord);
         $fechaServicio = Carbon::now()->format('Y-m-d H:i:s');
         $usuario = (string) $request->session()->get('erp_auth.usuario', 'anonimo');
 
         try {
-            DB::transaction(function () use ($validated, $id, $deviceId, $phoneNumber, $fechaServicio, $usuario, $request) {
+            $hasChanges = DB::transaction(function () use ($validated, $serviceUpdates, $existingRecord, $id, $deviceId, $phoneNumber, $fechaServicio, $usuario, $request) {
                 // Get old values
                 $oldRecord = DB::table('serviciocliente as sc')
                     ->leftJoin('detalle_serviciodispositivo as dsd', 'dsd.servicioCliente_idservicioCliente', '=', 'sc.idservicioCliente')
-                    ->leftJoin('detnumerosdispositivo as dnd', 'dnd.dispositivoCliente_iddispositivoCliente', '=', 'dsd.dispositivoCliente_iddispositivoCliente')
                     ->where('sc.idservicioCliente', $id)
                     ->select([
                         'sc.vehiculo_placa',
+                        'sc.estado',
                         'dsd.dispositivoCliente_iddispositivoCliente as dispositivoCliente_iddispositivoCliente',
-                        'dnd.numeroTelefonico_numeroTelefonico as numeroTelefonico_numeroTelefonico'
+                        DB::raw('(select dnd.numeroTelefonico_numeroTelefonico from detnumerosdispositivo as dnd where dnd.dispositivoCliente_iddispositivoCliente = dsd.dispositivoCliente_iddispositivoCliente order by dnd.fechaAsignacion desc, dnd.iddetNumerosDispositivo desc limit 1) as numeroTelefonico_numeroTelefonico'),
                     ])
+                    ->orderByDesc('dsd.iddetalle_serviciodispositivo')
                     ->first();
 
                 $oldVehicle = $oldRecord->vehiculo_placa ?? null;
                 $oldDevice = $oldRecord->dispositivoCliente_iddispositivoCliente ?? null;
-                $oldNumero = $oldRecord->numeroTelefonico_numeroTelefonico ?? null;
+                $oldServiceWasActive = ($oldRecord->estado ?? null) === 'activo';
+                $oldNumero = $oldServiceWasActive ? ($oldRecord->numeroTelefonico_numeroTelefonico ?? null) : null;
+                $deviceChanged = $oldDevice !== $deviceId;
+                $vehicleChanged = $oldVehicle !== null && $oldVehicle !== $validated['vehiculo_placa'];
+                $numberChanged = $oldNumero !== $phoneNumber;
+                $serviceAssignmentChanged = $deviceChanged || $vehicleChanged || $numberChanged
+                    || ($oldRecord->estado ?? null) !== $validated['estado'];
+                $syncDeviceState = ($oldServiceWasActive || $validated['estado'] === 'activo') && $serviceAssignmentChanged;
+                $oldDeviceHasAnotherActiveService = $deviceChanged && $oldDevice !== null
+                    && DB::table('detalle_serviciodispositivo as dsd')
+                        ->join('serviciocliente as sc', 'sc.idservicioCliente', '=', 'dsd.servicioCliente_idservicioCliente')
+                        ->where('dsd.dispositivoCliente_iddispositivoCliente', $oldDevice)
+                        ->where('dsd.servicioCliente_idservicioCliente', '<>', $id)
+                        ->where('dsd.estado', 1)
+                        ->where('sc.estado', 'activo')
+                        ->exists();
+
+                // Completa solo los campos historicos que quedaron NULL antes de agregar el nuevo evento.
+                $lastHistory = $serviceAssignmentChanged
+                    ? DB::table('historial_servicio')
+                        ->where('servicioCliente_idservicioCliente', $id)
+                        ->orderByDesc('idhistorial_servicio')
+                        ->first()
+                    : null;
+                if ($lastHistory) {
+                    $historyBackfill = [];
+                    if ($lastHistory->dispositivo === null && $oldDevice !== null) {
+                        $historyBackfill['dispositivo'] = $oldDevice;
+                    }
+                    if ($lastHistory->numerotelefono === null && $oldNumero !== null) {
+                        $historyBackfill['numerotelefono'] = $oldNumero;
+                    }
+                    if ($historyBackfill !== []) {
+                        DB::table('historial_servicio')
+                            ->where('idhistorial_servicio', $lastHistory->idhistorial_servicio)
+                            ->update($historyBackfill);
+                    }
+                }
 
                 $deviceInfo = DB::table('elementoalmacen as ea')
                     ->join('almacen as a', 'a.idalmacen', '=', 'ea.dispositivo_iddispositivo')
@@ -1088,176 +1348,362 @@ class ServicioClienteController extends Controller
                     ->select(['ea.imei', 'ma.nombreMarca', 'mo.nombreModelo', 'ea.estado'])
                     ->first();
 
-                if ($deviceInfo) {
+                if ($syncDeviceState && $deviceChanged && $oldDevice !== null && !$oldDeviceHasAnotherActiveService) {
+                    DB::table('detnumerosdispositivo')
+                        ->where('dispositivoCliente_iddispositivoCliente', $oldDevice)
+                        ->delete();
+                }
+
+                if ($syncDeviceState) {
+                    DB::table('detnumerosdispositivo')
+                        ->where('dispositivoCliente_iddispositivoCliente', $deviceId)
+                        ->delete();
+                }
+
+                if ($syncDeviceState && $deviceInfo) {
+                    $deviceUpdates = [
+                        'estado' => $validated['estado'] === 'activo' ? '1' : '0',
+                    ];
+                    if ($deviceChanged || $vehicleChanged) {
+                        $deviceUpdates['vehiculo_placa'] = $validated['vehiculo_placa'];
+                    }
+                    if ($deviceChanged) {
+                        $deviceUpdates['marcaDispositivo'] = $deviceInfo->nombreMarca ?? null;
+                        $deviceUpdates['modeloDispositivo'] = $deviceInfo->nombreModelo ?? null;
+                    }
+                    $deviceExists = DB::table('dispositivocliente')
+                        ->where('iddispositivoCliente', $deviceId)
+                        ->exists();
+                    $devicePayload = array_merge([
+                        'vehiculo_placa' => $validated['vehiculo_placa'],
+                        'marcaDispositivo' => $deviceInfo->nombreMarca ?? null,
+                        'modeloDispositivo' => $deviceInfo->nombreModelo ?? null,
+                    ], $deviceUpdates);
+                    if (!$deviceExists || $deviceChanged) {
+                        $devicePayload['fechaInstalacion'] = $fechaServicio;
+                    }
                     DB::table('dispositivocliente')->updateOrInsert(
                         ['iddispositivoCliente' => $deviceId],
-                        [
-                            'vehiculo_placa' => $validated['vehiculo_placa'],
-                            'marcaDispositivo' => $deviceInfo->nombreMarca ?? null,
-                            'modeloDispositivo' => $deviceInfo->nombreModelo ?? null,
-                            'fechaInstalacion' => $fechaServicio,
-                            'fechaBaja' => $validated['estado'] === 'inactivo' ? $fechaServicio : null,
-                            'estado' => $validated['estado'] === 'activo' ? '1' : '0',
-                        ]
+                        $devicePayload
                     );
 
-                    DB::table('detnumerosdispositivo')->updateOrInsert(
-                        ['dispositivoCliente_iddispositivoCliente' => $deviceId],
-                        [
+                    if ($validated['estado'] === 'activo' && $phoneNumber !== null && $phoneNumber !== '') {
+                        DB::table('detnumerosdispositivo')->insert([
+                            'dispositivoCliente_iddispositivoCliente' => $deviceId,
                             'numeroTelefonico_numeroTelefonico' => $phoneNumber,
                             'fechaAsignacion' => $fechaServicio,
-                        ]
-                    );
+                        ]);
+                    }
 
-                    DB::table('detalle_serviciodispositivo')->updateOrInsert(
-                        ['servicioCliente_idservicioCliente' => $id],
-                        [
+                    $detailUpdates = [
+                        'estado' => $validated['estado'] === 'activo' ? 1 : 0,
+                    ];
+                    if ($deviceChanged || $vehicleChanged) {
+                        $detailUpdates['vehiculo_placa'] = $validated['vehiculo_placa'];
+                    }
+                    if ($deviceChanged) {
+                        $detailUpdates['dispositivoCliente_iddispositivoCliente'] = $deviceId;
+                    }
+                    if ($validated['estado'] === 'inactivo' && $request->filled('comentario_baja')) {
+                        $detailUpdates['observacion'] = $request->input('comentario_baja');
+                    } elseif ($validated['estado'] === 'activo' && $request->filled('comentario_activacion')) {
+                        $detailUpdates['observacion'] = $request->input('comentario_activacion');
+                    }
+                    $detail = DB::table('detalle_serviciodispositivo')
+                        ->where('servicioCliente_idservicioCliente', $id)
+                        ->orderByDesc('iddetalle_serviciodispositivo')
+                        ->first();
+                    if ($detail) {
+                        DB::table('detalle_serviciodispositivo')
+                            ->where('iddetalle_serviciodispositivo', $detail->iddetalle_serviciodispositivo)
+                            ->update($detailUpdates);
+                    } else {
+                        DB::table('detalle_serviciodispositivo')->insert(array_merge([
+                            'servicioCliente_idservicioCliente' => $id,
                             'vehiculo_placa' => $validated['vehiculo_placa'],
                             'dispositivoCliente_iddispositivoCliente' => $deviceId,
                             'fecha' => $fechaServicio,
-                            'estado' => $validated['estado'] === 'activo' ? 1 : 0,
-                            'observacion' => $validated['estado'] === 'inactivo' ? ($request->input('comentario_baja') ?? null) : null,
-                        ]
-                    );
+                        ], $detailUpdates));
+                    }
 
                     if ($validated['estado'] === 'activo') {
                         $currentState = (int) $deviceInfo->estado;
-                        if (in_array($currentState, [1, 2, 4], true)) {
-                            $nextState = [1 => 6, 2 => 3, 4 => 5][$currentState];
+                        if (in_array($currentState, [0, 1, 2, 4], true)) {
+                            $nextState = [0 => 6, 1 => 6, 2 => 3, 4 => 5][$currentState];
                             DB::table('elementoalmacen')->where('imei', $deviceId)->update(['estado' => $nextState]);
                         }
                     }
                 }
 
                 // If device changed, release the old device
-                if ($oldDevice !== null && $oldDevice !== $deviceId) {
+                if ($syncDeviceState && $deviceChanged && !$oldDeviceHasAnotherActiveService) {
+                    $oldDeviceState = (int) DB::table('elementoalmacen')
+                        ->where('imei', $oldDevice)
+                        ->value('estado');
+                    $oldDeviceNextState = $this->stateAfterServiceDeactivation($oldDeviceState);
+
                     DB::table('dispositivocliente')
                         ->where('iddispositivoCliente', $oldDevice)
                         ->update(['estado' => '0', 'fechaBaja' => $fechaServicio]);
-                    
+
                     DB::table('elementoalmacen')
                         ->where('imei', $oldDevice)
-                        ->update(['estado' => 0]);
+                        ->update(['estado' => $oldDeviceNextState]);
 
                     DB::table('historial_servicio')->insert([
                         'usuario_usuario' => $usuario,
+                        'serv_usuario' => $usuario,
                         'servicioCliente_idservicioCliente' => $id,
                         'fecha_accion' => $fechaServicio,
                         'motivo' => 'Cambio de dispositivo',
                         'descripcion' => "Cambio de ID Dispositivo de {$oldDevice} a {$deviceId}",
                         'doc_referencia' => $validated['docReferencia'] ?? null,
+                        'dispositivo' => $deviceId,
+                        'numerotelefono' => $phoneNumber,
                     ]);
                 }
 
                 // If vehicle changed (and device remained the same, update its placement details)
-                if ($oldVehicle !== null && $oldVehicle !== $validated['vehiculo_placa']) {
+                if ($syncDeviceState && $vehicleChanged && !$deviceChanged) {
                     DB::table('dispositivocliente')
                         ->where('iddispositivoCliente', $deviceId)
                         ->update(['vehiculo_placa' => $validated['vehiculo_placa']]);
 
                     DB::table('historial_servicio')->insert([
                         'usuario_usuario' => $usuario,
+                        'serv_usuario' => $usuario,
                         'servicioCliente_idservicioCliente' => $id,
                         'fecha_accion' => $fechaServicio,
                         'motivo' => 'Cambio de vehiculo',
                         'descripcion' => "Cambio de vehículo de {$oldVehicle} a {$validated['vehiculo_placa']}",
                         'doc_referencia' => $validated['docReferencia'] ?? null,
+                        'dispositivo' => $deviceId,
+                        'numerotelefono' => $phoneNumber,
                     ]);
                 }
 
                 // If phone number changed
-                if ($oldNumero !== null && $oldNumero !== $phoneNumber) {
+                if ($syncDeviceState && $numberChanged) {
                     $mantenerSim = $request->input('mantener_sim', 'si');
 
-                    if ($mantenerSim === 'no') {
-                        // Break relationship between old number and its SIM card
+                    if ($oldNumero !== null && $oldNumero !== '') {
+                        if ($mantenerSim === 'no') {
+                            $activeSimPair = DB::table('detallesimcard')
+                                ->where('numeroTelefonico_numeroTelefonico', $oldNumero)
+                                ->where('estado', '0')
+                                ->first();
+
+                            if ($activeSimPair) {
+                                DB::table('detallesimcard')
+                                    ->where('iddetalleSimCard', $activeSimPair->iddetalleSimCard)
+                                    ->update(['estado' => '1']);
+
+                                DB::table('simcard')
+                                    ->where('idsimCard', $activeSimPair->simCard_idsimCard)
+                                    ->where('estado', '!=', '0')
+                                    ->update(['estado' => '1']);
+                            }
+
+                            DB::table('numerotelefonico')
+                                ->where('numeroTelefonico', $oldNumero)
+                                ->where('estado', '!=', '0')
+                                ->update(['estado' => '1']);
+                        } else {
+                            DB::table('numerotelefonico')
+                                ->where('numeroTelefonico', $oldNumero)
+                                ->where('estado', '!=', '0')
+                                ->update(['estado' => '2']);
+
+                            $activeSimPair = DB::table('detallesimcard')
+                                ->where('numeroTelefonico_numeroTelefonico', $oldNumero)
+                                ->where('estado', '0')
+                                ->first();
+
+                            if ($activeSimPair) {
+                                DB::table('simcard')
+                                    ->where('idsimCard', $activeSimPair->simCard_idsimCard)
+                                    ->where('estado', '!=', '0')
+                                    ->update(['estado' => '2']);
+                            }
+                        }
+                    }
+
+                    if ($phoneNumber !== null && $phoneNumber !== '') {
+                        DB::table('numerotelefonico')
+                            ->where('numeroTelefonico', $phoneNumber)
+                            ->where('estado', '!=', '0')
+                            ->update(['estado' => '3']);
+
                         $activeSimPair = DB::table('detallesimcard')
-                            ->where('numeroTelefonico_numeroTelefonico', $oldNumero)
+                            ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
                             ->where('estado', '0')
                             ->first();
 
                         if ($activeSimPair) {
-                            DB::table('detallesimcard')
-                                ->where('iddetalleSimCard', $activeSimPair->iddetalleSimCard)
-                                ->update(['estado' => '1']); // broken/inactive relationship
-
-                            // Keep SIM card active
                             DB::table('simcard')
                                 ->where('idsimCard', $activeSimPair->simCard_idsimCard)
-                                ->update(['estado' => '1']);
+                                ->where('estado', '!=', '0')
+                                ->update(['estado' => '3']);
                         }
                     }
 
-                    // Keep old phone number active (free for reuse)
-                    DB::table('numerotelefonico')
-                        ->where('numeroTelefonico', $oldNumero)
-                        ->update(['estado' => '1']);
-
                     DB::table('historial_servicio')->insert([
                         'usuario_usuario' => $usuario,
+                        'serv_usuario' => $usuario,
                         'servicioCliente_idservicioCliente' => $id,
                         'fecha_accion' => $fechaServicio,
                         'motivo' => 'Cambio de numero',
                         'descripcion' => "Cambio de número telefónico de {$oldNumero} a {$phoneNumber} (Mantener relación SIM: " . ($mantenerSim === 'si' ? 'Sí' : 'No') . ")",
                         'doc_referencia' => $validated['docReferencia'] ?? null,
+                        'dispositivo' => $deviceId,
+                        'numerotelefono' => $phoneNumber,
                     ]);
                 }
 
-                unset($validated['dispositivoCliente_iddispositivoCliente'], $validated['numeroTelefonico_numeroTelefonico'], $validated['mantener_sim']);
-                DB::table('serviciocliente')->where('idservicioCliente', $id)->update($validated);
+                if ($serviceUpdates !== []) {
+                    DB::table('serviciocliente')->where('idservicioCliente', $id)->update($serviceUpdates);
+                }
 
-                if ($validated['estado'] === 'inactivo') {
-                    $activeSimPair = DB::table('detallesimcard')
-                        ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
-                        ->where('estado', '0')
-                        ->first();
+                if (array_key_exists('fechaInicio', $serviceUpdates) || array_key_exists('fecheVencimiento', $serviceUpdates)) {
+                    app(\App\Services\CxcService::class)->synchronizeCurrentServiceChargeDates(
+                        $id,
+                        $existingRecord,
+                        $serviceUpdates
+                    );
+                }
 
-                    if ($activeSimPair) {
-                        DB::table('detallesimcard')
-                            ->where('iddetalleSimCard', $activeSimPair->iddetalleSimCard)
-                            ->update(['estado' => '1']);
+                if ($validated['estado'] === 'activo' && ($oldRecord->estado ?? null) !== 'activo') {
+                    app(\App\Services\CxcService::class)->crearCobroDesdeServicio(array_merge($validated, [
+                        'idservicioCliente' => $id,
+                    ]));
+                }
 
-                        DB::table('simcard')
-                            ->where('idsimCard', $activeSimPair->simCard_idsimCard)
-                            ->update(['estado' => '0']);
+                if ($validated['estado'] === 'inactivo' && $oldServiceWasActive) {
+                    if ($phoneNumber !== null && $phoneNumber !== '') {
+                        $mantenerSim = $request->input('mantener_sim', 'si');
+                        if ($mantenerSim === 'no') {
+                            $activeSimPair = DB::table('detallesimcard')
+                                ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
+                                ->where('estado', '0')
+                                ->first();
+
+                            if ($activeSimPair) {
+                                DB::table('detallesimcard')
+                                    ->where('iddetalleSimCard', $activeSimPair->iddetalleSimCard)
+                                    ->update(['estado' => '1']);
+
+                                DB::table('simcard')
+                                    ->where('idsimCard', $activeSimPair->simCard_idsimCard)
+                                    ->where('estado', '!=', '0')
+                                    ->update(['estado' => '1']);
+                            }
+
+                            DB::table('numerotelefonico')
+                                ->where('numeroTelefonico', $phoneNumber)
+                                ->where('estado', '!=', '0')
+                                ->update(['estado' => '1']);
+                        } else {
+                            DB::table('numerotelefonico')
+                                ->where('numeroTelefonico', $phoneNumber)
+                                ->where('estado', '!=', '0')
+                                ->update(['estado' => '2']);
+
+                            $activeSimPair = DB::table('detallesimcard')
+                                ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
+                                ->where('estado', '0')
+                                ->first();
+
+                            if ($activeSimPair) {
+                                DB::table('simcard')
+                                    ->where('idsimCard', $activeSimPair->simCard_idsimCard)
+                                    ->where('estado', '!=', '0')
+                                    ->update(['estado' => '2']);
+                            }
+                        }
+
+                        DB::table('detnumerosdispositivo')
+                            ->where('dispositivoCliente_iddispositivoCliente', $deviceId)
+                            ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
+                            ->delete();
                     }
-
-                    DB::table('numerotelefonico')
-                        ->where('numeroTelefonico', $phoneNumber)
-                        ->update(['estado' => '1']);
 
                     if ($deviceInfo) {
                         $latestStockDevice = DB::table('elementoalmacen')->where('imei', $deviceId)->first();
                         if ($latestStockDevice) {
-                            $deviceState = (int) $latestStockDevice->estado;
-                            if ($deviceState === 3 || $deviceState === 2) {
-                                DB::table('elementoalmacen')
-                                    ->where('imei', $deviceId)
-                                    ->update(['estado' => 2]);
-                            } elseif (in_array($deviceState, [0, 5, 6], true)) {
-                                DB::table('elementoalmacen')
-                                    ->where('imei', $deviceId)
-                                    ->update(['estado' => 0]);
-                            }
+                            $inactiveState = $this->stateAfterServiceDeactivation((int) ($deviceInfo->estado ?? 0));
+                            DB::table('elementoalmacen')
+                                ->where('imei', $deviceId)
+                                ->update(['estado' => $inactiveState]);
                         }
                     }
 
                     DB::table('historial_servicio')->insert([
                         'usuario_usuario' => $usuario,
+                        'serv_usuario' => $usuario,
                         'servicioCliente_idservicioCliente' => $id,
                         'fecha_accion' => $fechaServicio,
                         'motivo' => 'Dado de baja',
                         'descripcion' => $request->input('comentario_baja') ?? 'Servicio dado de baja',
                         'doc_referencia' => $validated['docReferencia'] ?? null,
+                        'dispositivo' => $deviceId,
+                        'numerotelefono' => $phoneNumber ?? $oldNumero,
+                    ]);
+                } elseif (($oldRecord->estado ?? null) !== ($validated['estado'] ?? null)) {
+                    $motivo = 'Cambio de estado';
+                    $descripcion = "Cambio de estado de {$oldRecord->estado} a {$validated['estado']}";
+
+                    if ($validated['estado'] === 'activo') {
+                        $motivo = 'Reactivación';
+                        if ($request->filled('comentario_activacion')) {
+                            $descripcion = $request->input('comentario_activacion');
+                        }
+                    }
+
+                    DB::table('historial_servicio')->insert([
+                        'usuario_usuario' => $usuario,
+                        'serv_usuario' => $usuario,
+                        'servicioCliente_idservicioCliente' => $id,
+                        'fecha_accion' => $fechaServicio,
+                        'motivo' => $motivo,
+                        'descripcion' => $descripcion,
+                        'doc_referencia' => $validated['docReferencia'] ?? null,
+                        'dispositivo' => $deviceId,
+                        'numerotelefono' => $phoneNumber,
                     ]);
                 }
+
+                return $serviceUpdates !== [] || $serviceAssignmentChanged;
             });
+        } catch (\RuntimeException $exception) {
+            if ($exception->getMessage() === 'ambiguous_service_cxc') {
+                return redirect()->back()->withInput()->with(
+                    'error',
+                    'No se actualizaron las fechas porque hay más de un CXC pendiente que podría pertenecer a este servicio.'
+                );
+            }
+
+            return redirect()->back()->withInput()->with('error', 'No se pudo actualizar el servicio cliente. Intente de nuevo.');
         } catch (\Exception $exception) {
             return redirect()->back()->withInput()->with('error', 'No se pudo actualizar el servicio cliente. Intente de nuevo.');
         }
 
+        if (!$hasChanges) {
+            $this->releaseLockIfOwned($request, self::LOCK_RESOURCE, (string) $id);
+            return redirect()->back()->withInput()->with('error', 'No se detectaron cambios para guardar.');
+        }
+
         $this->publishResourceEvent(self::LOCK_RESOURCE, (string) $id, 'updated');
         $this->releaseLockIfOwned($request, self::LOCK_RESOURCE, (string) $id);
+
+        if ($request->input('return_route') === 'modules.cuentasporcobrar') {
+            return redirect()
+                ->route('modules.cuentasporcobrar', ['tab' => 'servicios'])
+                ->with('success', 'Servicio cliente actualizado correctamente.');
+        }
+
+        if ($request->input('return_route') === 'modules.clientes') {
+            return redirect()->route('modules.clientes')->with('success', 'Servicio cliente actualizado correctamente.');
+        }
 
         return redirect()->route('modules.servicio-cliente')->with('success', 'Servicio cliente actualizado correctamente.');
     }
@@ -1357,19 +1803,30 @@ class ServicioClienteController extends Controller
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
             $term = '%' . $search . '%';
-            $query->where(function ($builder) use ($term) {
+            $periodoSearchValue = $this->periodoSearchValue($search);
+            $query->where(function ($builder) use ($term, $periodoSearchValue) {
                 $builder
                     ->where('sc.idservicioCliente', 'like', $term)
                     ->orWhere('sc.cliente_idcliente', 'like', $term)
                     ->orWhere('sc.vehiculo_placa', 'like', $term)
                     ->orWhere('sc.estado', 'like', $term)
                     ->orWhere('sc.docReferencia', 'like', $term)
+                    ->orWhereExists(function ($q) use ($term) {
+                        $q->from('detalle_serviciodispositivo as dsd')
+                            ->whereColumn('dsd.servicioCliente_idservicioCliente', 'sc.idservicioCliente')
+                            ->where('dsd.dispositivoCliente_iddispositivoCliente', 'like', $term);
+                    })
                     ->orWhere('c.nombreComercial', 'like', $term)
                     ->orWhere('c.razonSocial', 'like', $term)
                     ->orWhere('v.marca', 'like', $term)
                     ->orWhere('v.modelo', 'like', $term)
                     ->orWhere('a.detalle', 'like', $term)
+                    ->orWhere('a.periodo', 'like', $term)
                     ->orWhere('p.nombrePlataforma', 'like', $term);
+
+                if ($periodoSearchValue !== null) {
+                    $builder->orWhere('a.periodo', $periodoSearchValue);
+                }
             });
         }
 
@@ -1384,9 +1841,21 @@ class ServicioClienteController extends Controller
             });
         }
 
+        $grupoText = trim((string) $request->input('grupo', ''));
+        if ($grupoText !== '') {
+            $term = '%' . $grupoText . '%';
+            $query->whereExists(function ($groupQuery) use ($term) {
+                $groupQuery->select(DB::raw(1))
+                    ->from('detallegrupocliente as dgc')
+                    ->join('grupocliente as gc', 'gc.idgrupoCliente', '=', 'dgc.grupoCliente_idgrupoCliente')
+                    ->whereColumn('dgc.cliente_idcliente', 'sc.cliente_idcliente')
+                    ->where('gc.nombreGrupo', 'like', $term);
+            });
+        }
+
         $almacenText = trim((string) $request->input('almacen_idalmacen', ''));
         if ($almacenText !== '') {
-            $query->where('a.detalle', 'like', '%' . $almacenText . '%');
+            $this->applyServicioFilter($query, $almacenText);
         }
 
         $vehiculoText = trim((string) $request->input('vehiculo', ''));
@@ -1405,17 +1874,204 @@ class ServicioClienteController extends Controller
             $query->where('sc.estado', $estadoFilter);
         }
 
-        $fechaFrom = $request->input('fechaInicio_from');
-        if ($fechaFrom) {
-            $query->whereDate('sc.fechaInicio', '>=', $fechaFrom);
+        $montoFilter = trim((string) $request->input('monto', ''));
+        if ($montoFilter !== '') {
+            $query->where('sc.monto', $montoFilter);
         }
 
-        $fechaTo = $request->input('fechaInicio_to');
+        $fechaFrom = $request->input('fechaInicio_from');
+        if ($fechaFrom) {
+            $query->whereDate('sc.fechaInicio', '=', $fechaFrom);
+        }
+
+        $fechaTo = $request->input('fecheVencimiento_to', $request->input('fechaInicio_to'));
         if ($fechaTo) {
-            $query->whereDate('sc.fechaInicio', '<=', $fechaTo);
+            $query->whereDate('sc.fecheVencimiento', '=', $fechaTo);
         }
 
         return $query;
+    }
+
+    private function applyServicioFilter($query, string $value)
+    {
+        $term = '%' . $value . '%';
+        $normalized = mb_strtolower(trim($value), 'UTF-8');
+        $periodoMap = [
+            'mensual' => 30,
+            '1 mes' => 30,
+            '3 meses' => 90,
+            '6 meses' => 180,
+            '12 meses' => 365,
+            '24 meses' => 730,
+            '36 meses' => 1095,
+            '48 meses' => 1460,
+        ];
+
+        return $query->where(function ($builder) use ($term, $normalized, $periodoMap) {
+            $builder->where('a.detalle', 'like', $term)
+                ->orWhere('a.periodo', 'like', $term);
+
+            if (isset($periodoMap[$normalized])) {
+                $builder->orWhere('a.periodo', $periodoMap[$normalized]);
+            }
+        });
+    }
+
+    private function periodoSearchValue(string $value): ?int
+    {
+        $periodoMap = [
+            'mensual' => 30,
+            '1 mes' => 30,
+            '3 meses' => 90,
+            '6 meses' => 180,
+            '12 meses' => 365,
+            '24 meses' => 730,
+            '36 meses' => 1095,
+            '48 meses' => 1460,
+        ];
+
+        return $periodoMap[mb_strtolower(trim($value), 'UTF-8')] ?? null;
+    }
+
+    private function normalizeDateRequestForValidation(Request $request, string $field): void
+    {
+        $value = $request->input($field);
+        if (!is_string($value) || trim($value) === '') {
+            return;
+        }
+
+        $displayDate = mb_strtolower(trim($value), 'UTF-8');
+        if (preg_match('/^\d{4}-\d{2}-\d{2}(?:\s|T)/', $displayDate)) {
+            $request->merge([$field => substr($displayDate, 0, 10)]);
+            return;
+        }
+
+        $months = [
+            'ene' => '01',
+            'feb' => '02',
+            'mar' => '03',
+            'abr' => '04',
+            'may' => '05',
+            'jun' => '06',
+            'jul' => '07',
+            'ago' => '08',
+            'sept' => '09',
+            'sep' => '09',
+            'oct' => '10',
+            'nov' => '11',
+            'dic' => '12',
+        ];
+
+        if (preg_match('/^(\d{1,2})\s+([a-z]{3,4})\.?[,]?\s+(\d{4})$/u', $displayDate, $matches)) {
+            $month = $months[$matches[2]] ?? null;
+            if ($month !== null) {
+                $request->merge([
+                    $field => sprintf('%04d-%s-%02d', (int) $matches[3], $month, (int) $matches[1]),
+                ]);
+            }
+        }
+    }
+
+    private function changedServiceFields(array $validated, object $existingRecord): array
+    {
+        $fields = [
+            'cliente_idcliente',
+            'vehiculo_placa',
+            'almacen_idalmacen',
+            'fechaInicio',
+            'fecheVencimiento',
+            'monto',
+            'moneda_idmoneda',
+            'estado',
+            'docReferencia',
+        ];
+        $changes = [];
+
+        foreach ($fields as $field) {
+            if (!array_key_exists($field, $validated)) {
+                continue;
+            }
+
+            $currentValue = $existingRecord->{$field} ?? null;
+            $nextValue = $validated[$field];
+
+            if (in_array($field, ['fechaInicio', 'fecheVencimiento'], true)) {
+                $currentValue = $currentValue === null ? null : substr((string) $currentValue, 0, 10);
+            }
+
+            $currentValue = $currentValue === '' ? null : $currentValue;
+            $nextValue = $nextValue === '' ? null : $nextValue;
+
+            if ($currentValue === null && $nextValue === null) {
+                continue;
+            }
+
+            if ($field === 'monto' && is_numeric($currentValue) && is_numeric($nextValue)) {
+                if ((float) $currentValue === (float) $nextValue) {
+                    continue;
+                }
+            } elseif ((string) $currentValue === (string) $nextValue) {
+                continue;
+            }
+
+            $changes[$field] = $nextValue;
+        }
+
+        return $changes;
+    }
+
+    private function getPeriodoServicio(mixed $almacenId): ?int
+    {
+        if ($almacenId === null || $almacenId === '') {
+            return null;
+        }
+
+        $periodo = DB::table('almacen')->where('idalmacen', $almacenId)->value('periodo');
+        if ($periodo === null || trim((string) $periodo) === '' || strcasecmp((string) $periodo, 'No') === 0) {
+            return null;
+        }
+
+        if (is_numeric($periodo)) {
+            return (int) $periodo;
+        }
+
+        $normalized = mb_strtolower(trim((string) $periodo), 'UTF-8');
+        $map = [
+            'mensual' => 30,
+            '1 mes' => 30,
+            '3 meses' => 90,
+            '6 meses' => 180,
+            '12 meses' => 365,
+            '24 meses' => 730,
+            '36 meses' => 1095,
+            '48 meses' => 1460,
+        ];
+
+        return $map[$normalized] ?? null;
+    }
+
+    private function calculateFecheVencimiento(string $fechaInicio, mixed $periodo): ?string
+    {
+        $fecha = trim($fechaInicio);
+        if ($fecha === '') {
+            return null;
+        }
+
+        $periodoValue = $periodo;
+        if (!is_numeric($periodoValue)) {
+            $periodoValue = $this->getPeriodoServicio((string) $periodoValue);
+        }
+
+        if ($periodoValue === null || !is_numeric($periodoValue)) {
+            return null;
+        }
+
+        $days = (int) $periodoValue;
+        if ($days <= 0) {
+            return null;
+        }
+
+        return Carbon::parse($fecha)->addDays($days)->format('Y-m-d');
     }
 
     private function baseQuery()
@@ -1430,6 +2086,7 @@ class ServicioClienteController extends Controller
             ->select([
                 'sc.idservicioCliente',
                 'sc.cliente_idcliente',
+                'c.flag_integrador',
                 'sc.vehiculo_placa',
                 'sc.almacen_idalmacen',
                 'sc.moneda_idmoneda',
@@ -1447,7 +2104,7 @@ class ServicioClienteController extends Controller
                 DB::raw('COALESCE(m.simbolo, "") as moneda_simbolo'),
                 DB::raw('COALESCE(m.detalle, "") as moneda_detalle'),
                 DB::raw('(select dsd.dispositivoCliente_iddispositivoCliente from detalle_serviciodispositivo as dsd where dsd.servicioCliente_idservicioCliente = sc.idservicioCliente order by dsd.iddetalle_serviciodispositivo desc limit 1) as dispositivoCliente_iddispositivoCliente'),
-                DB::raw('(select dnd.numeroTelefonico_numeroTelefonico from detnumerosdispositivo as dnd where dnd.dispositivoCliente_iddispositivoCliente = (select dsd.dispositivoCliente_iddispositivoCliente from detalle_serviciodispositivo as dsd where dsd.servicioCliente_idservicioCliente = sc.idservicioCliente order by dsd.iddetalle_serviciodispositivo desc limit 1) order by dnd.iddetNumerosDispositivo desc limit 1) as numeroTelefonico_numeroTelefonico'),
+                DB::raw('(select dnd.numeroTelefonico_numeroTelefonico from detnumerosdispositivo as dnd where dnd.dispositivoCliente_iddispositivoCliente = (select dsd.dispositivoCliente_iddispositivoCliente from detalle_serviciodispositivo as dsd where dsd.servicioCliente_idservicioCliente = sc.idservicioCliente order by dsd.iddetalle_serviciodispositivo desc limit 1) order by dnd.fechaAsignacion desc, dnd.iddetNumerosDispositivo desc limit 1) as numeroTelefonico_numeroTelefonico'),
             ]);
     }
 
@@ -1504,50 +2161,125 @@ class ServicioClienteController extends Controller
 
         if ($cliente !== null && $cliente !== '') {
             $query->where(function ($q) use ($cliente, $currentDevice) {
-                $q->whereIn('ea.estado', [1, 2, 4]);
+                $q->whereIn('ea.estado', [1, 2]);
                 if ($currentDevice !== null && $currentDevice !== '') {
                     $q->orWhere('ea.imei', $currentDevice);
                 }
                 $q->orWhere(function ($sub) use ($cliente) {
-                    $sub->whereExists(function ($existsQuery) use ($cliente) {
-                        $existsQuery->select(DB::raw(1))
-                            ->from('dispositivocliente as dc')
-                            ->join('vehiculo as v', 'v.placa', '=', 'dc.vehiculo_placa')
-                            ->whereColumn('dc.iddispositivoCliente', 'ea.imei')
-                            ->where('dc.estado', '0')
-                            ->where('v.cliente_idcliente', $cliente);
-                    });
+                    $sub->whereIn('ea.estado', [0, 4])
+                        ->where(function ($available) use ($cliente) {
+                            $available->whereNotExists(function ($noOwnerQuery) {
+                                    $noOwnerQuery->select(DB::raw(1))
+                                        ->from('dispositivocliente as dc')
+                                        ->whereColumn('dc.iddispositivoCliente', 'ea.imei');
+                                })
+                                ->orWhereExists(function ($existsQuery) use ($cliente) {
+                                    $existsQuery->select(DB::raw(1))
+                                        ->from('dispositivocliente as dc')
+                                        ->join('vehiculo as owner_vehicle', 'owner_vehicle.placa', '=', 'dc.vehiculo_placa')
+                                        ->whereColumn('dc.iddispositivoCliente', 'ea.imei')
+                                        ->where('dc.estado', '0')
+                                        ->where(function ($ownerQuery) use ($cliente) {
+                                            $ownerQuery->where('owner_vehicle.cliente_idcliente', $cliente)
+                                                ->orWhereExists(function ($groupQuery) use ($cliente) {
+                                                    $groupQuery->select(DB::raw(1))
+                                                        ->from('detallegrupocliente as owner_group')
+                                                        ->join('detallegrupocliente as target_group', 'target_group.grupoCliente_idgrupoCliente', '=', 'owner_group.grupoCliente_idgrupoCliente')
+                                                        ->whereColumn('owner_group.cliente_idcliente', 'owner_vehicle.cliente_idcliente')
+                                                        ->where('target_group.cliente_idcliente', $cliente);
+                                                });
+                                        });
+                                });
+                        });
                 });
             });
         } else {
             $query->where(function ($q) use ($currentDevice) {
-                $q->whereIn('ea.estado', [1, 2, 4]);
+                $q->whereIn('ea.estado', [1, 2]);
                 if ($currentDevice !== null && $currentDevice !== '') {
                     $q->orWhere('ea.imei', $currentDevice);
                 }
             });
         }
 
-        return $query->select(['ea.imei', 'a.detalle'])
+        return $query->select(['ea.imei', 'ea.estado', 'a.detalle'])
             ->orderBy('ea.imei')
             ->get()
             ->mapWithKeys(function ($item): array {
+                $imei = (string) $item->imei;
+                $state = (int) $item->estado;
+                $suffix = '';
+
+                if (in_array($state, [2, 3], true)) {
+                    $suffix = '(Comodato)';
+                } elseif ($state === 4) {
+                    $suffix = '(Migrado)';
+                }
+
+                $imeiConEtiqueta = $suffix !== '' ? $imei . $suffix : $imei;
+
                 $label = trim(implode(' - ', array_filter([
-                    (string) $item->imei,
+                    $imeiConEtiqueta,
                     trim((string) ($item->detalle ?? '')),
                 ])));
 
-                return [(string) $item->imei => $label];
+                return [$imei => $label];
             })
             ->all();
+    }
+
+    private function deviceIsAvailableForClient(string $deviceId, string $clienteId, int $state): bool
+    {
+        if (in_array($state, [1, 2], true)) {
+            return true;
+        }
+
+        if (!in_array($state, [0, 4], true) || $clienteId === '') {
+            return false;
+        }
+
+        $hasOwner = DB::table('dispositivocliente')
+            ->where('iddispositivoCliente', $deviceId)
+            ->exists();
+
+        if ($state === 4 && !$hasOwner) {
+            return true;
+        }
+
+        return DB::table('dispositivocliente as dc')
+            ->join('vehiculo as owner_vehicle', 'owner_vehicle.placa', '=', 'dc.vehiculo_placa')
+            ->where('dc.iddispositivoCliente', $deviceId)
+            ->where('dc.estado', '0')
+            ->where(function ($ownerQuery) use ($clienteId) {
+                $ownerQuery->where('owner_vehicle.cliente_idcliente', $clienteId)
+                    ->orWhereExists(function ($groupQuery) use ($clienteId) {
+                        $groupQuery->select(DB::raw(1))
+                            ->from('detallegrupocliente as owner_group')
+                            ->join('detallegrupocliente as target_group', 'target_group.grupoCliente_idgrupoCliente', '=', 'owner_group.grupoCliente_idgrupoCliente')
+                            ->whereColumn('owner_group.cliente_idcliente', 'owner_vehicle.cliente_idcliente')
+                            ->where('target_group.cliente_idcliente', $clienteId);
+                    });
+            })
+            ->exists();
+    }
+
+    private function stateAfterServiceDeactivation(int $state): int
+    {
+        return match ($state) {
+            3 => 2,
+            5 => 4,
+            2, 4 => $state,
+            default => 0,
+        };
     }
 
     private function servicioOptionsForVehicle(string $vehiculo): array
     {
         $usedServices = $vehiculo === '' ? [] : DB::table('serviciocliente')
             ->where('vehiculo_placa', $vehiculo)
+            ->where('estado', 'activo')
             ->pluck('almacen_idalmacen')
-            ->map(fn ($id) => (string) $id)
+            ->map(fn($id) => (string) $id)
             ->all();
 
         return $this->almacenOptions()
@@ -1567,17 +2299,32 @@ class ServicioClienteController extends Controller
 
     private function clienteEsIntegrador(string $cliente): bool
     {
+        if ($cliente === '' || $cliente === '0' || $cliente === null) {
+            return false;
+        }
+
         $value = DB::table('cliente')->where('idcliente', $cliente)->value('flag_integrador');
         $normalized = strtolower(str_replace('í', 'i', trim((string) $value)));
 
         return in_array($normalized, ['si', '1', 'true', 'on', 'yes', 'y'], true);
     }
 
+    private function normalizeOptionalPhone(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = trim((string) $value);
+
+        return $normalized === '' ? null : $normalized;
+    }
+
     private function numeroTelefonicoOptions(?string $currentNumero = null): array
     {
         return DB::table('numerotelefonico as nt')
             ->where(function ($q) use ($currentNumero) {
-                $q->where('nt.estado', '1');
+                $q->where('nt.estado', '2');
                 if ($currentNumero !== null && $currentNumero !== '') {
                     $q->orWhere('nt.numeroTelefonico', $currentNumero);
                 }
@@ -1586,7 +2333,15 @@ class ServicioClienteController extends Controller
                 $q->whereNotExists(function ($query) {
                     $query->select(DB::raw(1))
                         ->from('detnumerosdispositivo as dn')
-                        ->whereColumn('dn.numeroTelefonico_numeroTelefonico', 'nt.numeroTelefonico');
+                        ->join('dispositivocliente as dc', 'dc.iddispositivoCliente', '=', 'dn.dispositivoCliente_iddispositivoCliente')
+                        ->whereColumn('dn.numeroTelefonico_numeroTelefonico', 'nt.numeroTelefonico')
+                            ->where('dc.estado', '1')
+                            ->whereNotExists(function ($newer) {
+                                $newer->select(DB::raw(1))
+                                    ->from('detnumerosdispositivo as newer_dn')
+                                    ->whereColumn('newer_dn.dispositivoCliente_iddispositivoCliente', 'dn.dispositivoCliente_iddispositivoCliente')
+                                    ->whereColumn('newer_dn.iddetNumerosDispositivo', '>', 'dn.iddetNumerosDispositivo');
+                            });
                 });
                 if ($currentNumero !== null && $currentNumero !== '') {
                     $q->orWhere('nt.numeroTelefonico', $currentNumero);
@@ -1611,16 +2366,54 @@ class ServicioClienteController extends Controller
     private function vehiculoOptions(?string $cliente = null)
     {
         $query = DB::table('vehiculo as v')
-            ->select([
-                'v.placa',
-                DB::raw("CONCAT(v.placa, CASE WHEN COALESCE(v.marca, '') <> '-' OR COALESCE(v.modelo, '') <> '-' THEN CONCAT(' - ', COALESCE(v.marca, ''), '-', COALESCE(v.modelo, '')) ELSE '' END) as vehiculo_label"),
-            ]);
+            ->select(['v.placa', 'v.marca', 'v.modelo', 'v.cliente_idcliente'])
+            ->orderBy('v.placa');
 
         if ($cliente !== null && $cliente !== '') {
-            $query->where('v.cliente_idcliente', $cliente);
+            $query->where(function ($builder) use ($cliente) {
+                $builder->where('v.cliente_idcliente', $cliente)
+                    ->orWhereExists(function ($groupQuery) use ($cliente) {
+                        $groupQuery->select(DB::raw(1))
+                            ->from('detallegrupocliente as owner_group')
+                            ->join('detallegrupocliente as target_group', 'target_group.grupoCliente_idgrupoCliente', '=', 'owner_group.grupoCliente_idgrupoCliente')
+                            ->whereColumn('owner_group.cliente_idcliente', 'v.cliente_idcliente')
+                            ->where('target_group.cliente_idcliente', $cliente);
+                    });
+            });
         }
 
-        return $query->orderBy('v.placa')->get();
+        return $query->get()->map(function ($vehicle) {
+            $marca = trim((string) ($vehicle->marca ?? ''));
+            $modelo = trim((string) ($vehicle->modelo ?? ''));
+            $suffix = $marca !== '' || $modelo !== ''
+                ? ' - ' . trim($marca . '-' . $modelo, " -")
+                : '';
+
+            $vehicle->vehiculo_label = $vehicle->placa . $suffix;
+
+            return $vehicle;
+        })->values()->all();
+    }
+
+    private function vehicleIsAllowedForClient(string $placa, string $clienteId): bool
+    {
+        if ($placa === '' || $clienteId === '') {
+            return false;
+        }
+
+        return DB::table('vehiculo as v')
+            ->where('v.placa', $placa)
+            ->where(function ($query) use ($clienteId) {
+                $query->where('v.cliente_idcliente', $clienteId)
+                    ->orWhereExists(function ($groupQuery) use ($clienteId) {
+                        $groupQuery->select(DB::raw(1))
+                            ->from('detallegrupocliente as owner_group')
+                            ->join('detallegrupocliente as target_group', 'target_group.grupoCliente_idgrupoCliente', '=', 'owner_group.grupoCliente_idgrupoCliente')
+                            ->whereColumn('owner_group.cliente_idcliente', 'v.cliente_idcliente')
+                            ->where('target_group.cliente_idcliente', $clienteId);
+                    });
+            })
+            ->exists();
     }
 
     private function almacenOptions()
@@ -1646,7 +2439,7 @@ class ServicioClienteController extends Controller
 
                 return $option;
             })
-            ;
+        ;
     }
 
     private function formatPeriodo(mixed $value): string
@@ -1705,7 +2498,7 @@ class ServicioClienteController extends Controller
         return DB::table('cliente')
             ->select(['idcliente', 'flag_integrador'])
             ->get()
-            ->mapWithKeys(fn ($item) => [(string) $item->idcliente => in_array(strtolower(str_replace('í', 'i', trim((string) $item->flag_integrador))), ['si', '1', 'true', 'on', 'yes', 'y'], true)])
+            ->mapWithKeys(fn($item) => [(string) $item->idcliente => in_array(strtolower(str_replace('í', 'i', trim((string) $item->flag_integrador))), ['si', '1', 'true', 'on', 'yes', 'y'], true)])
             ->all();
     }
 
@@ -1719,10 +2512,12 @@ class ServicioClienteController extends Controller
             })
             ->select(['a.idalmacen', 'a.precio', 'a.periodo'])
             ->get()
-            ->mapWithKeys(fn ($item) => [(string) $item->idalmacen => [
-                'precio' => $item->precio,
-                'periodo' => $item->periodo,
-            ]])
+            ->mapWithKeys(fn($item) => [
+                (string) $item->idalmacen => [
+                    'precio' => $item->precio,
+                    'periodo' => $item->periodo,
+                ]
+            ])
             ->all();
     }
 }

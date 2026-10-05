@@ -27,7 +27,7 @@ class ElementoAlmacenController extends Controller
                 'e.idAuxiliar',
                 DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
                 DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
-                DB::raw('CASE e.estado WHEN 1 THEN "Activo" WHEN 0 THEN "Inactivo" WHEN 2 THEN "Comodato" WHEN 3 THEN "Comodato venta" WHEN 4 THEN "Migrado" WHEN 5 THEN "Migrado venta" WHEN 6 THEN "Ventas" ELSE "Inactivo" END as estado'),
+                DB::raw('CASE e.estado WHEN 1 THEN "Activo" WHEN 0 THEN "Inactivo" WHEN 2 THEN "Comodato" WHEN 3 THEN "Comodato venta" WHEN 4 THEN "Migrado" WHEN 5 THEN "Migrado venta" WHEN 6 THEN "Venta" ELSE "Inactivo" END as estado'),
             ]);
 
         $search = trim((string) $request->input('q', ''));
@@ -72,7 +72,7 @@ class ElementoAlmacenController extends Controller
 
         $items = $baseQuery
             ->orderByRaw("CASE WHEN e.estado = '1' THEN 0 ELSE 1 END")
-            ->orderByDesc('e.fechaIngreso')
+            ->orderByDesc('e.estado')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
 
@@ -126,7 +126,7 @@ class ElementoAlmacenController extends Controller
                         ['value' => '3', 'label' => 'Comodato venta'],
                         ['value' => '4', 'label' => 'Migrado'],
                         ['value' => '5', 'label' => 'Migrado venta'],
-                        ['value' => '6', 'label' => 'Ventas'],
+                        ['value' => '6', 'label' => 'Venta'],
                     ],
                     'placeholder' => 'Todos los estados',
                 ],
@@ -188,12 +188,8 @@ class ElementoAlmacenController extends Controller
                     'placeholder' => 'Selecciona un estado',
                     'options' => [
                         '1' => 'Activo',
-                        '0' => 'Inactivo',
                         '2' => 'Comodato',
-                        '3' => 'Comodato venta',
                         '4' => 'Migrado',
-                        '5' => 'Migrado venta',
-                        '6' => 'Ventas',
                     ],
                 ],
                 [
@@ -281,7 +277,7 @@ class ElementoAlmacenController extends Controller
                         '3' => 'Comodato venta',
                         '4' => 'Migrado',
                         '5' => 'Migrado venta',
-                        '6' => 'Ventas',
+                        '6' => 'Venta',
                     ],
                 ],
                 [
@@ -371,7 +367,7 @@ class ElementoAlmacenController extends Controller
                 'e.estado',
                 'e.idAuxiliar',
                 DB::raw('COALESCE(a.detalle, "") as almacen_detalle'),
-                DB::raw('CASE e.estado WHEN 1 THEN "Activo" WHEN 0 THEN "Inactivo" WHEN 2 THEN "Comodato" WHEN 3 THEN "Comodato venta" WHEN 4 THEN "Migrado" WHEN 5 THEN "Migrado venta" WHEN 6 THEN "Ventas" ELSE "Inactivo" END as estado'),
+                DB::raw('CASE e.estado WHEN 1 THEN "Activo" WHEN 0 THEN "Inactivo" WHEN 2 THEN "Comodato" WHEN 3 THEN "Comodato venta" WHEN 4 THEN "Migrado" WHEN 5 THEN "Migrado venta" WHEN 6 THEN "Venta" ELSE "Inactivo" END as estado'),
                 DB::raw('TRIM(CONCAT(COALESCE(NULLIF(TRIM(a.detalle), ""), "Sin dispositivo"))) as almacen_label'),
             ]);
 

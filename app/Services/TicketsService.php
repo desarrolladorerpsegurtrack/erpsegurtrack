@@ -191,7 +191,8 @@ class TicketsService
                 'v.detalle as vigencia_label'
             );
 
-        $cotizaciones = strlen($ref) > 20
+        $isBatchReference = DB::table('cotizacion')->where('batch_id', $ref)->exists();
+        $cotizaciones = $isBatchReference
             ? $cotizacionesQuery->where('c.batch_id', $ref)->get()
             : $cotizacionesQuery->where('c.nroCotizacion', $ref)->get();
 
@@ -431,7 +432,8 @@ class TicketsService
             ->leftJoin('cliente as cli', 'c.cliente_idcliente', '=', 'cli.idcliente')
             ->select('c.*', 'cli.razonSocial', 'cli.nombreComercial', 'cli.idcliente');
 
-        $cotizaciones = strlen($ref) > 20
+        $isBatchReference = DB::table('cotizacion')->where('batch_id', $ref)->exists();
+        $cotizaciones = $isBatchReference
             ? $cotizacionesQuery->where('c.batch_id', $ref)->get()
             : $cotizacionesQuery->where('c.nroCotizacion', $ref)->get();
 
@@ -652,16 +654,21 @@ class TicketsService
 
                 if ($placa && $primeraCot) {
                     if (empty($planesArray)) {
-                        DB::table('serviciocliente')->insert([
+                        $serviceData = [
                             'cliente_idcliente' => $primeraCot->cliente_idcliente,
                             'vehiculo_placa'    => $placa,
                             'almacen_idalmacen' => (int) $item->almacen_idalmacen,
                             'fechaInicio'       => now()->format('Y-m-d H:i:s'),
                             'fecheVencimiento'  => null,
                             'monto'             => null,
+                            'moneda_idmoneda'   => $primeraCot->moneda_idmoneda ?? 1,
                             'estado'            => 'activo',
                             'docReferencia'     => mb_substr($idPedido, 0, 15),
-                        ]);
+                        ];
+                        $serviceId = DB::table('serviciocliente')->insertGetId($serviceData);
+                        app(CxcService::class)->crearCobroDesdeServicio(array_merge($serviceData, [
+                            'idservicioCliente' => $serviceId,
+                        ]));
                     } else {
                         // For string backwards compatibility just in case, wrap in array if not array
                         if (!is_array($planesArray)) $planesArray = [$planesArray];
@@ -679,16 +686,21 @@ class TicketsService
                                 }
                             }
 
-                            DB::table('serviciocliente')->insert([
+                            $serviceData = [
                                 'cliente_idcliente' => $primeraCot->cliente_idcliente,
                                 'vehiculo_placa'    => $placa,
                                 'almacen_idalmacen' => $planAlmacenId,
                                 'fechaInicio'       => now()->format('Y-m-d H:i:s'),
                                 'fecheVencimiento'  => null,
                                 'monto'             => $planMonto,
+                                'moneda_idmoneda'   => $primeraCot->moneda_idmoneda ?? 1,
                                 'estado'            => 'activo',
                                 'docReferencia'     => mb_substr($idPedido, 0, 15),
-                            ]);
+                            ];
+                            $serviceId = DB::table('serviciocliente')->insertGetId($serviceData);
+                            app(CxcService::class)->crearCobroDesdeServicio(array_merge($serviceData, [
+                                'idservicioCliente' => $serviceId,
+                            ]));
                         }
                     }
                 }
@@ -703,7 +715,8 @@ class TicketsService
         }
 
         // --- 8. Actualizar estado de cotizaciones ---
-        if (strlen($ref) > 20) {
+        $isBatchReference = DB::table('cotizacion')->where('batch_id', $ref)->exists();
+        if ($isBatchReference) {
             $cotizacionesToUpdate = DB::table('cotizacion')->where('batch_id', $ref)->get(['nroCotizacion', 'estado']);
             
             foreach ($cotizacionesToUpdate as $cotizacion) {

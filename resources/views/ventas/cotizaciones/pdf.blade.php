@@ -1,31 +1,6 @@
-@php use Illuminate\Support\Carbon; @endphp
+@php use App\Support\ServicePeriod; use Illuminate\Support\Carbon; @endphp
 @php
-    $periodoPdfMap = [
-        30 => 'Mensual',
-        90 => '3 Meses',
-        180 => '6 Meses',
-        365 => '12 Meses',
-        730 => '24 Meses',
-        1095 => '36 Meses',
-        1460 => '48 Meses',
-    ];
-    $formatPeriodoPdf = function ($value) use ($periodoPdfMap) {
-        if ($value === null || $value === '') {
-            return '';
-        }
-
-        $periodo = trim((string) $value);
-        if ($periodo === '' || mb_strtolower($periodo, 'UTF-8') === 'no') {
-            return '';
-        }
-
-        if (is_numeric($periodo)) {
-            $days = (int) $periodo;
-            return $periodoPdfMap[$days] ?? $periodo;
-        }
-
-        return $periodo;
-    };
+    $formatPeriodoPdf = fn ($value) => ServicePeriod::label($value);
 @endphp
 <!doctype html>
 <html lang="es">

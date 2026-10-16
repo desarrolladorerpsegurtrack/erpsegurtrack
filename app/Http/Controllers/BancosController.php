@@ -8,7 +8,6 @@ use Illuminate\Database\QueryException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 
 class BancosController extends Controller
@@ -74,6 +73,7 @@ class BancosController extends Controller
                     ['value' => 'A', 'label' => 'Saldo a favor'],
                     ['value' => 'C', 'label' => 'Aplicación de saldo a favor'],
                     ['value' => 'T', 'label' => 'Detracción/retención aplicada'],
+                    ['value' => 'AUTODETRACCION', 'label' => 'Autodetracción'],
                 ]],
             ],
             'createRoute' => route('modules.finanzas.bancos.create'),
@@ -220,44 +220,54 @@ class BancosController extends Controller
 
     public function notaCreditos(Request $request): View
     {
-        $request->merge(['tipoMov' => 'S']);
-        $balances = $this->bancosService->getStats($request)['balances'] ?? [];
-        $amountInSoles = (float) ($balances['S/']['balance_negativo'] ?? 0);
-        $amountInDollars = collect($balances)
-            ->filter(fn (array $balance, string $symbol): bool => in_array(strtoupper(str_replace(' ', '', trim($symbol))), ['$', 'US$', 'USD'], true))
-            ->sum('balance_negativo');
-        $bankOptions = $this->bancosService->getBankOptions()
-            ->map(fn ($bank): array => [
-                'value' => (string) $bank->identidadBancaria,
-                'label' => $bank->label,
-            ])
-            ->all();
-        $items = $this->bancosService->getList($request, $this->resolvePerPage($request));
+        $items = $this->notaCreditoQuery($request)
+            ->orderByDesc('nc.fechaEmision')
+            ->orderByDesc('nc.idnotacredito')
+            ->paginate($this->resolvePerPage($request))
+            ->withQueryString();
         $items->getCollection()->transform(function ($row): mixed {
-            $row->fechaRegistro_display = $row->fechaRegistro ? date('d/m/Y H:i', strtotime((string) $row->fechaRegistro)) : '-';
+            $row->fechaEmision_display = $row->fechaEmision ? date('d/m/Y H:i', strtotime((string) $row->fechaEmision)) : '-';
             $row->monto_display = $this->formatMoney($row->monto, $row->moneda_simbolo ?? null);
+            $row->monto_disponible_display = $this->formatMoney($row->monto_disponible, $row->moneda_simbolo ?? null);
+            $row->estado_display = match ((string) $row->estado) {
+                'E' => (float) $row->monto_disponible > 0 ? 'Disponible' : 'Aplicada',
+                'A' => 'Aplicada',
+                default => (string) $row->estado,
+            };
             return $row;
         });
+        $totals = DB::table('nota_credito as nc')
+            ->leftJoin('moneda as m', 'm.idmoneda', '=', 'nc.moneda_idmoneda')
+            ->selectRaw("COALESCE(NULLIF(TRIM(m.simbolo), ''), 'S/') as moneda_simbolo")
+            ->selectRaw('SUM(nc.monto) as monto_emitido')
+            ->groupBy('m.simbolo')
+            ->get()
+            ->mapWithKeys(fn ($row): array => [
+                $this->normalizeCurrencySymbol((string) $row->moneda_simbolo) => (float) $row->monto_emitido,
+            ]);
 
         return view('finanzas.reporte', [
             'title' => 'Nota de créditos',
             'singularTitle' => 'Nota de crédito',
             'items' => $items,
             'columns' => [
-                ['key' => 'idbancos', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'entidad_bancaria_nombre', 'label' => 'Entidad bancaria', 'type' => 'text'],
+                ['key' => 'idnotacredito', 'label' => 'ID', 'type' => 'text'],
+                ['key' => 'docReferencia', 'label' => 'Factura', 'type' => 'text'],
                 ['key' => 'cliente_nombre', 'label' => 'Cliente', 'type' => 'text'],
-                ['key' => 'fechaRegistro_display', 'label' => 'Fecha de registro', 'type' => 'text'],
+                ['key' => 'descripcion', 'label' => 'Comentario', 'type' => 'text'],
+                ['key' => 'fechaEmision_display', 'label' => 'Fecha de emisión', 'type' => 'text'],
                 ['key' => 'monto_display', 'label' => 'Monto', 'type' => 'text'],
+                ['key' => 'monto_disponible_display', 'label' => 'Disponible', 'type' => 'text'],
+                ['key' => 'estado_display', 'label' => 'Estado', 'type' => 'text'],
             ],
             'stats' => [
-                ['label' => 'Monto de salida en soles', 'value' => $this->formatMoney($amountInSoles, 'S/')],
-                ['label' => 'Monto de salida en dólares', 'value' => $this->formatMoney((float) $amountInDollars, '$')],
+                ['label' => 'Monto emitido en soles', 'value' => $this->formatMoney($totals['S/'] ?? 0, 'S/')],
+                ['label' => 'Monto emitido en dólares', 'value' => $this->formatMoney($totals['$'] ?? 0, '$')],
             ],
             'refreshStatsOnFilter' => true,
             'filters' => [
-                ['name' => 'entidadBancaria_identidadBancaria', 'label' => 'Entidad bancaria', 'type' => 'select', 'placeholder' => 'Todas', 'options' => $bankOptions],
                 ['name' => 'cliente', 'label' => 'Cliente', 'type' => 'text', 'placeholder' => 'RUC o nombre del cliente'],
+                ['name' => 'factura', 'label' => 'Factura', 'type' => 'text', 'placeholder' => 'Número de factura'],
                 ['name' => 'moneda', 'label' => 'Tipo de moneda', 'type' => 'select', 'placeholder' => 'Todas', 'options' => [
                     ['value' => 'S/', 'label' => 'S/'],
                     ['value' => '$', 'label' => '$'],
@@ -265,7 +275,7 @@ class BancosController extends Controller
                 ['name' => 'fechaDesde', 'toName' => 'fechaHasta', 'label' => 'Fecha de registro', 'type' => 'date_range'],
                 ['name' => 'montoDesde', 'toName' => 'montoHasta', 'label' => 'Monto', 'type' => 'number_range', 'placeholder' => 'Ej. 35'],
             ],
-            'createRoute' => route('modules.finanzas.bancos.create', ['tipoMov' => 'S', 'notaCredito' => 1]),
+            'createRoute' => route('modules.finanzas.nota-creditos.create'),
             'createButtonLabel' => 'Nueva Nota de crédito',
             'exportRoutes' => [
                 'pdf' => route('modules.finanzas.nota-creditos.export', ['format' => 'pdf']),
@@ -274,7 +284,7 @@ class BancosController extends Controller
             'showActionsColumn' => false,
             'showResultStat' => true,
             'resultsLabel' => 'Notas de crédito encontradas',
-            'identifierKey' => 'idbancos',
+            'identifierKey' => 'idnotacredito',
         ]);
     }
 
@@ -307,18 +317,64 @@ class BancosController extends Controller
 
     public function exportNotaCreditos(Request $request, string $format)
     {
-        $request->merge(['tipoMov' => 'S']);
+        abort_unless(in_array(strtolower($format), ['pdf', 'xlsx'], true), 404);
+        $columns = [
+            ['key' => 'idnotacredito', 'label' => 'ID'],
+            ['key' => 'docReferencia', 'label' => 'Factura'],
+            ['key' => 'cliente_nombre', 'label' => 'Cliente'],
+            ['key' => 'descripcion', 'label' => 'Comentario'],
+            ['key' => 'fechaEmision', 'label' => 'Fecha de emisión'],
+            [
+                'key' => 'monto',
+                'label' => 'Monto',
+                'value' => fn ($row): string => $this->formatMoney($row->monto, $row->moneda_simbolo ?? null),
+            ],
+            [
+                'key' => 'monto_disponible',
+                'label' => 'Disponible',
+                'value' => fn ($row): string => $this->formatMoney($row->monto_disponible, $row->moneda_simbolo ?? null),
+            ],
+            [
+                'key' => 'estado',
+                'label' => 'Estado',
+                'value' => fn ($row): string => match ((string) $row->estado) {
+                    'E' => (float) $row->monto_disponible > 0 ? 'Disponible' : 'Aplicada',
+                    'A' => 'Aplicada',
+                    default => (string) $row->estado,
+                },
+            ],
+        ];
+        $filename = 'notas_credito_' . now()->format('Ymd_His') . '.' . strtolower($format);
+        $rows = $this->notaCreditoQuery($request)
+            ->orderByDesc('nc.fechaEmision')
+            ->orderByDesc('nc.idnotacredito')
+            ->get();
 
-        return $this->export($request, $format);
+        return strtolower($format) === 'xlsx'
+            ? $this->exportXlsxResponse($rows, $columns, $filename)
+            : $this->exportPdfResponse($rows, $columns, 'Notas de crédito', $filename);
     }
 
-    public function create(Request $request): View
+    public function create(Request $request): View|RedirectResponse
     {
         $type = strtoupper(trim((string) $request->query('tipoMov', '')));
         $isCreditNote = $request->boolean('notaCredito') && $type === 'S';
-        $title = $isCreditNote ? 'Nueva Nota de crédito' : 'Nuevo movimiento bancario';
+        if ($isCreditNote) {
+            return redirect()->route('modules.finanzas.nota-creditos.create');
+        }
+        return view('finanzas.bancos-form', $this->formViewData('Nuevo movimiento bancario', 'create', null, null, $type));
+    }
 
-        return view('finanzas.bancos-form', $this->formViewData($title, 'create', null, null, $type, $isCreditNote));
+    public function createNotaCredito(): View
+    {
+        return view('finanzas.bancos-form', $this->formViewData(
+            'Nueva Nota de crédito',
+            'create',
+            null,
+            null,
+            null,
+            true
+        ));
     }
 
     public function store(Request $request): RedirectResponse
@@ -327,68 +383,23 @@ class BancosController extends Controller
         $validated = $this->validateData($request, $isCreditNote);
 
         if ($isCreditNote) {
-            $cxc = DB::table('cuentasporcobrar')
-                ->where('cliente_idcliente', $validated['cliente_idcliente'])
-                ->where('moneda_idmoneda', $validated['moneda_idmoneda'])
-                ->where('montoActual', '>', 0)
-                ->orderBy('idcuentasPorCobrar')
-                ->first();
-            if (!$cxc) {
-                return redirect()->back()->withInput()->with('error', 'El cliente no tiene una cuenta por cobrar con saldo en la moneda seleccionada.');
-            }
-            if ((float) $validated['monto'] > $this->availableCredit((string) $cxc->cliente_idcliente, (int) $cxc->moneda_idmoneda)) {
-                return redirect()->back()->withInput()->with('error', 'El monto de la nota de crédito supera el saldo a favor disponible.');
-            }
-            $description = trim((string) ($validated['informacion'] ?? ''));
-            $validated['informacion'] = 'Nota de crédito: ' . ($description !== '' ? $description : 'Devolución de saldo a favor');
-            $paymentFile = $request->file('archivoPago');
-            $storedPath = null;
-
-            try {
-                DB::transaction(function () use ($validated, $cxc, $paymentFile, &$storedPath): void {
-                    if ($paymentFile !== null) {
-                        $storedPath = $paymentFile->store('comprobantes-pago/notas-credito', 'public');
-                        if (!$storedPath) {
-                            throw new \RuntimeException('No se pudo guardar el archivo de pago.');
-                        }
-                    }
-
-                    $bankData = $validated;
-                    unset($bankData['cliente_idcliente'], $bankData['moneda_idmoneda'], $bankData['archivoPago']);
-                    $bankId = DB::table('bancos')->insertGetId($bankData);
-                    DB::table('detallecxc')->insert([
-                        'formaPago_idformaPago' => DB::table('formapago')->orderBy('idformaPago')->value('idformaPago'),
-                        'cuentasPorCobrar_idcuentasPorCobrar' => $cxc->idcuentasPorCobrar,
-                        'moneda_idmoneda' => $cxc->moneda_idmoneda,
-                        'descripcion' => 'Nota de crédito / devolución de saldo a favor',
-                        'fechaPagoProgramada' => $validated['fechaRegistro'],
-                        'fechaPago' => $validated['fechaRegistro'],
-                        'bancos_idbancos' => $bankId,
-                        'estado' => '1',
-                    ]);
-                    if ($storedPath !== null) {
-                        DB::table('evidenciapago')->insert([
-                            'fechaCarga' => now()->format('Y-m-d H:i:s'),
-                            'archivo' => $storedPath,
-                            'bancos_idbancos' => $bankId,
-                        ]);
-                    }
-                });
-            } catch (\Throwable $exception) {
-                if ($storedPath !== null) {
-                    Storage::disk('public')->delete($storedPath);
-                }
-
-                throw $exception;
-            }
-        } else {
-            DB::table('bancos')->insert($validated);
+            $this->insertNotaCredito($validated);
+            return redirect()->route('modules.finanzas.nota-creditos.index')
+                ->with('success', 'Nota de crédito creada correctamente.');
         }
 
-        $returnRoute = $isCreditNote ? 'modules.finanzas.nota-creditos.index' : 'modules.finanzas.bancos.index';
-        $message = $isCreditNote ? 'Nota de crédito creada correctamente.' : 'Movimiento bancario creado correctamente.';
+        DB::table('bancos')->insert($validated);
+        return redirect()->route('modules.finanzas.bancos.index')
+            ->with('success', 'Movimiento bancario creado correctamente.');
+    }
 
-        return redirect()->route($returnRoute)->with('success', $message);
+    public function storeNotaCredito(Request $request): RedirectResponse
+    {
+        $validated = $this->validateData($request, true);
+        $this->insertNotaCredito($validated);
+
+        return redirect()->route('modules.finanzas.nota-creditos.index')
+            ->with('success', 'Nota de crédito creada correctamente.');
     }
 
     public function edit(int $id): View
@@ -426,40 +437,56 @@ class BancosController extends Controller
 
     private function validateData(Request $request, bool $isCreditNote = false): array
     {
+        if ($isCreditNote) {
+            $data = $request->validate([
+                'cliente_idcliente' => ['required', 'string', 'max:20', 'exists:cliente,idcliente'],
+                'docReferencia' => ['required', 'string', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX],
+                'descripcion' => ['nullable', 'string', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
+                'moneda_idmoneda' => ['required', 'integer', 'exists:moneda,idmoneda'],
+                'monto' => ['required', 'numeric', 'gt:0', 'decimal:0,2'],
+            ]);
+            $data['monto'] = number_format((float) $data['monto'], 2, '.', '');
+
+            return $data;
+        }
+
         $rules = [
             'entidadBancaria_identidadBancaria' => ['required', 'integer', 'exists:entidadbancaria,identidadBancaria'],
             'fechaRegistro' => ['required', 'date'],
-            'informacion' => ['nullable', 'string', 'max:' . ($isCreditNote ? 80 : 100), 'regex:' . self::SAFE_TEXT_REGEX],
+            'informacion' => ['nullable', 'string', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
             'monto' => ['required', 'numeric', 'min:0', 'decimal:0,2'],
         ];
 
-        if ($isCreditNote) {
-            $rules += [
-                'cliente_idcliente' => ['required', 'string', 'max:20', 'exists:cliente,idcliente'],
-                'moneda_idmoneda' => ['required', 'integer', 'exists:moneda,idmoneda'],
-                'archivoPago' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
-            ];
-        } else {
-            $rules['tipoMov'] = ['required', 'in:I,S'];
-        }
+        $rules['tipoMov'] = ['required', 'in:I,S'];
 
         $data = $request->validate($rules);
-        if ($isCreditNote) {
-            $data['tipoMov'] = 'S';
-        }
-
         $data['monto'] = number_format((float) $data['monto'], 2, '.', '');
         return $data;
+    }
+
+    private function insertNotaCredito(array $validated): void
+    {
+        DB::table('nota_credito')->insert([
+            'cliente_idcliente' => $validated['cliente_idcliente'],
+            'moneda_idmoneda' => $validated['moneda_idmoneda'],
+            'docReferencia' => $validated['docReferencia'],
+            'monto' => $validated['monto'],
+            'descripcion' => $validated['descripcion'] ?? null,
+            'fechaEmision' => now(),
+            'estado' => 'E',
+            'cuentasPorCobrar_idcuentasPorCobrar' => null,
+            'fechaAplicacion' => null,
+        ]);
     }
 
     private function formViewData(string $title, string $mode, object|array|null $record = null, ?int $id = null, ?string $defaultTipoMov = null, bool $isCreditNote = false): array
     {
         $value = fn(string $key, mixed $default = null): mixed => data_get($record, $key, $default);
         $type = $value('tipoMov', $defaultTipoMov);
-        $fields = [
+        $fields = $isCreditNote ? [] : [
             ['name' => 'entidadBancaria_identidadBancaria', 'type' => 'select', 'label' => 'Entidad bancaria', 'required' => true, 'tomSelect' => true, 'optionsData' => $this->bancosService->getBankOptions(), 'optionKey' => 'identidadBancaria', 'optionLabel' => 'label', 'placeholder' => 'Selecciona entidad bancaria'],
         ];
-        if ($isCreditNote && $type === 'S' && $mode === 'create') {
+        if ($isCreditNote) {
             $fields[] = [
                 'name' => 'cliente_idcliente',
                 'type' => 'select',
@@ -474,22 +501,21 @@ class BancosController extends Controller
                 'optionLabel' => 'cliente_label',
                 'placeholder' => 'Selecciona cliente',
             ];
-        }
-        $fields[] = [
-            'name' => 'fechaRegistro',
-            'type' => 'datetime-local',
-            'label' => 'Fecha de registro',
-            'required' => true,
-            'value' => $value('fechaRegistro') ? date('Y-m-d\\TH:i', strtotime((string) $value('fechaRegistro'))) : now()->format('Y-m-d\\TH:i'),
-        ];
-        if ($isCreditNote && $type === 'S' && $mode === 'create') {
             $fields[] = [
-                'name' => 'informacion',
+                'name' => 'docReferencia',
                 'type' => 'text',
-                'label' => 'Información',
+                'label' => 'Factura relacionada',
+                'required' => true,
+                'maxlength' => 15,
+                'value' => $value('docReferencia'),
+            ];
+            $fields[] = [
+                'name' => 'descripcion',
+                'type' => 'text',
+                'label' => 'Comentario',
                 'required' => false,
-                'maxlength' => 80,
-                'datalistOptions' => ['Devolución de dinero', 'Reembolso'],
+                'maxlength' => 100,
+                'value' => $value('descripcion'),
             ];
             $fields[] = [
                 'name' => 'moneda_idmoneda',
@@ -523,15 +549,14 @@ class BancosController extends Controller
                 'min' => 0,
                 'value' => number_format((float) $value('monto', 0), 2, '.', ''),
             ];
-            $fields[] = [
-                'name' => 'archivoPago',
-                'type' => 'file',
-                'label' => 'Archivo de pago',
-                'required' => false,
-                'fileKind' => 'file',
-                'accept' => 'image/jpeg,image/png,application/pdf',
-            ];
         } else {
+            $fields[] = [
+                'name' => 'fechaRegistro',
+                'type' => 'datetime-local',
+                'label' => 'Fecha de registro',
+                'required' => true,
+                'value' => $value('fechaRegistro') ? date('Y-m-d\\TH:i', strtotime((string) $value('fechaRegistro'))) : now()->format('Y-m-d\\TH:i'),
+            ];
             $fields[] = ['name' => 'monto', 'type' => 'number', 'label' => 'Monto', 'required' => true, 'inputmode' => 'decimal', 'step' => '0.01', 'min' => 0, 'value' => number_format((float) $value('monto', 0), 2, '.', '')];
             $fields[] = ['name' => 'informacion', 'type' => 'text', 'label' => 'Información', 'required' => false, 'maxlength' => 100];
             $fields[] = ['name' => 'tipoMov', 'type' => 'select', 'label' => 'Tipo de movimiento', 'required' => true, 'value' => $type, 'options' => [['value' => 'I', 'label' => 'Ingreso'], ['value' => 'S', 'label' => 'Salida']], 'placeholder' => 'Selecciona tipo de movimiento'];
@@ -542,23 +567,113 @@ class BancosController extends Controller
 
         return [
             'title' => $title,
-            'moduleTitle' => 'Banco / Caja',
+            'moduleTitle' => $isCreditNote ? 'Notas de crédito' : 'Banco / Caja',
             'mode' => $mode,
             'formAction' => $mode === 'create'
-                ? route('modules.finanzas.bancos.store', $isCreditNote ? ['notaCredito' => 1] : [])
+                ? ($isCreditNote
+                    ? route('modules.finanzas.nota-creditos.store')
+                    : route('modules.finanzas.bancos.store'))
                 : route('modules.finanzas.bancos.update', ['id' => $id]),
             'backRoute' => $backRoute,
             'record' => $record,
             'fields' => $fields,
-            'readOnly' => false,
+            'readOnly' => $mode === 'edit',
         ];
     }
 
-    private function availableCredit(string $clientId, int $currencyId): float
+    private function notaCreditoQuery(Request $request)
     {
-        $credits = DB::table('bancos as b')->join('detallecxc as dc', 'dc.bancos_idbancos', '=', 'b.idbancos')->join('cuentasporcobrar as c', 'c.idcuentasPorCobrar', '=', 'dc.cuentasPorCobrar_idcuentasPorCobrar')->where('b.tipoMov', 'A')->where('b.informacion', 'not like', '[ANULADO]%')->where('c.cliente_idcliente', $clientId)->where('dc.moneda_idmoneda', $currencyId)->sum('b.monto');
-        $used = DB::table('bancos as b')->join('detallecxc as dc', 'dc.bancos_idbancos', '=', 'b.idbancos')->join('cuentasporcobrar as c', 'c.idcuentasPorCobrar', '=', 'dc.cuentasPorCobrar_idcuentasPorCobrar')->whereIn('b.tipoMov', ['C', 'S'])->where(function ($q): void { $q->where('b.informacion', 'like', 'Aplicación saldo a favor%')->orWhere('b.informacion', 'like', 'Nota de crédito:%'); })->where('b.informacion', 'not like', '[ANULADO]%')->where('c.cliente_idcliente', $clientId)->where('dc.moneda_idmoneda', $currencyId)->sum('b.monto');
-        return max(0, (float) $credits - (float) $used);
+        $filters = $request->validate([
+            'cliente' => ['nullable', 'string', 'max:100'],
+            'factura' => ['nullable', 'string', 'max:50'],
+            'moneda' => ['nullable', 'in:S/,$'],
+            'fechaDesde' => ['nullable', 'date_format:Y-m-d'],
+            'fechaHasta' => ['nullable', 'date_format:Y-m-d'],
+            'montoDesde' => ['nullable', 'numeric', 'min:0'],
+            'montoHasta' => ['nullable', 'numeric', 'min:0'],
+        ]);
+        $applied = DB::table('nota_credito_aplicacion')
+            ->select('nota_credito_idnotacredito')
+            ->where('estado', '1')
+            ->groupBy('nota_credito_idnotacredito')
+            ->selectRaw('SUM(monto) as monto_aplicado');
+        $query = DB::table('nota_credito as nc')
+            ->leftJoin('cliente as cli', 'cli.idcliente', '=', 'nc.cliente_idcliente')
+            ->leftJoin('moneda as m', 'm.idmoneda', '=', 'nc.moneda_idmoneda')
+            ->leftJoinSub($applied, 'aplicada', function ($join): void {
+                $join->on('aplicada.nota_credito_idnotacredito', '=', 'nc.idnotacredito');
+            })
+            ->select([
+                'nc.idnotacredito',
+                'nc.cliente_idcliente',
+                'nc.docReferencia',
+                'nc.descripcion',
+                'nc.fechaEmision',
+                'nc.monto',
+                'nc.estado',
+            ])
+            ->selectRaw('COALESCE(cli.razonSocial, cli.nombreComercial, cli.idcliente, "-") as cliente_nombre')
+            ->selectRaw('COALESCE(NULLIF(TRIM(m.simbolo), ""), "S/") as moneda_simbolo')
+            ->selectRaw('ROUND(nc.monto - COALESCE(aplicada.monto_aplicado, 0), 2) as monto_disponible');
+
+        $search = trim((string) $request->query('q', ''));
+        if ($search !== '') {
+            $term = '%' . $search . '%';
+            $query->where(function ($builder) use ($term): void {
+                $builder->where('nc.idnotacredito', 'like', $term)
+                    ->orWhere('nc.docReferencia', 'like', $term)
+                    ->orWhere('nc.descripcion', 'like', $term)
+                    ->orWhere('cli.idcliente', 'like', $term)
+                    ->orWhere('cli.razonSocial', 'like', $term)
+                    ->orWhere('cli.nombreComercial', 'like', $term);
+            });
+        }
+
+        $client = trim((string) ($filters['cliente'] ?? ''));
+        if ($client !== '') {
+            $term = '%' . $client . '%';
+            $query->where(function ($builder) use ($term): void {
+                $builder->where('cli.idcliente', 'like', $term)
+                    ->orWhere('cli.razonSocial', 'like', $term)
+                    ->orWhere('cli.nombreComercial', 'like', $term);
+            });
+        }
+        $invoice = trim((string) ($filters['factura'] ?? ''));
+        if ($invoice !== '') {
+            $query->where('nc.docReferencia', 'like', '%' . $invoice . '%');
+        }
+        if (($filters['moneda'] ?? null) === 'S/') {
+            $query->whereIn(DB::raw("UPPER(TRIM(m.simbolo))"), ['S/', 'S', 'SOL', 'SOLES']);
+        } elseif (($filters['moneda'] ?? null) === '$') {
+            $query->whereIn(DB::raw("UPPER(TRIM(m.simbolo))"), ['$', 'US$', 'USD']);
+        }
+        if (!empty($filters['fechaDesde'])) {
+            $query->whereDate('nc.fechaEmision', '>=', $filters['fechaDesde']);
+        }
+        if (!empty($filters['fechaHasta'])) {
+            $query->whereDate('nc.fechaEmision', '<=', $filters['fechaHasta']);
+        }
+        if (isset($filters['montoDesde'])) {
+            $query->where('nc.monto', '>=', $filters['montoDesde']);
+        }
+        if (isset($filters['montoHasta'])) {
+            $query->where('nc.monto', '<=', $filters['montoHasta']);
+        }
+
+        return $query;
+    }
+
+    private function normalizeCurrencySymbol(string $symbol): string
+    {
+        $normalized = strtoupper(str_replace(' ', '', trim($symbol)));
+        if (in_array($normalized, ['', 'S', 'S/', 'SOL', 'SOLES'], true)) {
+            return 'S/';
+        }
+        if (in_array($normalized, ['$', 'US$', 'USD'], true)) {
+            return '$';
+        }
+
+        return $symbol;
     }
 
     private function formatMoney(mixed $value, ?string $symbol = null): string
@@ -578,11 +693,17 @@ class BancosController extends Controller
             return 'Anulado/Revertido';
         }
 
+        if (str_starts_with(mb_strtolower(trim((string) ($information ?? '')), 'UTF-8'), 'autodetracción')) {
+            return 'Autodetracción';
+        }
+
         return match ((string) $type) {
             'I' => 'Ingreso',
             'A' => 'Saldo a favor',
             'C' => 'Aplicación de saldo a favor',
-            'T' => 'Detracción/retención aplicada',
+            'T' => str_starts_with(mb_strtolower(trim((string) ($information ?? '')), 'UTF-8'), 'retención')
+                ? 'Retención'
+                : 'Detracción',
             default => 'Salida',
         };
     }

@@ -32,7 +32,9 @@ Route::middleware('erp.module:ventas.cotizaciones')->group(function () {
     Route::post('/modulos/ventas/cotizaciones', [CotizacionController::class, 'store'])->name('modules.ventas.cotizaciones.store');
     Route::get('/modulos/ventas/cotizaciones/{id}/editar', [CotizacionController::class, 'edit'])->name('modules.ventas.cotizaciones.edit');
     Route::put('/modulos/ventas/cotizaciones/{id}', [CotizacionController::class, 'update'])->name('modules.ventas.cotizaciones.update');
-    Route::post('/modulos/ventas/cotizaciones/{id}/anular', [CotizacionController::class, 'anular'])->name('modules.ventas.cotizaciones.anular');
+    Route::post('/modulos/ventas/cotizaciones/{id}/anular', [CotizacionController::class, 'anular'])
+        ->middleware('erp.action:ventas.cotizaciones,anular')
+        ->name('modules.ventas.cotizaciones.anular');
     Route::post('/modulos/ventas/cotizaciones/{id}/aprobar', [CotizacionController::class, 'approve'])->name('modules.ventas.cotizaciones.approve');
     Route::delete('/modulos/ventas/cotizaciones/bulk-destroy', [\App\Http\Controllers\BulkDestroyController::class, 'destroy'])->name('modules.ventas.cotizaciones.bulk-destroy');
     Route::delete('/modulos/ventas/cotizaciones/{id}', [CotizacionController::class, 'destroy'])->name('modules.ventas.cotizaciones.destroy');

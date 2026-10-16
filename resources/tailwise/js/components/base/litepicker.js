@@ -9,7 +9,7 @@ const initLitepickers = (root = document) => {
 		}
 		inputEl.__litepickerInitialized = true;
 
-		let e = {autoApply:!1,singleMode:!0,numberOfColumns:1,numberOfMonths:1,showWeekNumbers:!1,format:"D MMM, YYYY",lang:"es-ES",buttonText:{apply:"Aplicar",cancel:"Cancelar"},dropdowns:{minYear:1990,maxYear:null,months:!0,years:!0}};
+		let e = {autoApply:!1,singleMode:!0,numberOfColumns:1,numberOfMonths:1,showWeekNumbers:!1,format:"D MMM, YYYY",lang:"es-ES",buttonText:{apply:"Aplicar",cancel:"Cancelar"},dropdowns:{minYear:1990,maxYear:new Date().getFullYear()+5,months:!0,years:!0}};
 		const $input = $(inputEl);
 		const noDefault = inputEl.hasAttribute('data-no-default') || $input.data('no-default') === true;
 		if (inputEl.dataset.autoApply !== undefined) {

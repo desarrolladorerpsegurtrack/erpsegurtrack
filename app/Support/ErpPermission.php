@@ -374,6 +374,10 @@ class ErpPermission
             return null;
         }
 
+        if (mb_strtolower($routeName) === 'modules.cuentasporcobrar.quotations.anular') {
+            return 'ventas.cotizaciones';
+        }
+
         if (!str_starts_with($routeName, 'modules.')) {
             return null;
         }
@@ -619,6 +623,7 @@ class ErpPermission
 
         $segments = explode('.', $routeName);
         $last = mb_strtolower((string) end($segments));
+        $previous = mb_strtolower((string) ($segments[count($segments) - 2] ?? ''));
 
         if (str_starts_with($routeNameLower, 'modules.tickets.vehiculos.')) {
             return 'ver';
@@ -630,6 +635,10 @@ class ErpPermission
 
         if (str_starts_with($routeNameLower, 'modules.tickets.') && in_array($last, ['advance', 'cancel'], true)) {
             return 'ver';
+        }
+
+        if ($last === 'post' && $previous === 'export') {
+            return 'exportar';
         }
 
         if (in_array($last, ['store', 'crear-rapido'], true)) {

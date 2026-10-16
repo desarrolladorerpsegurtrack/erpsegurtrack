@@ -5,6 +5,9 @@
     <meta charset="utf-8">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="erp-current-user" content="{{ session('erp_auth.usuario', '') }}">
+    <meta name="erp-notifications-muted" content="{{ !empty($notificationsMuted) ? '1' : '0' }}">
+    <!-- Temporal: cambiar a 1 para volver a mostrar ventanas emergentes. -->
+    <meta name="erp-notification-popups-enabled" content="0">
     <meta name="erp-allowed-vistas" content="{{ json_encode(session('erp_auth.allowed_vistas', [])) }}">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="ERP SEGURTRACK">
@@ -1359,15 +1362,18 @@
                         data-tw-dismiss="modal" href="javascript:;">
                         <i data-lucide="x" class="stroke-[1.5] h-8 w-8"></i>
                     </a>
-                    <div class="flex items-center border-b border-slate-200/80 px-6 py-5 bg-slate-50/50">
-                        <h2 class="mr-auto text-base font-bold text-slate-800 flex items-center gap-2">
+                    <div class="flex flex-col gap-3 border-b border-slate-200/80 px-5 py-4 bg-slate-50/50">
+                        <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
                             <i data-lucide="bell" class="h-4 w-4 text-[#c1121f]"></i> Notificaciones
                         </h2>
-                        <button id="btn-mark-all-read"
-                            class="transition duration-200 border shadow-xs items-center justify-center py-1.5 px-3 rounded-lg font-semibold text-xs cursor-pointer border-slate-200 text-slate-600 bg-white hover:bg-slate-100 hover:text-slate-900 flex gap-1.5">
-                            <i data-lucide="check-check" class="stroke-[1.8] h-3.5 w-3.5 text-emerald-600"></i>
-                            Marcar todo como leído
-                        </button>
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <span class="text-xs font-medium text-slate-500">Ventanas emergentes desactivadas temporalmente</span>
+                            <button id="btn-mark-all-read"
+                                class="transition duration-200 border shadow-xs items-center justify-center py-1.5 px-2.5 rounded-lg font-semibold text-xs cursor-pointer border-slate-200 text-slate-600 bg-white hover:bg-slate-100 hover:text-slate-900 flex gap-1.5">
+                                <i data-lucide="check-check" class="stroke-[1.8] h-3.5 w-3.5 text-emerald-600"></i>
+                                Marcar todo como leído
+                            </button>
+                        </div>
                     </div>
                     <div class="overflow-y-auto flex-1 p-0">
                         <div id="notifications-list-container" class="flex flex-col gap-1 py-2 px-3">
@@ -1430,11 +1436,16 @@
                 const badgeEl = document.getElementById('notifications-badge');
                 const containerEl = document.getElementById('notifications-list-container');
                 const markAllBtn = document.getElementById('btn-mark-all-read');
+                const notificationPopupsEnabled =
+                    document.querySelector('meta[name="erp-notification-popups-enabled"]')?.content === '1';
                 const toastReminderMs = 2 * 60 * 60 * 1000;
                 const currentUser = document.querySelector('meta[name="erp-current-user"]')?.content || 'guest';
                 const toastQueue = [];
                 const queuedToastIds = new Set();
                 let toastShowing = false;
+                let activeToast = null;
+                let notificationsMuted =
+                    document.querySelector('meta[name="erp-notifications-muted"]')?.content === '1';
 
                 // Desenfoque seguro al ocultar modal para evitar advertencias de accesibilidad aria-hidden
                 document.addEventListener('hide.tw.modal', function () {
@@ -1453,6 +1464,9 @@
                         .then(response => response.json())
                         .then(data => {
                             if (!data || !data.success) return;
+                            if (typeof data.muted === 'boolean' && data.muted !== notificationsMuted) {
+                                updateNotificationsMutedState(data.muted);
+                            }
 
                             const count = data.count || 0;
                             const items = [...(data.items || [])].sort((first, second) => {
@@ -1523,6 +1537,8 @@
                 }
 
                 function enqueueToastNotifications(items) {
+                    if (!notificationPopupsEnabled || notificationsMuted) return;
+
                     const now = Date.now();
 
                     items
@@ -1543,7 +1559,7 @@
                 }
 
                 function showNextToast() {
-                    if (toastShowing || toastQueue.length === 0 || typeof Toastify !== 'function') return;
+                    if (!notificationPopupsEnabled || notificationsMuted || toastShowing || toastQueue.length === 0 || typeof Toastify !== 'function') return;
 
                     const item = toastQueue.shift();
                     toastShowing = true;
@@ -1552,6 +1568,7 @@
                     showToastNotification(item, () => {
                         queuedToastIds.delete(String(item.id));
                         toastShowing = false;
+                        activeToast = null;
                         setTimeout(showNextToast, 250);
                     });
                 }
@@ -1591,7 +1608,7 @@
                         window.location.href = item.url;
                     });
 
-                    Toastify({
+                    activeToast = Toastify({
                         node: toastNode,
                         duration: 10000,
                         close: true,
@@ -1606,7 +1623,23 @@
                             boxShadow: 'none',
                             padding: '0'
                         }
-                    }).showToast();
+                    });
+                    activeToast.showToast();
+                }
+
+                function updateNotificationsMutedState(muted) {
+                    notificationsMuted = muted;
+                    if (window.ERPRealtime) {
+                        window.ERPRealtime.notificationsMuted = muted;
+                    }
+                    if (muted) {
+                        toastQueue.length = 0;
+                        queuedToastIds.clear();
+                        if (activeToast) activeToast.hideToast();
+                        if (typeof window.ERPRealtime?.hideNotificationToasts === 'function') {
+                            window.ERPRealtime.hideNotificationToasts();
+                        }
+                    }
                 }
 
                 // Cargar notificaciones inmediatamente

@@ -2,14 +2,415 @@
 
 namespace App\Services;
 
+use App\Support\ServicePeriod;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class CxcService
 {
+    private const SCHEDULED_DEACTIVATION_MARKER = '[BAJA_PROGRAMADA:';
+    private const CXC_SERVICE_LINK_TABLE = 'cuentasporcobrar_serviciocliente';
+
+    public static function convertPaymentAmountToDebtCurrency(
+        float $paymentAmount,
+        float $exchangeRate,
+        int $debtCurrencyId,
+        int $paymentCurrencyId
+    ): float {
+        if ($debtCurrencyId <= 0 || $paymentCurrencyId <= 0 || $debtCurrencyId === $paymentCurrencyId) {
+            throw new \RuntimeException('La moneda de pago debe ser distinta a la moneda de la deuda.');
+        }
+        if ($exchangeRate <= 0) {
+            throw new \RuntimeException('Debe indicar un tipo de cambio válido.');
+        }
+
+        $currencies = DB::table('moneda')
+            ->whereIn('idmoneda', [$debtCurrencyId, $paymentCurrencyId])
+            ->get(['idmoneda', 'detalle', 'simbolo'])
+            ->keyBy('idmoneda');
+        $debtCurrency = $currencies->get($debtCurrencyId);
+        $paymentCurrency = $currencies->get($paymentCurrencyId);
+        if (!$debtCurrency || !$paymentCurrency) {
+            throw new \RuntimeException('No se encontraron las monedas seleccionadas.');
+        }
+
+        $isDollar = static function (object $currency): bool {
+            $description = Str::ascii(mb_strtolower((string) ($currency->detalle ?? ''), 'UTF-8'));
+            $symbol = trim((string) ($currency->simbolo ?? ''));
+
+            return $symbol === '$'
+                || str_contains($description, 'dolar')
+                || preg_match('/\bUSD\b/i', $description) === 1;
+        };
+
+        $convertedAmount = $isDollar($debtCurrency)
+            ? $paymentAmount / $exchangeRate
+            : $paymentAmount * $exchangeRate;
+
+        return round($convertedAmount, 2);
+    }
+
+    public function darDeBajaServicios(
+        array $serviceIds,
+        string $mode,
+        string $comment,
+        string $keepSim,
+        string $user,
+        ?Carbon $today = null
+    ): int {
+        $today ??= Carbon::today();
+        $serviceIds = array_values(array_unique(array_map('intval', $serviceIds)));
+
+        return DB::transaction(function () use ($serviceIds, $mode, $comment, $keepSim, $user, $today): int {
+            $processed = 0;
+            foreach (DB::table('serviciocliente')->whereIn('idservicioCliente', $serviceIds)->lockForUpdate()->get() as $service) {
+                if (strtolower((string) $service->estado) !== 'activo') {
+                    continue;
+                }
+
+                $serviceEnd = $mode === 'periodo' && $service->fecheVencimiento
+                    ? Carbon::parse($service->fecheVencimiento)->startOfDay()
+                    : $today->copy()->startOfDay();
+                $this->adjustOpenChargesForServiceDeactivation($service, $serviceEnd, $mode === 'ahora');
+
+                if ($mode === 'periodo' && $serviceEnd->gt($today->copy()->startOfDay())) {
+                    $this->scheduleServiceDeactivation($service, $serviceEnd, $comment, $keepSim, $user);
+                } else {
+                    $this->deactivateService($service, $comment, $keepSim, $user);
+                }
+
+                $processed++;
+            }
+
+            return $processed;
+        });
+    }
+
+    public function procesarBajasProgramadas(?Carbon $today = null): int
+    {
+        $today ??= Carbon::today();
+        $processed = 0;
+        $scheduledServices = DB::table('serviciocliente')
+            ->whereRaw('LOWER(COALESCE(estado, "")) = ?', ['activo'])
+            ->where('observacion', 'like', '%' . self::SCHEDULED_DEACTIVATION_MARKER . '%')
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($scheduledServices as $service) {
+            if (!preg_match(
+                '/\[BAJA_PROGRAMADA:fecha=(\d{4}-\d{2}-\d{2});mantener_sim=(si|no)\]/',
+                (string) ($service->observacion ?? ''),
+                $scheduled
+            )) {
+                continue;
+            }
+
+            if (Carbon::parse($scheduled[1])->startOfDay()->gt($today->copy()->startOfDay())) {
+                continue;
+            }
+
+            DB::transaction(function () use ($service, $scheduled, $today): void {
+                $lockedService = DB::table('serviciocliente')
+                    ->where('idservicioCliente', $service->idservicioCliente)
+                    ->lockForUpdate()
+                    ->first();
+                if (!$lockedService || strtolower((string) $lockedService->estado) !== 'activo') {
+                    return;
+                }
+
+                $comment = DB::table('historial_servicio')
+                    ->where('servicioCliente_idservicioCliente', $lockedService->idservicioCliente)
+                    ->where('motivo', 'Baja programada al finalizar periodo')
+                    ->orderByDesc('idhistorial_servicio')
+                    ->value('descripcion') ?? 'Servicio dado de baja desde Cuentas por Cobrar';
+                $comment = preg_replace('/\s+\(Mantener SIM\/Número: (Sí|No)\)$/u', '', trim((string) $comment)) ?? trim((string) $comment);
+                $this->deactivateService(
+                    $lockedService,
+                    $comment,
+                    $scheduled[2],
+                    (string) (DB::table('historial_servicio')
+                        ->where('servicioCliente_idservicioCliente', $lockedService->idservicioCliente)
+                        ->where('motivo', 'Baja programada al finalizar periodo')
+                        ->orderByDesc('idhistorial_servicio')
+                        ->value('usuario_usuario') ?? 'anonimo')
+                );
+            });
+            $processed++;
+        }
+
+        return $processed;
+    }
+
+    private function scheduleServiceDeactivation(object $service, Carbon $serviceEnd, string $comment, string $keepSim, string $user): void
+    {
+        $observacion = (string) ($service->observacion ?? '');
+        $observacion = preg_replace('/\s*\[BAJA_PROGRAMADA:fecha=\d{4}-\d{2}-\d{2};mantener_sim=(?:si|no)\]/', '', $observacion) ?? $observacion;
+        $marker = sprintf(
+            '[BAJA_PROGRAMADA:fecha=%s;mantener_sim=%s]',
+            $serviceEnd->format('Y-m-d'),
+            $keepSim
+        );
+        DB::table('serviciocliente')
+            ->where('idservicioCliente', $service->idservicioCliente)
+            ->update(['observacion' => trim($observacion . ' ' . $marker)]);
+
+        DB::table('historial_servicio')->insert([
+            'usuario_usuario' => $user,
+            'serv_usuario' => $user,
+            'servicioCliente_idservicioCliente' => $service->idservicioCliente,
+            'fecha_accion' => Carbon::now()->format('Y-m-d H:i:s'),
+            'motivo' => 'Baja programada al finalizar periodo',
+            'descripcion' => $comment . ' (Mantener SIM/Número: ' . ($keepSim === 'si' ? 'Sí' : 'No') . ')',
+            'doc_referencia' => $service->docReferencia ?? null,
+            'dispositivo' => null,
+            'numerotelefono' => null,
+        ]);
+    }
+
+    private function deactivateService(object $service, string $comment, string $keepSim, string $user): void
+    {
+        $serviceId = (int) $service->idservicioCliente;
+        $observacion = (string) ($service->observacion ?? '');
+        $observacion = trim(preg_replace('/\s*\[BAJA_PROGRAMADA:fecha=\d{4}-\d{2}-\d{2};mantener_sim=(?:si|no)\]/', '', $observacion) ?? $observacion);
+        DB::table('serviciocliente')->where('idservicioCliente', $serviceId)->update([
+            'estado' => 'inactivo',
+            'observacion' => $observacion !== '' ? $observacion : null,
+        ]);
+
+        $deviceInfo = DB::table('detalle_serviciodispositivo')
+            ->where('servicioCliente_idservicioCliente', $serviceId)
+            ->orderByDesc('iddetalle_serviciodispositivo')
+            ->first();
+        $deviceId = $deviceInfo->dispositivoCliente_iddispositivoCliente ?? null;
+        $phoneNumber = null;
+
+        if ($deviceId) {
+            $phoneNumber = DB::table('detnumerosdispositivo')
+                ->where('dispositivoCliente_iddispositivoCliente', $deviceId)
+                ->orderByDesc('fechaAsignacion')
+                ->value('numeroTelefonico_numeroTelefonico');
+            DB::table('dispositivocliente')
+                ->where('iddispositivoCliente', $deviceId)
+                ->update(['estado' => '0', 'fechaBaja' => Carbon::now()->format('Y-m-d H:i:s')]);
+
+            $stockDevice = DB::table('elementoalmacen')->where('imei', $deviceId)->first();
+            if ($stockDevice) {
+                DB::table('elementoalmacen')
+                    ->where('imei', $deviceId)
+                    ->update(['estado' => $this->stateAfterServiceDeactivation((int) $stockDevice->estado)]);
+            }
+        }
+
+        if ($phoneNumber) {
+            $activeSimPair = DB::table('detallesimcard')
+                ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
+                ->where('estado', '0')
+                ->first();
+            if ($keepSim === 'no') {
+                if ($activeSimPair) {
+                    DB::table('detallesimcard')
+                        ->where('iddetalleSimCard', $activeSimPair->iddetalleSimCard)
+                        ->update(['estado' => '1']);
+                    DB::table('simcard')
+                        ->where('idsimCard', $activeSimPair->simCard_idsimCard)
+                        ->where('estado', '!=', '0')
+                        ->update(['estado' => '1']);
+                }
+                DB::table('numerotelefonico')
+                    ->where('numeroTelefonico', $phoneNumber)
+                    ->where('estado', '!=', '0')
+                    ->update(['estado' => '1']);
+            } else {
+                DB::table('numerotelefonico')
+                    ->where('numeroTelefonico', $phoneNumber)
+                    ->where('estado', '!=', '0')
+                    ->update(['estado' => '2']);
+                if ($activeSimPair) {
+                    DB::table('simcard')
+                        ->where('idsimCard', $activeSimPair->simCard_idsimCard)
+                        ->where('estado', '!=', '0')
+                        ->update(['estado' => '2']);
+                }
+            }
+
+            if ($deviceId) {
+                DB::table('detnumerosdispositivo')
+                    ->where('dispositivoCliente_iddispositivoCliente', $deviceId)
+                    ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
+                    ->delete();
+            }
+        }
+
+        DB::table('historial_servicio')->insert([
+            'usuario_usuario' => $user,
+            'serv_usuario' => $user,
+            'servicioCliente_idservicioCliente' => $serviceId,
+            'fecha_accion' => Carbon::now()->format('Y-m-d H:i:s'),
+            'motivo' => 'Dado de baja',
+            'descripcion' => $comment . ' (Mantener SIM/Número: ' . ($keepSim === 'si' ? 'Sí' : 'No') . ')',
+            'doc_referencia' => $service->docReferencia ?? null,
+            'dispositivo' => $deviceId,
+            'numerotelefono' => $phoneNumber,
+        ]);
+    }
+
+    private function adjustOpenChargesForServiceDeactivation(
+        object $service,
+        Carbon $serviceEnd,
+        bool $includeServiceEnd
+    ): void
+    {
+        $openStates = ['1', '2', '4', 'NUEVO', 'PagoCredito', 'PENDIENTE', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito'];
+        $charges = DB::table('cuentasporcobrar')
+            ->where('cliente_idcliente', $service->cliente_idcliente)
+            ->where('moneda_idmoneda', $service->moneda_idmoneda)
+            ->whereIn('estado', $openStates)
+            ->whereRaw('montoActual = montoOriginal')
+            ->whereNull('docReferencia')
+            ->whereDate('fechaCancelacion', $includeServiceEnd ? '>=' : '>', $serviceEnd->toDateString())
+            ->lockForUpdate()
+            ->get();
+        $hasInvoiceFile = Schema::hasColumn('cuentasporcobrar', 'docFactura');
+
+        foreach ($charges as $charge) {
+            if ($hasInvoiceFile && trim((string) ($charge->docFactura ?? '')) !== '') {
+                continue;
+            }
+            if (preg_match('/SC-([0-9,]+)/', (string) $charge->descripcion, $matches) !== 1) {
+                continue;
+            }
+            $serviceIds = array_values(array_unique(array_map('intval', explode(',', $matches[1]))));
+            if (!in_array((int) $service->idservicioCliente, $serviceIds, true)) {
+                continue;
+            }
+            $remainingIds = array_values(array_filter($serviceIds, fn(int $id): bool => $id !== (int) $service->idservicioCliente));
+            $remainingServices = $remainingIds === []
+                ? collect()
+                : DB::table('serviciocliente')
+                    ->whereIn('idservicioCliente', $remainingIds)
+                    ->whereRaw('LOWER(COALESCE(estado, "")) = ?', ['activo'])
+                    ->where('moneda_idmoneda', $service->moneda_idmoneda)
+                    ->get(['idservicioCliente', 'monto', 'observacion']);
+            $period = $this->periodFromDescription((string) $charge->descripcion);
+            $chargeEnd = $charge->fechaCancelacion
+                ? Carbon::parse($charge->fechaCancelacion)->startOfDay()
+                : (isset($period[1]) ? Carbon::parse($period[1])->startOfDay() : null);
+            $remainingServices = $remainingServices->filter(function (object $remaining) use ($chargeEnd): bool {
+                if (!$chargeEnd || preg_match(
+                    '/\[BAJA_PROGRAMADA:fecha=(\d{4}-\d{2}-\d{2});mantener_sim=(?:si|no)\]/',
+                    (string) ($remaining->observacion ?? ''),
+                    $scheduled
+                ) !== 1) {
+                    return true;
+                }
+
+                return Carbon::parse($scheduled[1])->startOfDay()->gte($chargeEnd);
+            });
+            $remainingIds = $remainingServices->pluck('idservicioCliente')->map(fn($id): int => (int) $id)->all();
+            $remainingAmount = round((float) $remainingServices->sum('monto'), 2);
+            if ($remainingIds === [] || $remainingAmount <= 0) {
+                DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $charge->idcuentasPorCobrar)
+                    ->update(['estado' => 'CANCELADO', 'montoActual' => 0]);
+                continue;
+            }
+
+            $description = (string) $charge->descripcion;
+            $range = preg_match('/\d{2}\/\d{2}\/\d{4}\s+a\s+\d{2}\/\d{2}\/\d{4}/', $description, $rangeMatch)
+                ? $rangeMatch[0]
+                : '';
+            $prefix = $range !== '' ? mb_substr($description, 0, mb_strpos($description, $range, 0, 'UTF-8'), 'UTF-8') : '';
+            $newDescription = mb_substr(
+                $prefix . $range . ' SC-' . implode(',', $remainingIds),
+                0,
+                50
+            );
+            $newBalance = max(0, round((float) $charge->montoActual - (float) $service->monto, 2));
+            DB::table('cuentasporcobrar')
+                ->where('idcuentasPorCobrar', $charge->idcuentasPorCobrar)
+                ->update([
+                    'descripcion' => $newDescription,
+                    'montoOriginal' => $remainingAmount,
+                    'montoActual' => min($newBalance, $remainingAmount),
+                ]);
+        }
+    }
+
+    private function stateAfterServiceDeactivation(int $state): int
+    {
+        return match ($state) {
+            3 => 2,
+            5 => 4,
+            2, 4 => $state,
+            default => 0,
+        };
+    }
+
+    public function ensureQuotationReceivable(string $quoteId): int
+    {
+        return DB::transaction(function () use ($quoteId): int {
+            $quote = DB::table('cotizacion')
+                ->where('nroCotizacion', $quoteId)
+                ->lockForUpdate()
+                ->first(['nroCotizacion', 'estado', 'cliente_idcliente', 'moneda_idmoneda', 'total', 'fechaHoraEmision']);
+
+            if (!$quote || (string) $quote->estado !== '1') {
+                return 0;
+            }
+
+            $marker = 'COTIZACION:' . $quoteId;
+            $cxc = DB::table('cuentasporcobrar')
+                ->where('descripcion', $marker)
+                ->lockForUpdate()
+                ->first(['idcuentasPorCobrar']);
+
+            if (!$cxc) {
+                $cxc = DB::table('cuentasporcobrar')
+                    ->where('cliente_idcliente', $quote->cliente_idcliente)
+                    ->where('moneda_idmoneda', $quote->moneda_idmoneda)
+                    ->where(function ($query) use ($quoteId): void {
+                        $query->where('descripcion', $quoteId)
+                            ->orWhere('descripcion', 'like', '% ' . $quoteId);
+                    })
+                    ->orderByDesc('idcuentasPorCobrar')
+                    ->lockForUpdate()
+                    ->first(['idcuentasPorCobrar']);
+            }
+
+            if ($cxc) {
+                DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $cxc->idcuentasPorCobrar)
+                    ->update(['descripcion' => $marker]);
+
+                return (int) $cxc->idcuentasPorCobrar;
+            }
+
+            $data = [
+                'cliente_idcliente' => $quote->cliente_idcliente,
+                'tipoCobro_idtipoCobros' => 1,
+                'moneda_idmoneda' => $quote->moneda_idmoneda,
+                'docReferencia' => null,
+                'descripcion' => $marker,
+                'montoOriginal' => (float) ($quote->total ?? 0),
+                'montoActual' => (float) ($quote->total ?? 0),
+                'canCuotas' => null,
+                'fechaRegistro' => $quote->fechaHoraEmision ?? now()->format('Y-m-d H:i:s'),
+                'fechaCancelacion' => null,
+                'estado' => 'NUEVO',
+            ];
+
+            if (DB::getSchemaBuilder()->hasColumn('cuentasporcobrar', 'docFactura')) {
+                $data['docFactura'] = null;
+            }
+
+            return (int) DB::table('cuentasporcobrar')->insertGetId($data);
+        });
+    }
+
     /**
      * FASE 1: PENDIENTE (Creación Automática)
      * Inserta automáticamente un registro en cuentasPorCobrar al crear/activar un servicio.
@@ -61,7 +462,7 @@ class CxcService
                 $existingId = DB::table('cuentasporcobrar')
                     ->where('cliente_idcliente', $clienteId)
                     ->where('descripcion', $descripcion)
-                    ->whereIn('estado', ['1', '2', '3', '4', 'PENDIENTE', 'FACTURADO', 'CANCELADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito', 'Cancelado Detracción'])
+                    ->whereIn('estado', ['1', '2', '3', '4', 'NUEVO', 'PagoCredito', 'PENDIENTE', 'FACTURADO', 'CANCELADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito', 'Cancelado Detracción', 'Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención'])
                     ->value('idcuentasPorCobrar');
                 if ($existingId) {
                     return (int) $existingId;
@@ -70,7 +471,7 @@ class CxcService
                 $existingQuery = DB::table('cuentasporcobrar')
                     ->where('cliente_idcliente', $clienteId)
                     ->where('montoOriginal', $montoServicio)
-                    ->whereIn('estado', ['1', '2', '3', '4', 'PENDIENTE', 'FACTURADO', 'CANCELADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito', 'Cancelado Detracción']);
+                    ->whereIn('estado', ['1', '2', '3', '4', 'NUEVO', 'PagoCredito', 'PENDIENTE', 'FACTURADO', 'CANCELADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito', 'Cancelado Detracción', 'Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención']);
                 if ($docRef !== '') {
                     $existingQuery->where('docReferencia', $docRef);
                 } else {
@@ -89,7 +490,7 @@ class CxcService
                 $existingQuery = DB::table('cuentasporcobrar')
                     ->where('cliente_idcliente', $clienteId)
                     ->where('montoOriginal', $montoServicio)
-                    ->whereIn('estado', ['1', '2', '3', '4', 'PENDIENTE', 'FACTURADO', 'CANCELADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito', 'Cancelado Detracción']);
+                    ->whereIn('estado', ['1', '2', '3', '4', 'NUEVO', 'PagoCredito', 'PENDIENTE', 'FACTURADO', 'CANCELADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito', 'Cancelado Detracción', 'Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención']);
 
                 if ($docRef !== '') {
                     $existingQuery->where('docReferencia', $docRef);
@@ -122,6 +523,190 @@ class CxcService
         ]);
     }
 
+    public function registrarCxcsFaltantesServicios(?int $serviceId = null, bool $execute = false): array
+    {
+        $query = DB::table('serviciocliente')
+            ->whereRaw('LOWER(TRIM(COALESCE(estado, ""))) = ?', ['activo'])
+            ->whereNotNull('fechaInicio')
+            ->whereNotNull('fecheVencimiento')
+            ->orderBy('idservicioCliente');
+
+        if ($serviceId !== null) {
+            $query->where('idservicioCliente', $serviceId);
+        }
+
+        $summary = [
+            'eligible' => 0,
+            'created' => 0,
+            'updated' => 0,
+            'existing' => 0,
+            'ambiguous' => 0,
+            'to_create' => 0,
+            'to_update' => 0,
+            'service_ids' => [],
+            'ambiguous_service_ids' => [],
+            'skipped_reason' => null,
+        ];
+
+        $query->chunkById(200, function ($services) use (&$summary, $execute): void {
+            foreach ($services as $service) {
+                $summary['eligible']++;
+                $match = $this->findInitialServiceCharge($service);
+
+                if ($match['status'] === 'existing') {
+                    $summary['existing']++;
+                    continue;
+                }
+                if ($match['status'] === 'ambiguous') {
+                    $summary['ambiguous']++;
+                    $summary['ambiguous_service_ids'][] = (int) $service->idservicioCliente;
+                    continue;
+                }
+
+                $summary['service_ids'][] = (int) $service->idservicioCliente;
+                if (!$execute) {
+                    $summary[$match['status'] === 'undated' ? 'to_update' : 'to_create']++;
+                    continue;
+                }
+
+                $created = DB::transaction(function () use ($service): string {
+                    $lockedService = DB::table('serviciocliente')
+                        ->where('idservicioCliente', $service->idservicioCliente)
+                        ->lockForUpdate()
+                        ->first();
+                    if (
+                        !$lockedService
+                        || strtolower(trim((string) $lockedService->estado)) !== 'activo'
+                        || empty($lockedService->fechaInicio)
+                        || empty($lockedService->fecheVencimiento)
+                    ) {
+                        return 'existing';
+                    }
+
+                    $currentMatch = $this->findInitialServiceCharge($lockedService);
+                    if ($currentMatch['status'] === 'existing' || $currentMatch['status'] === 'ambiguous') {
+                        return $currentMatch['status'];
+                    }
+                    if ($currentMatch['status'] === 'undated') {
+                        $period = Carbon::parse($lockedService->fechaInicio)->format('d/m/Y')
+                            . ' a ' . Carbon::parse($lockedService->fecheVencimiento)->format('d/m/Y');
+                        DB::table('cuentasporcobrar')
+                            ->where('idcuentasPorCobrar', $currentMatch['charge_id'])
+                            ->update([
+                                'fechaCancelacion' => Carbon::parse($lockedService->fecheVencimiento)->toDateString(),
+                                'descripcion' => 'CXC ' . $period . ' SC-' . $lockedService->idservicioCliente,
+                            ]);
+
+                        return 'updated';
+                    }
+
+                    $this->crearCobroDesdeServicio([
+                        'cliente_idcliente' => $lockedService->cliente_idcliente,
+                        'monto' => $lockedService->monto,
+                        'moneda_idmoneda' => $lockedService->moneda_idmoneda,
+                        'tipoCobro_idtipoCobros' => $lockedService->tipoCobro_idtipoCobros,
+                        'fechaInicio' => $lockedService->fechaInicio,
+                        'fecheVencimiento' => $lockedService->fecheVencimiento,
+                        'idservicioCliente' => $lockedService->idservicioCliente,
+                        'vehiculo_placa' => $lockedService->vehiculo_placa ?? '',
+                        'docReferencia' => $lockedService->docReferencia ?? null,
+                    ]);
+
+                    return 'created';
+                });
+
+                if ($created === 'created') {
+                    $summary['created']++;
+                } elseif ($created === 'updated') {
+                    $summary['updated']++;
+                } elseif ($created === 'ambiguous') {
+                    $summary['ambiguous']++;
+                    $summary['ambiguous_service_ids'][] = (int) $service->idservicioCliente;
+                } else {
+                    $summary['existing']++;
+                }
+            }
+        }, 'idservicioCliente');
+
+        if ($serviceId !== null && $summary['eligible'] === 0) {
+            $service = DB::table('serviciocliente')
+                ->where('idservicioCliente', $serviceId)
+                ->first(['estado', 'fechaInicio', 'fecheVencimiento']);
+
+            $summary['skipped_reason'] = match (true) {
+                !$service => 'No existe un servicio con ese ID en esta base de datos.',
+                strtolower(trim((string) $service->estado)) !== 'activo' => 'El servicio no está activo.',
+                empty($service->fechaInicio) => 'El servicio no tiene fecha de inicio.',
+                empty($service->fecheVencimiento) => 'El servicio todavía no tiene fecha fin.',
+                default => 'El servicio no cumple los criterios de selección.',
+            };
+        }
+
+        return $summary;
+    }
+
+    private function findInitialServiceCharge(object $service): array
+    {
+        $serviceId = (int) $service->idservicioCliente;
+        $period = Carbon::parse($service->fechaInicio)->format('d/m/Y')
+            . ' a ' . Carbon::parse($service->fecheVencimiento)->format('d/m/Y');
+        $endDate = Carbon::parse($service->fecheVencimiento)->toDateString();
+        $markerPattern = '/(^|[^A-Za-z0-9])SC-' . $serviceId . '([^0-9]|$)/';
+
+        $charges = DB::table('cuentasporcobrar')
+            ->where('cliente_idcliente', $service->cliente_idcliente)
+            ->where('moneda_idmoneda', $service->moneda_idmoneda)
+            ->where(function ($query) use ($endDate, $period): void {
+                $query->whereDate('fechaCancelacion', $endDate)
+                    ->orWhere('descripcion', 'like', '%' . $period . '%')
+                    ->orWhereNull('fechaCancelacion');
+            })
+            ->get(['idcuentasPorCobrar', 'descripcion', 'fechaCancelacion', 'montoOriginal', 'montoActual', 'estado', 'docReferencia']);
+
+        $marked = $charges->filter(static fn(object $charge): bool =>
+            preg_match($markerPattern, (string) $charge->descripcion) === 1
+        );
+        $currentMarked = $marked->contains(static fn(object $charge): bool =>
+            $charge->fechaCancelacion === $endDate
+            || str_contains((string) $charge->descripcion, $period)
+        );
+        if ($currentMarked) {
+            return ['status' => 'existing'];
+        }
+
+        $undatedMarked = $marked->filter(static fn(object $charge): bool =>
+            $charge->fechaCancelacion === null
+            && preg_match('/\d{2}\/\d{2}\/\d{4}\s+a\s+\d{2}\/\d{2}\/\d{4}/', (string) $charge->descripcion) !== 1
+        );
+        $editableUndatedMarked = $undatedMarked->filter(static fn(object $charge): bool =>
+            in_array((string) $charge->estado, ['1', '4', 'NUEVO', 'PENDIENTE', 'VENCIDO'], true)
+            && (float) $charge->montoActual > 0
+            && abs((float) $charge->montoActual - (float) $charge->montoOriginal) < 0.005
+        );
+        if ($editableUndatedMarked->count() === 1 && $undatedMarked->count() === 1) {
+            return [
+                'status' => 'undated',
+                'charge_id' => (int) $editableUndatedMarked->first()->idcuentasPorCobrar,
+            ];
+        }
+        if ($undatedMarked->isNotEmpty()) {
+            return ['status' => 'ambiguous'];
+        }
+
+        $legacyMatches = $charges->filter(static fn(object $charge): bool =>
+            preg_match('/SC-[0-9]+/', (string) $charge->descripcion) !== 1
+            && str_contains((string) $charge->descripcion, $period)
+            && abs((float) $charge->montoOriginal - (float) $service->monto) < 0.005
+            && (string) ($charge->docReferencia ?? '') === (string) ($service->docReferencia ?? '')
+        );
+
+        return match ($legacyMatches->count()) {
+            0 => ['status' => 'missing'],
+            1 => ['status' => 'existing'],
+            default => ['status' => 'ambiguous'],
+        };
+    }
+
     public function synchronizeCurrentServiceChargeDates(int $serviceId, object $oldService, array $updatedService): bool
     {
         $oldStart = !empty($oldService->fechaInicio) ? Carbon::parse($oldService->fechaInicio)->toDateString() : null;
@@ -145,15 +730,130 @@ class CxcService
         $newRange = $newStart && $newEnd
             ? Carbon::parse($newStart)->format('d/m/Y') . ' a ' . Carbon::parse($newEnd)->format('d/m/Y')
             : null;
-        $service = DB::table('serviciocliente')
-            ->where('idservicioCliente', $serviceId)
-            ->first(['cliente_idcliente', 'moneda_idmoneda', 'monto', 'docReferencia']);
-
-        if (!$service || !$oldEnd || !$newEnd || !$newRange) {
+        if (!$newEnd || !$newRange) {
             return false;
         }
 
-        $openStates = ['1', '4', 'PENDIENTE', 'VENCIDO'];
+        $service = DB::table('serviciocliente')
+            ->where('idservicioCliente', $serviceId)
+            ->first();
+
+        if (!$service) {
+            return false;
+        }
+
+        if (!$oldEnd) {
+            if (strtolower(trim((string) $service->estado)) !== 'activo') {
+                return false;
+            }
+
+            $markerPattern = '/(^|[^A-Za-z0-9])SC-' . $serviceId . '([^0-9]|$)/';
+            $openStates = ['1', '4', 'NUEVO', 'PENDIENTE', 'VENCIDO'];
+            $isEditableCharge = static fn(object $charge): bool =>
+                in_array((string) $charge->estado, $openStates, true)
+                && (float) $charge->montoActual > 0
+                && abs((float) $charge->montoActual - (float) $charge->montoOriginal) < 0.005;
+            $undatedCharges = DB::table('cuentasporcobrar')
+                ->where('cliente_idcliente', $service->cliente_idcliente)
+                ->where('moneda_idmoneda', $service->moneda_idmoneda)
+                ->whereNull('fechaCancelacion')
+                ->get([
+                    'idcuentasPorCobrar',
+                    'descripcion',
+                    'docReferencia',
+                    'estado',
+                    'montoOriginal',
+                    'montoActual',
+                ])
+                ->filter(function (object $charge) use ($markerPattern, $oldStart): bool {
+                    if (preg_match($markerPattern, (string) $charge->descripcion) !== 1) {
+                        return false;
+                    }
+                    $period = $this->periodFromDescription((string) $charge->descripcion);
+                    return $period === [] || ($oldStart !== null && $period[0] === $oldStart);
+                });
+
+            if ($undatedCharges->count() > 1) {
+                throw new \RuntimeException('ambiguous_service_cxc');
+            }
+
+            $undatedCharge = $undatedCharges->first();
+            if ($undatedCharge && !$isEditableCharge($undatedCharge)) {
+                return false;
+            }
+
+            if (!$undatedCharge) {
+                $legacyCharges = DB::table('cuentasporcobrar')
+                    ->where('cliente_idcliente', $service->cliente_idcliente)
+                    ->where('moneda_idmoneda', $service->moneda_idmoneda)
+                    ->whereNull('fechaCancelacion')
+                    ->get([
+                        'idcuentasPorCobrar',
+                        'descripcion',
+                        'docReferencia',
+                        'estado',
+                        'montoOriginal',
+                        'montoActual',
+                    ])
+                    ->filter(function (object $charge) use ($service, $oldStart): bool {
+                        $description = (string) $charge->descripcion;
+                        if (
+                            preg_match('/SC-[0-9]+/', $description) === 1
+                            || abs((float) $charge->montoOriginal - (float) $service->monto) >= 0.005
+                            || (string) ($charge->docReferencia ?? '') !== (string) ($service->docReferencia ?? '')
+                        ) {
+                            return false;
+                        }
+
+                        $period = $this->periodFromDescription($description);
+                        if ($period !== []) {
+                            return $oldStart !== null && $period[0] === $oldStart;
+                        }
+
+                        $vehiclePlate = trim((string) ($service->vehiculo_placa ?? ''));
+                        return $vehiclePlate !== '' && stripos($description, $vehiclePlate) !== false;
+                    });
+
+                if ($legacyCharges->count() > 1) {
+                    throw new \RuntimeException('ambiguous_service_cxc');
+                }
+
+                $undatedCharge = $legacyCharges->first();
+                if ($undatedCharge && !$isEditableCharge($undatedCharge)) {
+                    return false;
+                }
+            }
+
+            if ($undatedCharge) {
+                $description = $this->descriptionWithUpdatedServicePeriod(
+                    (string) $undatedCharge->descripcion,
+                    $newRange,
+                    $serviceId
+                );
+                DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $undatedCharge->idcuentasPorCobrar)
+                    ->update([
+                        'fechaCancelacion' => $newEnd,
+                        'descripcion' => $description,
+                    ]);
+
+                return true;
+            }
+
+            return $this->crearCobroDesdeServicio([
+                'cliente_idcliente' => $service->cliente_idcliente,
+                'monto' => $service->monto,
+                'moneda_idmoneda' => $service->moneda_idmoneda,
+                'tipoCobro_idtipoCobros' => $service->tipoCobro_idtipoCobros ?? null,
+                'fechaInicio' => $newStart,
+                'fecheVencimiento' => $newEnd,
+                'idservicioCliente' => $serviceId,
+                'vehiculo_placa' => $service->vehiculo_placa ?? '',
+                'docReferencia' => $service->docReferencia ?? null,
+            ]) > 0;
+        }
+
+        $openStates = ['1', '4', 'NUEVO', 'PagoCredito', 'PENDIENTE', 'VENCIDO'];
         $periodCandidates = DB::table('cuentasporcobrar')
             ->where('cliente_idcliente', $service->cliente_idcliente)
             ->where('moneda_idmoneda', $service->moneda_idmoneda)
@@ -216,13 +916,13 @@ class CxcService
     }
 
     /**
-     * FASE 1.5: VENCIDO (Automatización por fecha de corte)
-    * Desde el día 5, los periodos no pagados pasan a VENCIDO.
+     * FASE 1.5: Solo las cuentas pendientes vencidas pasan a VENCIDO.
      */
     public function verificarYActualizarVencidos(?Carbon $hoy = null): int
     {
         $updatedCount = 0;
         $hoy ??= Carbon::today();
+        $pendingStates = ['1', 'PENDIENTE'];
 
         $pendientes = DB::table('cuentasporcobrar as c')
             ->select([
@@ -231,7 +931,7 @@ class CxcService
                 'c.fechaCancelacion',
                 'c.descripcion',
             ])
-            ->whereIn('c.estado', ['1', '2', 'PENDIENTE', 'FACTURADO', 'Pendiente Pago parcial', 'Pendiente a credito'])
+            ->whereIn('c.estado', $pendingStates)
             ->where('c.montoActual', '>', 0)
             ->get();
 
@@ -240,11 +940,10 @@ class CxcService
             $fechaLimite = $periodo[1] ?? $row->fechaCancelacion;
 
             if ($fechaLimite && Carbon::parse($fechaLimite)->startOfDay()->lt($hoy->copy()->startOfDay())) {
-                DB::table('cuentasporcobrar')
+                $updatedCount += DB::table('cuentasporcobrar')
                     ->where('idcuentasPorCobrar', $row->idcuentasPorCobrar)
+                    ->whereIn('estado', $pendingStates)
                     ->update(['estado' => '4']);
-
-                $updatedCount++;
             }
         }
 
@@ -353,12 +1052,12 @@ class CxcService
     ): array {
         $grossAmount = round(max(0, $grossAmount), 2);
         $deductionRate = $isRetention ? 0.03 : 0.12;
-        $deduction = $applyDeduction && $grossAmount > 700 ? round($grossAmount * $deductionRate, 2) : 0.0;
+        $deduction = $applyDeduction && $grossAmount > 700 ? round($grossAmount * $deductionRate) : 0.0;
         $afterDeduction = round($grossAmount - $deduction, 2);
         $creditApplied = $useCredit ? round(min($afterDeduction, max(0, $availableCredit)), 2) : 0.0;
         $cashDue = round(max(0, $afterDeduction - $creditApplied), 2);
         $cashApplied = round(min($cashDue, max(0, $cashReceived)), 2);
-        $newCredit = round(max(0, $cashReceived - $cashApplied), 2);
+        $newCredit = round(max(0, $cashReceived - $grossAmount), 2);
 
         return [
             'gross' => $grossAmount,
@@ -395,20 +1094,25 @@ class CxcService
         ?string $periodEnd,
         ?Carbon $today = null,
         ?int $currentInstallment = null,
-        ?int $totalInstallments = null
+        ?int $totalInstallments = null,
+        bool $isPartialPayment = false
     ): string {
         if (round(max(0, $remainingDebt), 2) <= 0) {
-            return $deduction > 0 && !$isRetention ? 'Cancelado Detracción' : '3';
-        }
-
-        $today ??= Carbon::today();
-        if ($periodEnd && Carbon::parse($periodEnd)->startOfDay()->lt($today->copy()->startOfDay())) {
-            return '4';
+            return '3';
         }
 
         $method = mb_strtolower(trim($paymentMethod), 'UTF-8');
         if (str_contains($method, 'credito') || str_contains($method, 'crédito')) {
             return self::creditInstallmentLabel($currentInstallment, $totalInstallments);
+        }
+
+        if ($isPartialPayment) {
+            return 'Pendiente Pago parcial';
+        }
+
+        $today ??= Carbon::today();
+        if ($periodEnd && Carbon::parse($periodEnd)->startOfDay()->lt($today->copy()->startOfDay())) {
+            return '4';
         }
 
         return 'Pendiente Pago parcial';
@@ -460,11 +1164,11 @@ class CxcService
     {
         $description = trim((string) $description);
         if ($months < 2 || $months > 120) {
-            return mb_substr($description, 0, 50);
+            return mb_substr($description, 0, 70);
         }
 
         $suffix = ' - ' . $months;
-        $prefix = mb_substr($description, 0, max(0, 50 - mb_strlen($suffix, 'UTF-8')), 'UTF-8');
+        $prefix = mb_substr($description, 0, max(0, 70 - mb_strlen($suffix, 'UTF-8')), 'UTF-8');
 
         return rtrim($prefix) . $suffix;
     }
@@ -513,6 +1217,103 @@ class CxcService
         return round(max(0, (float) $credits - (float) $used), 2);
     }
 
+    public function notasCreditoDisponibles(string $clientId, int $currencyId): array
+    {
+        if ($clientId === '' || $currencyId <= 0) {
+            return [];
+        }
+
+        $applied = DB::table('nota_credito_aplicacion')
+            ->select('nota_credito_idnotacredito')
+            ->where('estado', '1')
+            ->groupBy('nota_credito_idnotacredito')
+            ->selectRaw('SUM(monto) as monto_aplicado');
+
+        return DB::table('nota_credito as nc')
+            ->leftJoinSub($applied, 'aplicada', function ($join): void {
+                $join->on('aplicada.nota_credito_idnotacredito', '=', 'nc.idnotacredito');
+            })
+            ->where('nc.cliente_idcliente', $clientId)
+            ->where('nc.moneda_idmoneda', $currencyId)
+            ->where('nc.estado', 'E')
+            ->whereRaw('nc.monto > COALESCE(aplicada.monto_aplicado, 0)')
+            ->select([
+                'nc.idnotacredito',
+                'nc.docReferencia',
+                'nc.monto',
+                'nc.descripcion',
+                'nc.fechaEmision',
+            ])
+            ->selectRaw('ROUND(nc.monto - COALESCE(aplicada.monto_aplicado, 0), 2) as monto_disponible')
+            ->orderBy('nc.fechaEmision')
+            ->orderBy('nc.idnotacredito')
+            ->get()
+            ->map(fn ($note): array => [
+                'idnotacredito' => (int) $note->idnotacredito,
+                'docReferencia' => trim((string) ($note->docReferencia ?? '')),
+                'descripcion' => trim((string) ($note->descripcion ?? '')),
+                'fechaEmision' => $note->fechaEmision,
+                'monto_disponible' => (float) $note->monto_disponible,
+            ])
+            ->all();
+    }
+
+    private function lockAvailableCreditNotes(array $noteIds, string $clientId, int $currencyId): array
+    {
+        $ids = collect($noteIds)
+            ->filter(fn ($id): bool => is_numeric($id) && (int) $id > 0)
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+        if (count($ids) > 1) {
+            throw new \RuntimeException('Solo se puede aplicar una nota de crédito por cobro.');
+        }
+        if ($ids === []) {
+            return [];
+        }
+
+        $notes = DB::table('nota_credito')
+            ->whereIn('idnotacredito', $ids)
+            ->orderBy('idnotacredito')
+            ->lockForUpdate()
+            ->get();
+        if ($notes->count() !== count($ids)) {
+            throw new \RuntimeException('Una de las notas de crédito seleccionadas ya no existe.');
+        }
+
+        $appliedAmounts = DB::table('nota_credito_aplicacion')
+            ->whereIn('nota_credito_idnotacredito', $ids)
+            ->where('estado', '1')
+            ->select('nota_credito_idnotacredito')
+            ->groupBy('nota_credito_idnotacredito')
+            ->selectRaw('SUM(monto) as monto_aplicado')
+            ->pluck('monto_aplicado', 'nota_credito_idnotacredito');
+
+        $result = [];
+        foreach ($notes as $note) {
+            if (
+                (string) $note->cliente_idcliente !== $clientId
+                || (int) $note->moneda_idmoneda !== $currencyId
+                || (string) $note->estado !== 'E'
+            ) {
+                throw new \RuntimeException('Las notas seleccionadas deben estar emitidas y corresponder al cliente y moneda del cobro.');
+            }
+
+            $available = round((float) $note->monto - (float) ($appliedAmounts[$note->idnotacredito] ?? 0), 2);
+            if ($available <= 0) {
+                throw new \RuntimeException('Una de las notas de crédito seleccionadas ya no tiene saldo disponible.');
+            }
+            $result[] = [
+                'idnotacredito' => (int) $note->idnotacredito,
+                'monto_disponible' => $available,
+            ];
+        }
+
+        return $result;
+    }
+
     public function procesarPagoGrupo(array $cxcIds, array $pagoData, UploadedFile|string|null $fileComprobante = null): array
     {
         $ids = collect($cxcIds)->filter(fn ($id): bool => is_numeric($id) && (int) $id > 0)
@@ -525,13 +1326,31 @@ class CxcService
             ? $fileComprobante->store('comprobantes-pago/cxc', 'public')
             : $fileComprobante;
         $storedByService = $fileComprobante instanceof UploadedFile;
+        $withholdingProof = $pagoData['withholding_proof'] ?? null;
+        $withholdingProofPath = $withholdingProof instanceof UploadedFile
+            ? $withholdingProof->store('comprobantes-pago/cxc/detraccion-retencion', 'public')
+            : null;
+        if ($withholdingProof instanceof UploadedFile && !$withholdingProofPath) {
+            throw new \RuntimeException('No se pudo guardar el comprobante de detracción/retención.');
+        }
+        $storedWithholdingProof = $withholdingProof instanceof UploadedFile;
 
         try {
-            return DB::transaction(function () use ($ids, $pagoData, $storedPath): array {
+            return DB::transaction(function () use ($ids, $pagoData, $storedPath, $withholdingProofPath): array {
                 $unlocked = DB::table('cuentasporcobrar')->whereIn('idcuentasPorCobrar', $ids)
                     ->orderBy('idcuentasPorCobrar')->get();
                 if ($unlocked->count() !== count($ids)) {
                     throw new \RuntimeException('Una de las cuentas por cobrar seleccionadas ya no existe.');
+                }
+                $quotationOperation = ($pagoData['origen_pago'] ?? '') === 'cotizacion';
+                $quotationReceivables = $unlocked->filter(
+                    fn ($cxc): bool => str_starts_with((string) ($cxc->descripcion ?? ''), 'COTIZACION:')
+                );
+                if (
+                    ($quotationOperation && ($quotationReceivables->count() !== count($ids) || count($ids) !== 1))
+                    || (!$quotationOperation && $quotationReceivables->isNotEmpty())
+                ) {
+                    throw new \RuntimeException('Las cuentas de cotización y de servicios deben procesarse por separado.');
                 }
 
                 $clientIds = $unlocked->pluck('cliente_idcliente')->map(fn ($id): string => (string) $id)->unique();
@@ -550,9 +1369,45 @@ class CxcService
                 $cxcs = DB::table('cuentasporcobrar')->whereIn('idcuentasPorCobrar', $ids)
                     ->orderBy('idcuentasPorCobrar')->lockForUpdate()->get();
                 if ($cxcs->contains(fn ($cxc): bool => (float) $cxc->montoActual <= 0
-                    || in_array((string) $cxc->estado, ['3', 'CANCELADO', 'Cancelado Detracción'], true))) {
+                    || in_array((string) $cxc->estado, ['3', 'CANCELADO', 'Cancelado Detracción', 'Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención'], true))) {
                     throw new \RuntimeException('Una de las cuentas seleccionadas ya no tiene deuda pendiente.');
                 }
+
+                $groupServiceIds = array_values(array_unique(array_filter(array_map(
+                    'intval',
+                    (array) ($pagoData['servicio_ids'] ?? [])
+                ))));
+                $serviceAmountsById = $groupServiceIds === []
+                    ? []
+                    : DB::table('serviciocliente')
+                        ->whereIn('idservicioCliente', $groupServiceIds)
+                        ->pluck('monto', 'idservicioCliente')
+                        ->map(fn ($amount): float => (float) $amount)
+                        ->all();
+                $serviceIdsByCxc = [];
+                $assignedServiceIds = [];
+                foreach ($cxcs as $groupCxc) {
+                    $groupCxcId = (int) $groupCxc->idcuentasPorCobrar;
+                    $serviceIdsByCxc[$groupCxcId] = $this->serviceIdsForCxc(
+                        $groupCxc,
+                        $groupServiceIds,
+                        $serviceAmountsById,
+                        $assignedServiceIds,
+                        $cxcs->count() === 1
+                    );
+                    $assignedServiceIds = array_values(array_unique(array_merge(
+                        $assignedServiceIds,
+                        $serviceIdsByCxc[$groupCxcId]
+                    )));
+                }
+                $renewalCxcId = (int) ($pagoData['renewal_cxc_id'] ?? 0);
+                if ($renewalCxcId > 0 && isset($serviceIdsByCxc[$renewalCxcId])) {
+                    $serviceIdsByCxc[$renewalCxcId] = array_values(array_unique(array_merge(
+                        $serviceIdsByCxc[$renewalCxcId],
+                        array_diff($groupServiceIds, $assignedServiceIds)
+                    )));
+                }
+                $this->persistCxcServiceLinks($serviceIdsByCxc, $serviceAmountsById);
 
                 $advancePeriods = (int) ($pagoData['adelanto_meses'] ?? 0);
                 $advanceServiceIds = array_values(array_filter(array_map('intval', (array) ($pagoData['servicio_ids'] ?? []))));
@@ -573,7 +1428,7 @@ class CxcService
                     }
 
                     $currentPeriod = $this->periodFromDescription((string) ($renewalCxc->descripcion ?? ''));
-                    $advanceFrom = $renewalCxc->fechaCancelacion ?? $currentPeriod[1];
+                    $advanceFrom = $renewalCxc->fechaCancelacion ?? ($currentPeriod[1] ?? null);
                     if (!$advanceFrom) {
                         throw new \RuntimeException('No se pudo determinar la fecha final del periodo que se está pagando.');
                     }
@@ -598,40 +1453,82 @@ class CxcService
 
                 $currentDebt = round((float) $cxcs->sum('montoActual'), 2);
                 $gross = round($currentDebt + $advancePeriodAmount, 2);
-                $isRetention = (string) ($client->detraccion ?? '') === '1';
-                $availableCredit = $this->saldoFavorDisponible($clientId, $currencyId);
+                $isRetention = array_key_exists('is_retention_override', $pagoData)
+                    ? filter_var($pagoData['is_retention_override'], FILTER_VALIDATE_BOOLEAN)
+                    : (string) ($client->detraccion ?? '') === '1';
+                $applyDeduction = filter_var($pagoData['aplicar_deduccion'] ?? true, FILTER_VALIDATE_BOOLEAN);
+                $selectedCreditNotes = $this->lockAvailableCreditNotes(
+                    (array) ($pagoData['nota_credito_ids'] ?? []),
+                    $clientId,
+                    $currencyId
+                );
+                $selectedNoteCredit = round((float) collect($selectedCreditNotes)->sum('monto_disponible'), 2);
                 $useCredit = filter_var($pagoData['usar_saldo_favor'] ?? false, FILTER_VALIDATE_BOOLEAN);
+                $availableBankCredit = $useCredit
+                    ? $this->saldoFavorDisponible($clientId, $currencyId)
+                    : 0.0;
+                $availableCredit = round($availableBankCredit + $selectedNoteCredit, 2);
+                $applyCredit = $useCredit || $selectedNoteCredit > 0;
                 $mode = ($pagoData['modo_pago'] ?? 'total') === 'parcial' ? 'parcial' : 'total';
                 $currencyMode = ($pagoData['payment_currency_mode'] ?? 'same') === 'other' ? 'other' : 'same';
                 $withholdingDecision = strtolower(trim((string) ($pagoData['withholding_decision'] ?? '')));
-                $preview = self::calculatePaymentBreakdown($gross, $isRetention, $availableCredit, $useCredit, 0);
+                $applyDeductionToPayment = $applyDeduction
+                    && ($mode === 'total' || $withholdingDecision !== '');
+                $preview = self::calculatePaymentBreakdown(
+                    $gross,
+                    $isRetention,
+                    $availableCredit,
+                    $applyCredit,
+                    0,
+                    $applyDeductionToPayment
+                );
 
                 if ($currencyMode === 'other') {
                     $received = round((float) ($pagoData['monto_cancelado'] ?? 0), 2);
                     $rate = round((float) ($pagoData['tipo_cambio'] ?? 0), 8);
-                    if ($rate <= 0) {
-                        throw new \RuntimeException('Debe indicar un tipo de cambio válido.');
+                    $paymentCurrencyId = (int) ($pagoData['currency_selector'] ?? 0);
+                    if ($quotationOperation) {
+                        $cashReceived = self::convertPaymentAmountToDebtCurrency(
+                            $received,
+                            $rate,
+                            $currencyId,
+                            $paymentCurrencyId
+                        );
+                    } else {
+                        if ($rate <= 0) {
+                            throw new \RuntimeException('Debe indicar un tipo de cambio válido.');
+                        }
+                        $cashReceived = round($received * $rate, 2);
                     }
-                    $cashReceived = round($received * $rate, 2);
                 } else {
                     $rate = 1.0;
                     if ($mode === 'total' && $withholdingDecision === 'full_pending') {
                         $cashReceived = round(max(0, $gross - $preview['credit_applied']), 2);
                     } elseif ($mode === 'total' && $advancePeriods <= 0) {
-                        $cashReceived = $preview['cash_due'];
+                        $cashReceived = round(max(0, (float) (
+                            $pagoData['montoPago']
+                            ?? $pagoData['monto_factura']
+                            ?? $preview['cash_due']
+                        )), 2);
                     } else {
                         $cashReceived = round(max(0, (float) ($pagoData['montoPago'] ?? 0)), 2);
                     }
+                }
+
+                if (
+                    $preview['deduction'] > 0
+                    && ($mode === 'total' || $withholdingDecision !== '')
+                    && !($mode === 'parcial' && $withholdingDecision === 'paid')
+                    && $cashReceived + 0.01 < $preview['cash_due']
+                ) {
+                    throw new \RuntimeException('El monto pagado debe cubrir al menos el neto calculado.');
                 }
 
                 $withholdingPending = 0.0;
                 $cashHeldForWithholding = 0.0;
                 if ($preview['deduction'] > 0 && in_array($withholdingDecision, ['paid', 'pending', 'full_pending'], true)) {
                     if ($withholdingDecision === 'paid') {
-                        if ($cashReceived + 0.01 < $preview['cash_due']) {
-                            throw new \RuntimeException('Para confirmar la detracción/retención pagada, el monto debe cubrir al menos el neto calculado.');
-                        }
-                        $breakdown = self::calculatePaymentBreakdown($gross, $isRetention, $availableCredit, $useCredit, $cashReceived);
+                        $breakdown = self::calculatePaymentBreakdown($gross, $isRetention, $availableCredit, $applyCredit, $cashReceived, $applyDeductionToPayment);
                     } else {
                         $expectedReceived = $withholdingDecision === 'full_pending'
                             ? round($gross - $preview['credit_applied'], 2)
@@ -640,7 +1537,7 @@ class CxcService
                             throw new \RuntimeException('El monto no coincide con la opción de detracción/retención seleccionada.');
                         }
 
-                        $breakdown = self::calculatePaymentBreakdown($gross, $isRetention, $availableCredit, $useCredit, 0, false);
+                        $breakdown = self::calculatePaymentBreakdown($gross, $isRetention, $availableCredit, $applyCredit, 0, false);
                         $breakdown['deduction'] = 0.0;
                         $breakdown['credit_applied'] = $preview['credit_applied'];
                         $breakdown['cash_due'] = $preview['cash_due'];
@@ -656,7 +1553,7 @@ class CxcService
                 } elseif ($preview['deduction'] > 0 && $cashReceived + 0.01 >= $preview['cash_due']) {
                     throw new \RuntimeException('Confirma si la detracción/retención ya fue pagada antes de guardar.');
                 } else {
-                    $breakdown = self::calculatePaymentBreakdown($gross, $isRetention, $availableCredit, $useCredit, $cashReceived, $preview['deduction'] <= 0);
+                    $breakdown = self::calculatePaymentBreakdown($gross, $isRetention, $availableCredit, $applyCredit, $cashReceived, $applyDeductionToPayment);
                 }
 
                 if ($advancePeriods > 0 && $breakdown['remaining_debt'] > 0) {
@@ -677,6 +1574,12 @@ class CxcService
 
                 $deductionRemaining = $breakdown['deduction'];
                 $creditRemaining = $breakdown['credit_applied'];
+                $noteCreditRemaining = min($breakdown['credit_applied'], $selectedNoteCredit);
+                $noteBalancesById = collect($selectedCreditNotes)
+                    ->mapWithKeys(fn (array $note): array => [
+                        $note['idnotacredito'] => $note['monto_disponible'],
+                    ])
+                    ->all();
                 $cashAppliedRemaining = $breakdown['cash_applied'];
                 $newCreditRemaining = $breakdown['new_credit'];
                 $currentDebtAfterDeduction = max(0, $currentDebt - min($currentDebt, $breakdown['deduction']));
@@ -696,6 +1599,9 @@ class CxcService
                     $afterDeduction = round(max(0, $debt - $deduction), 2);
                     $credit = round(min($afterDeduction, $creditRemaining), 2);
                     $creditRemaining = round($creditRemaining - $credit, 2);
+                    $noteCredit = round(min($credit, $noteCreditRemaining), 2);
+                    $noteCreditRemaining = round($noteCreditRemaining - $noteCredit, 2);
+                    $bankCredit = round($credit - $noteCredit, 2);
                     $afterCredit = round(max(0, $afterDeduction - $credit), 2);
                     $cashApplied = round(min($afterCredit, $cashAppliedRemaining), 2);
                     $cashAppliedRemaining = round($cashAppliedRemaining - $cashApplied, 2);
@@ -708,30 +1614,57 @@ class CxcService
                         continue;
                     }
 
-                    $cashConverted = round($cashApplied + $advanceForCxc + $excess + $cashHeldForWithholdingCxc, 2);
+                    $noteApplications = [];
+                    $noteRemainingForCxc = $noteCredit;
+                    foreach ($noteBalancesById as $noteId => $noteBalance) {
+                        if ($noteRemainingForCxc <= 0) {
+                            break;
+                        }
+                        $noteAmount = round(min($noteBalance, $noteRemainingForCxc), 2);
+                        if ($noteAmount <= 0) {
+                            continue;
+                        }
+                        $noteApplications[] = [
+                            'nota_credito_idnotacredito' => (int) $noteId,
+                            'monto' => $noteAmount,
+                        ];
+                        $noteBalancesById[$noteId] = round($noteBalance - $noteAmount, 2);
+                        $noteRemainingForCxc = round($noteRemainingForCxc - $noteAmount, 2);
+                    }
+
+                    $cashConverted = round($cashApplied + $advanceForCxc + $cashHeldForWithholdingCxc, 2);
                     $itemData = array_merge($pagoData, [
                         'payment_currency_mode' => $currencyMode,
                         'tipo_cambio' => $rate,
                         'moneda_idmoneda' => $currencyId,
                         'monto_recibido' => $currencyMode === 'other' && $cashConverted > 0
-                            ? round($cashConverted / $rate, 2)
+                            ? ($quotationOperation
+                                ? self::convertPaymentAmountToDebtCurrency(
+                                    $cashConverted,
+                                    $rate,
+                                    $paymentCurrencyId,
+                                    $currencyId
+                                )
+                                : round($cashConverted / $rate, 2))
                             : $cashConverted,
                         'monto_convertido' => $cashConverted,
                         'monto_aplicado' => $cashApplied,
                         'monto_deduccion' => $deduction,
-                        'monto_saldo_favor_aplicado' => $credit,
+                        'monto_saldo_favor_aplicado' => $bankCredit,
+                        'monto_nota_credito_aplicado' => $noteCredit,
+                        'nota_credito_aplicaciones' => $noteApplications,
                         'monto_excedente' => $excess,
                         'monto_adelantado' => $advanceForCxc,
                         'monto_deduccion_pendiente' => $pendingWithholdingForCxc,
+                        'withholding_proof_path' => $withholdingProofPath,
                         'adelanto_hasta' => $isRenewalCxc ? $advanceUntil : null,
                         'adelanto_desde' => $isRenewalCxc ? $advanceFrom : null,
                         'fechaFin' => $isRenewalCxc ? ($pagoData['fechaFin'] ?? null) : null,
                         'montoPago' => $cashApplied,
                         'modo_pago' => $mode,
                         'cuotas' => $installments,
-                        'servicio_ids' => $isRenewalCxc
-                            ? ($pagoData['servicio_ids'] ?? [])
-                            : [],
+                        'servicio_ids' => $serviceIdsByCxc[(int) $cxc->idcuentasPorCobrar] ?? [],
+                        'renewal_service_ids' => $isRenewalCxc ? $groupServiceIds : [],
                     ]);
                     $results[] = $this->procesarPagoCancelacion($cxc->idcuentasPorCobrar, $itemData, $storedPath);
                 }
@@ -744,6 +1677,9 @@ class CxcService
         } catch (\Throwable $exception) {
             if ($storedByService && $storedPath && Storage::disk('public')->exists($storedPath)) {
                 Storage::disk('public')->delete($storedPath);
+            }
+            if ($storedWithholdingProof && $withholdingProofPath && Storage::disk('public')->exists($withholdingProofPath)) {
+                Storage::disk('public')->delete($withholdingProofPath);
             }
             throw $exception;
         }
@@ -758,7 +1694,8 @@ class CxcService
         }
 
         $payment = DB::table('formapago')->where('idformaPago', $formaPagoId)->first(['detalle', 'tiempo']);
-        if (!$payment || !str_contains(mb_strtolower((string) $payment->detalle, 'UTF-8'), 'credito')) {
+        $paymentName = Str::ascii(mb_strtolower((string) ($payment->detalle ?? ''), 'UTF-8'));
+        if (!$payment || !str_contains($paymentName, 'credito')) {
             return [];
         }
 
@@ -791,6 +1728,141 @@ class CxcService
         return $installments;
     }
 
+    private function serviceIdsForCxc(
+        object $cxc,
+        array $selectedServiceIds,
+        array $serviceAmountsById,
+        array $assignedServiceIds,
+        bool $singleCxc
+    ): array {
+        $selectedServiceIds = array_values(array_unique(array_map('intval', $selectedServiceIds)));
+        if ($selectedServiceIds === []) {
+            return [];
+        }
+
+        if ($singleCxc) {
+            return $selectedServiceIds;
+        }
+
+        if (Schema::hasTable(self::CXC_SERVICE_LINK_TABLE)) {
+            $linkedIds = DB::table(self::CXC_SERVICE_LINK_TABLE)
+                ->where('cuentasPorCobrar_idcuentasPorCobrar', $cxc->idcuentasPorCobrar)
+                ->pluck('servicioCliente_idservicioCliente')
+                ->map(fn ($id): int => (int) $id)
+                ->all();
+            $selectedLinkedIds = array_values(array_intersect($selectedServiceIds, $linkedIds));
+            if ($selectedLinkedIds !== []) {
+                return $selectedLinkedIds;
+            }
+        }
+
+        if (preg_match('/SC-([0-9,]+)/', (string) ($cxc->descripcion ?? ''), $match) === 1) {
+            $linkedIds = array_values(array_filter(array_map('intval', explode(',', $match[1]))));
+            return array_values(array_intersect($selectedServiceIds, $linkedIds));
+        }
+
+        $unassignedIds = array_diff($selectedServiceIds, $assignedServiceIds);
+        $matchingIds = array_values(array_filter($unassignedIds, fn (int $serviceId): bool =>
+            isset($serviceAmountsById[$serviceId])
+            && abs((float) $serviceAmountsById[$serviceId] - (float) ($cxc->montoOriginal ?? 0)) < 0.005
+        ));
+
+        return count($matchingIds) === 1 ? $matchingIds : [];
+    }
+
+    public function linkServicesToReceivables(array $cxcIds, array $selectedServiceIds, int $renewalCxcId = 0): void
+    {
+        $cxcIds = array_values(array_unique(array_filter(array_map('intval', $cxcIds))));
+        $selectedServiceIds = array_values(array_unique(array_filter(array_map('intval', $selectedServiceIds))));
+        if ($cxcIds === [] || $selectedServiceIds === [] || !Schema::hasTable(self::CXC_SERVICE_LINK_TABLE)) {
+            return;
+        }
+
+        $cxcs = DB::table('cuentasporcobrar')
+            ->whereIn('idcuentasPorCobrar', $cxcIds)
+            ->orderBy('idcuentasPorCobrar')
+            ->get(['idcuentasPorCobrar', 'cliente_idcliente', 'descripcion', 'montoOriginal']);
+        if ($cxcs->count() !== count($cxcIds)) {
+            throw new \RuntimeException('Una de las cuentas por cobrar seleccionadas ya no existe.');
+        }
+
+        $clientIds = $cxcs->pluck('cliente_idcliente')->map(fn ($id): string => (string) $id)->unique();
+        $serviceRows = DB::table('serviciocliente')
+            ->whereIn('idservicioCliente', $selectedServiceIds)
+            ->get(['idservicioCliente', 'cliente_idcliente', 'monto']);
+        if (
+            $clientIds->count() !== 1
+            || $serviceRows->count() !== count($selectedServiceIds)
+            || $serviceRows->contains(fn ($service): bool =>
+                (string) $service->cliente_idcliente !== (string) $clientIds->first()
+            )
+        ) {
+            throw new \RuntimeException('Los servicios seleccionados no pertenecen al cliente de las cuentas por cobrar.');
+        }
+
+        $serviceAmountsById = $serviceRows
+            ->mapWithKeys(fn ($service): array => [(int) $service->idservicioCliente => (float) $service->monto])
+            ->all();
+        $serviceIdsByCxc = [];
+        $assignedServiceIds = [];
+        foreach ($cxcs as $cxc) {
+            $cxcId = (int) $cxc->idcuentasPorCobrar;
+            $serviceIdsByCxc[$cxcId] = $this->serviceIdsForCxc(
+                $cxc,
+                $selectedServiceIds,
+                $serviceAmountsById,
+                $assignedServiceIds,
+                $cxcs->count() === 1
+            );
+            $assignedServiceIds = array_values(array_unique(array_merge(
+                $assignedServiceIds,
+                $serviceIdsByCxc[$cxcId]
+            )));
+        }
+
+        $renewalCxcId = $renewalCxcId > 0 ? $renewalCxcId : (int) $cxcs->first()->idcuentasPorCobrar;
+        if (isset($serviceIdsByCxc[$renewalCxcId])) {
+            $serviceIdsByCxc[$renewalCxcId] = array_values(array_unique(array_merge(
+                $serviceIdsByCxc[$renewalCxcId],
+                array_diff($selectedServiceIds, $assignedServiceIds)
+            )));
+        }
+        $this->persistCxcServiceLinks($serviceIdsByCxc, $serviceAmountsById);
+    }
+
+    private function persistCxcServiceLinks(array $serviceIdsByCxc, array $serviceAmountsById = []): void
+    {
+        if (!Schema::hasTable(self::CXC_SERVICE_LINK_TABLE)) {
+            return;
+        }
+
+        $serviceIds = array_values(array_unique(array_merge(...array_values($serviceIdsByCxc ?: [[]]))));
+        $storedAmounts = $serviceIds === []
+            ? []
+            : DB::table('serviciocliente')
+                ->whereIn('idservicioCliente', $serviceIds)
+                ->pluck('monto', 'idservicioCliente')
+                ->map(fn ($amount): float => (float) $amount)
+                ->all();
+        $serviceAmountsById = $serviceAmountsById + $storedAmounts;
+        foreach ($serviceIdsByCxc as $cxcId => $serviceIds) {
+            $rows = [];
+            foreach (array_unique(array_map('intval', $serviceIds)) as $serviceId) {
+                if ($serviceId <= 0) {
+                    continue;
+                }
+                $rows[] = [
+                    'cuentasPorCobrar_idcuentasPorCobrar' => (int) $cxcId,
+                    'servicioCliente_idservicioCliente' => $serviceId,
+                    'montoServicio' => $serviceAmountsById[$serviceId] ?? null,
+                ];
+            }
+            if ($rows !== []) {
+                DB::table(self::CXC_SERVICE_LINK_TABLE)->insertOrIgnore($rows);
+            }
+        }
+    }
+
     public function procesarPagoCancelacion(int|string $idCxc, array $pagoData, UploadedFile|string|null $fileComprobante = null): array
     {
         return DB::transaction(function () use ($idCxc, $pagoData, $fileComprobante) {
@@ -807,17 +1879,29 @@ class CxcService
             $formaPagoId = (int) ($pagoData['formaPago_idformaPago'] ?? 0);
             $montoPago = round((float) ($pagoData['montoPago'] ?? $cxc->montoActual), 2);
             $montoDeduccion = round(max(0, (float) ($pagoData['monto_deduccion'] ?? 0)), 2);
+            $montoDeduccionPendiente = round(max(0, (float) ($pagoData['monto_deduccion_pendiente'] ?? 0)), 2);
             $montoFavorAplicado = round(max(0, (float) ($pagoData['monto_saldo_favor_aplicado'] ?? 0)), 2);
+            $montoNotaCreditoAplicado = round(max(0, (float) ($pagoData['monto_nota_credito_aplicado'] ?? 0)), 2);
+            $notaCreditoAplicaciones = array_values((array) ($pagoData['nota_credito_aplicaciones'] ?? []));
             $docRef = trim((string) ($pagoData['docReferencia'] ?? $cxc->docReferencia ?? ''));
             $descripcion = trim((string) ($pagoData['descripcion'] ?? 'Pago de CXC #' . $idCxc));
-            $fechaPago = Carbon::parse($pagoData['fechaPago'] ?? now()->format('Y-m-d'))->format('Y-m-d H:i:s');
+            $fechaPago = $this->paymentDateTime($pagoData['fechaPago'] ?? null);
             $cuotas = array_values($pagoData['cuotas'] ?? []);
 
             $deudaActual = round((float) $cxc->montoActual, 2);
+            $montoNotasDetalle = round((float) collect($notaCreditoAplicaciones)->sum(
+                fn (array $application): float => (float) ($application['monto'] ?? 0)
+            ), 2);
             if ($montoPago < 0 || $montoPago > $deudaActual
-                || $montoDeduccion + $montoFavorAplicado + $montoPago <= 0
-                || $montoDeduccion + $montoFavorAplicado + $montoPago > $deudaActual) {
+                || abs($montoNotasDetalle - $montoNotaCreditoAplicado) > 0.01
+                || $montoDeduccion + $montoFavorAplicado + $montoNotaCreditoAplicado + $montoPago <= 0
+                || $montoDeduccion + $montoFavorAplicado + $montoNotaCreditoAplicado + $montoPago > $deudaActual) {
                 throw new \RuntimeException('El monto aplicado a la CXC es inválido.');
+            }
+            foreach ($notaCreditoAplicaciones as $application) {
+                if ((int) ($application['nota_credito_idnotacredito'] ?? 0) <= 0 || (float) ($application['monto'] ?? 0) <= 0) {
+                    throw new \RuntimeException('El detalle de aplicación de la nota de crédito es inválido.');
+                }
             }
 
             $entidadBancaria = DB::table('entidadbancaria')
@@ -832,6 +1916,13 @@ class CxcService
             $monedaPagoId = $paymentCurrencyMode === 'other'
                 ? (int) ($pagoData['currency_selector'] ?? $pagoData['moneda_idmoneda'] ?? 0)
                 : $monedaBaseId;
+            if (
+                ($pagoData['origen_pago'] ?? '') === 'cotizacion'
+                && $paymentCurrencyMode === 'other'
+                && $monedaPagoId === $monedaBaseId
+            ) {
+                throw new \RuntimeException('La moneda de pago debe ser distinta a la moneda de la deuda.');
+            }
             if ($monedaPagoId <= 0 && (float) ($pagoData['monto_convertido'] ?? 0) <= 0) {
                 $monedaPagoId = $monedaBaseId;
             }
@@ -843,16 +1934,20 @@ class CxcService
             $tipoCambio = $paymentCurrencyMode === 'other'
                 ? round((float) ($pagoData['tipo_cambio'] ?? 0), 8)
                 : 1.0;
+            $montoBanco = round((float) ($pagoData['monto_banco'] ?? 0), 2);
             if ($montoRecibido < 0 || $tipoCambio <= 0) {
                 throw new \RuntimeException('El monto recibido y el tipo de cambio deben ser mayores a cero.');
             }
 
             $montoConvertido = round((float) ($pagoData['monto_convertido'] ?? ($montoRecibido * $tipoCambio)), 2);
+            if ($montoBanco <= 0) {
+                $montoBanco = $montoConvertido;
+            }
             $montoAplicado = round(min($deudaActual, (float) ($pagoData['monto_aplicado'] ?? $montoPago)), 2);
             $montoExcedente = round(max(0, (float) ($pagoData['monto_excedente'] ?? ($montoConvertido - $montoAplicado))), 2);
             $montoAdelantado = round(max(0, (float) ($pagoData['monto_adelantado'] ?? 0)), 2);
-            if ($montoConvertido + 0.01 < $montoAplicado + $montoExcedente
-                || $montoConvertido + 0.01 < $montoAplicado + $montoExcedente + $montoAdelantado
+            if ($montoConvertido + 0.01 < $montoAplicado
+                || $montoConvertido + 0.01 < $montoAplicado + $montoAdelantado
                 || ($montoConvertido <= 0 && $montoRecibido > 0)) {
                 throw new \RuntimeException('El monto recibido no coincide con el efectivo aplicado.');
             }
@@ -878,6 +1973,7 @@ class CxcService
                 $storedPath = $fileComprobante;
             }
 
+            $paymentBankMovementId = null;
             if ($montoConvertido > 0 && $servicesList->isNotEmpty()) {
                 $totalServiciosMonto = round((float) $servicesList->sum('monto'), 2);
                 $montoRestante = $montoConvertido;
@@ -904,6 +2000,7 @@ class CxcService
                         'monto' => round($montoSrv, 2),
                         'tipoMov' => 'I',
                     ]);
+                    $paymentBankMovementId ??= $idBancoMov;
 
                     if ($storedPath) {
                         DB::table('evidenciapago')->insert([
@@ -917,7 +2014,7 @@ class CxcService
                         'formaPago_idformaPago' => $formaPagoId,
                         'cuentasPorCobrar_idcuentasPorCobrar' => $idCxc,
                         'moneda_idmoneda' => $monedaPagoId,
-                        'descripcion' => mb_substr($advanceLabel . $srv->servicio_nombre, 0, 50),
+                        'descripcion' => mb_substr('Obs: ' . $descripcion, 0, 80),
                         'fechaPagoProgramada' => $cuotas[0]['fecha'] ?? $fechaPago,
                         'fechaPago' => $fechaPago,
                         'nCuota' => $cuotas[0]['numero'] ?? null,
@@ -930,9 +2027,10 @@ class CxcService
                     'entidadBancaria_identidadBancaria' => $entidadBancariaId,
                     'fechaRegistro' => $fechaPago,
                     'informacion' => mb_substr($descripcion, 0, 100),
-                    'monto' => $montoConvertido,
+                    'monto' => $montoBanco,
                     'tipoMov' => 'I',
                 ]);
+                $paymentBankMovementId = $idBancoMov;
 
                 if ($storedPath) {
                     DB::table('evidenciapago')->insert([
@@ -942,27 +2040,51 @@ class CxcService
                     ]);
                 }
 
-                $detallePagoId = DB::table('detallecxc')->insertGetId([
+                $quoteInstallmentNumber = ($pagoData['origen_pago'] ?? '') === 'cotizacion'
+                    ? (int) ($pagoData['cuota_cotizacion_numero'] ?? 0)
+                    : 0;
+                $scheduledQuoteDetail = $quoteInstallmentNumber > 0 && empty($cuotas)
+                    ? DB::table('detallecxc')
+                        ->where('cuentasPorCobrar_idcuentasPorCobrar', $idCxc)
+                        ->where('nCuota', $quoteInstallmentNumber)
+                        ->where('estado', '0')
+                        ->lockForUpdate()
+                        ->first(['iddetalleCXC'])
+                    : null;
+                $paymentDetailData = [
                     'formaPago_idformaPago' => $formaPagoId,
                     'cuentasPorCobrar_idcuentasPorCobrar' => $idCxc,
                     'moneda_idmoneda' => $monedaPagoId,
-                    'descripcion' => mb_substr($descripcion, 0, 50),
-                    'fechaPagoProgramada' => $cuotas[0]['fecha'] ?? $fechaPago,
+                    'descripcion' => mb_substr($descripcion, 0, 80),
+                    'fechaPagoProgramada' => $cuotas[0]['fecha'] ?? $pagoData['cuota_cotizacion_fecha'] ?? $fechaPago,
                     'fechaPago' => $fechaPago,
-                    'nCuota' => $cuotas[0]['numero'] ?? null,
+                    'nCuota' => $cuotas[0]['numero'] ?? ($quoteInstallmentNumber > 0 ? $quoteInstallmentNumber : null),
                     'bancos_idbancos' => $idBancoMov,
                     'estado' => '1',
-                ]);
+                ];
+                if ($scheduledQuoteDetail) {
+                    DB::table('detallecxc')
+                        ->where('iddetalleCXC', $scheduledQuoteDetail->iddetalleCXC)
+                        ->update($paymentDetailData);
+                    $detallePagoId = (int) $scheduledQuoteDetail->iddetalleCXC;
+                } else {
+                    $detallePagoId = DB::table('detallecxc')->insertGetId($paymentDetailData);
+                }
             } else {
                 $idBancoMov = null;
             }
 
             foreach ($idBancoMov ? array_slice($cuotas, 1) : [] as $cuota) {
+                $scheduledDescription = ($pagoData['origen_pago'] ?? '') === 'cotizacion'
+                    ? 'Cuota programada ' . $cuota['numero'] . ' - Monto: ' . number_format((float) $cuota['monto'], 2, '.', '')
+                    : 'Cuota programada ' . $cuota['numero'];
                 DB::table('detallecxc')->insert([
                     'formaPago_idformaPago' => $formaPagoId,
                     'cuentasPorCobrar_idcuentasPorCobrar' => $idCxc,
-                    'moneda_idmoneda' => $monedaPagoId,
-                    'descripcion' => mb_substr('Cuota programada ' . $cuota['numero'], 0, 50),
+                    'moneda_idmoneda' => ($pagoData['origen_pago'] ?? '') === 'cotizacion'
+                        ? $monedaBaseId
+                        : $monedaPagoId,
+                    'descripcion' => mb_substr($scheduledDescription, 0, 80),
                     'fechaPagoProgramada' => $cuota['fecha'],
                     'fechaPago' => null,
                     'nCuota' => $cuota['numero'],
@@ -971,14 +2093,42 @@ class CxcService
                 ]);
             }
 
-            $deudaPendiente = round(max(0, $deudaActual - $montoAplicado - $montoDeduccion - $montoFavorAplicado), 2);
+            foreach ($notaCreditoAplicaciones as $application) {
+                DB::table('nota_credito_aplicacion')->insert([
+                    'nota_credito_idnotacredito' => (int) $application['nota_credito_idnotacredito'],
+                    'cuentasPorCobrar_idcuentasPorCobrar' => (int) $idCxc,
+                    'monto' => round((float) $application['monto'], 2),
+                    'fechaAplicacion' => $fechaPago,
+                    'estado' => '1',
+                ]);
+            }
+            foreach (collect($notaCreditoAplicaciones)->pluck('nota_credito_idnotacredito')->unique() as $noteId) {
+                $noteAmount = (float) DB::table('nota_credito')->where('idnotacredito', $noteId)->value('monto');
+                $noteUsed = (float) DB::table('nota_credito_aplicacion')
+                    ->where('nota_credito_idnotacredito', $noteId)
+                    ->where('estado', '1')
+                    ->sum('monto');
+                if ($noteAmount > 0 && $noteUsed + 0.01 >= $noteAmount) {
+                    DB::table('nota_credito')
+                        ->where('idnotacredito', $noteId)
+                        ->where('estado', 'E')
+                        ->update(['estado' => 'A']);
+                }
+            }
+
+            $deudaPendiente = round(max(
+                0,
+                $deudaActual - $montoAplicado - $montoDeduccion - $montoFavorAplicado - $montoNotaCreditoAplicado
+            ), 2);
             $pagoCompleto = $deudaPendiente <= 0;
             $paymentMethod = DB::table('formapago')->where('idformaPago', $formaPagoId)->value('detalle');
-            $isRetention = (string) DB::table('cliente')
-                ->where('idcliente', $cxc->cliente_idcliente)
-                ->value('detraccion') === '1';
+            $isRetention = array_key_exists('is_retention_override', $pagoData)
+                ? filter_var($pagoData['is_retention_override'], FILTER_VALIDATE_BOOLEAN)
+                : (string) DB::table('cliente')
+                    ->where('idcliente', $cxc->cliente_idcliente)
+                    ->value('detraccion') === '1';
             $period = $this->periodFromDescription((string) ($cxc->descripcion ?? ''));
-            $periodEnd = $cxc->fechaCancelacion ?? $period[1] ?? $pagoData['fechaFin'] ?? null;
+            $periodEnd = $pagoData['fechaFin'] ?? $cxc->fechaCancelacion ?? $period[1] ?? null;
             $creditInstallments = max(1, (int) ($cxc->canCuotas ?? count($cuotas) ?: 1));
             $paidInstallments = (int) DB::table('detallecxc')
                 ->where('cuentasPorCobrar_idcuentasPorCobrar', $idCxc)
@@ -994,8 +2144,23 @@ class CxcService
                 $periodEnd,
                 null,
                 $nextCreditInstallment,
-                $creditInstallments
+                $creditInstallments,
+                ($pagoData['modo_pago'] ?? 'total') === 'parcial'
             );
+            if ($montoDeduccionPendiente > 0) {
+                if (abs($deudaPendiente - $montoDeduccionPendiente) > 0.01) {
+                    throw new \RuntimeException('El saldo pendiente de detracción/retención no coincide con el monto restante de la cuenta.');
+                }
+                $isAutodetraccionPending = !$isRetention
+                    && ($pagoData['withholding_decision'] ?? null) === 'full_pending';
+                $isAutoretentionPending = $isRetention
+                    && $parsedServiceIds !== []
+                    && ($pagoData['origen_pago'] ?? '') !== 'cotizacion'
+                    && ($pagoData['withholding_decision'] ?? null) === 'full_pending';
+                $nuevoEstado = $isRetention
+                    ? ($isAutoretentionPending ? 'Pendiente Autoretención' : 'Pendiente a Retención')
+                    : ($isAutodetraccionPending ? 'Pendiente Autodetracción' : 'Pendiente a Detracción');
+            }
             $persistedState = str_contains(mb_strtolower((string) $nuevoEstado, 'UTF-8'), 'pendiente a credito')
                 ? 'Pendiente a credito'
                 : $nuevoEstado;
@@ -1011,17 +2176,47 @@ class CxcService
                 ]);
 
             if ($montoDeduccion > 0) {
+                $nacionBankId = $this->bancoNacionId();
+                $deductionLabel = $isRetention ? 'Retención' : 'Detracción';
+                $quotationNumber = preg_match('/^COTIZACION:(.+)$/u', (string) ($cxc->descripcion ?? ''), $quotationMatch) === 1
+                    ? trim($quotationMatch[1])
+                    : 'CXC #' . $idCxc;
+                $currencySymbol = trim((string) DB::table('moneda')
+                    ->where('idmoneda', $monedaBaseId)
+                    ->value('simbolo')) ?: 'S/';
+                if (mb_strtolower($currencySymbol, 'UTF-8') === 's') {
+                    $currencySymbol = 'S/';
+                }
+                $deductionDateTime = $this->paymentDateTime(
+                    (string) ($pagoData['withholding_fecha'] ?? $fechaPago)
+                );
+                $quotationClient = ($pagoData['origen_pago'] ?? '') === 'cotizacion'
+                    ? DB::table('cliente')
+                        ->where('idcliente', $cxc->cliente_idcliente)
+                        ->first(['razonSocial', 'nombreComercial'])
+                    : null;
+                $clientName = trim((string) ($quotationClient->razonSocial ?? $quotationClient->nombreComercial ?? ''));
+                $withholdingDescription = trim((string) ($pagoData['withholding_description'] ?? ''));
+                $movementInformation = ($pagoData['origen_pago'] ?? '') === 'cotizacion'
+                    ? implode(' | ', array_filter([
+                        $deductionLabel . ' pagada ' . $quotationNumber,
+                        $clientName !== '' ? 'Cliente: ' . $clientName : '',
+                        $withholdingDescription,
+                    ]))
+                    : $deductionLabel . ' pagada de ' . $quotationNumber . ' del monto '
+                        . $currencySymbol . ' ' . number_format((float) $cxc->montoOriginal, 2, '.', ',');
                 $deductionBankId = DB::table('bancos')->insertGetId([
-                    'entidadBancaria_identidadBancaria' => $entidadBancariaId,
-                    'fechaRegistro' => $fechaPago,
-                    'informacion' => mb_substr('Detracción/retención aplicada a CXC #' . $idCxc, 0, 100),
+                    'entidadBancaria_identidadBancaria' => $nacionBankId,
+                    'fechaRegistro' => $deductionDateTime,
+                    'informacion' => mb_substr($movementInformation, 0, 100),
                     'monto' => $montoDeduccion,
                     'tipoMov' => 'T',
                 ]);
-                if ($storedPath) {
+                $deductionProofPath = $pagoData['withholding_proof_path'] ?? $storedPath;
+                if ($deductionProofPath) {
                     DB::table('evidenciapago')->insert([
                         'fechaCarga' => now()->format('Y-m-d H:i:s'),
-                        'archivo' => $storedPath,
+                        'archivo' => $deductionProofPath,
                         'bancos_idbancos' => $deductionBankId,
                     ]);
                 }
@@ -1029,12 +2224,30 @@ class CxcService
                     'formaPago_idformaPago' => $formaPagoId,
                     'cuentasPorCobrar_idcuentasPorCobrar' => $idCxc,
                     'moneda_idmoneda' => $monedaBaseId,
-                    'descripcion' => 'Detracción/retención aplicada',
-                    'fechaPagoProgramada' => $fechaPago,
-                    'fechaPago' => $fechaPago,
+                    'descripcion' => $deductionLabel . ' aplicada',
+                    'fechaPagoProgramada' => $deductionDateTime,
+                    'fechaPago' => $deductionDateTime,
                     'nCuota' => null,
                     'bancos_idbancos' => $deductionBankId,
                     'estado' => '1',
+                ]);
+            }
+
+            if ($montoDeduccionPendiente > 0) {
+                if ($paymentBankMovementId === null) {
+                    throw new \RuntimeException('No se encontró el movimiento bancario que respalda el pago con detracción/retención pendiente.');
+                }
+                $pendingWithholdingLabel = $isRetention ? 'Retención pendiente: ' : 'Detracción pendiente: ';
+                DB::table('detallecxc')->insert([
+                    'formaPago_idformaPago' => $formaPagoId,
+                    'cuentasPorCobrar_idcuentasPorCobrar' => $idCxc,
+                    'moneda_idmoneda' => $monedaBaseId,
+                    'descripcion' => mb_substr($pendingWithholdingLabel . number_format($montoDeduccionPendiente, 2, '.', ''), 0, 50),
+                    'fechaPagoProgramada' => $fechaPago,
+                    'fechaPago' => null,
+                    'nCuota' => null,
+                    'bancos_idbancos' => $paymentBankMovementId,
+                    'estado' => '0',
                 ]);
             }
 
@@ -1094,19 +2307,24 @@ class CxcService
             if (empty($serviceIds) && !empty($pagoData['servicioCliente_idservicioCliente'])) {
                 $serviceIds = [(int) $pagoData['servicioCliente_idservicioCliente']];
             }
+            $renewalServiceIds = $pagoData['renewal_service_ids'] ?? $serviceIds;
+            $parsedRenewalServiceIds = array_values(array_unique(array_filter(array_map(
+                'intval',
+                (array) $renewalServiceIds
+            ))));
             $tipoCobroId = !empty($pagoData['tipoCobro_idtipoCobros'])
                 ? (int) $pagoData['tipoCobro_idtipoCobros']
                 : null;
             $period = $this->periodFromDescription((string) ($cxc->descripcion ?? ''));
-            $periodEnd = $cxc->fechaCancelacion ?? $period[1];
+            $periodEnd = $cxc->fechaCancelacion ?? ($period[1] ?? null);
             $renewalCxcId = (int) ($pagoData['renewal_cxc_id'] ?? $idCxc);
             $advanceUntil = $pagoData['adelanto_hasta'] ?? null;
             $advanceMonths = (int) ($pagoData['adelanto_meses'] ?? 0);
             if ($pagoCompleto && (int) $idCxc === $renewalCxcId && $periodEnd) {
-                if ($advanceMonths > 1 && $advanceUntil && !empty($parsedServiceIds)) {
+                if ($advanceMonths > 1 && $advanceUntil && $parsedRenewalServiceIds !== []) {
                     $this->cancelarCxcsCubiertasPorAdelanto(
                         $cxc,
-                        $parsedServiceIds,
+                        $parsedRenewalServiceIds,
                         (string) ($pagoData['adelanto_desde'] ?? $periodEnd),
                         (string) $advanceUntil
                     );
@@ -1114,25 +2332,30 @@ class CxcService
             }
             $nextCxcId = $pagoCompleto
                 && (int) $idCxc === $renewalCxcId
-                && !empty($serviceIds)
+                && $parsedRenewalServiceIds !== []
                 && self::shouldRenewAfterFullPayment($periodEnd)
                 ? $this->renovarServicioVinculado(
                     $cxc,
                     0,
                     Carbon::now(),
-                    $serviceIds,
+                    $parsedRenewalServiceIds,
                     $tipoCobroId,
                     $advanceMonths > 1 ? (string) $advanceUntil : null,
                     $advanceMonths > 1,
-                    $advanceMonths > 1 ? null : ($pagoData['fechaFin'] ?? null)
+                    $advanceMonths > 1 ? null : ($pagoData['fechaFin'] ?? null),
+                    $fechaPago
                 )
                 : null;
+            if ($nextCxcId) {
+                $this->registrarFechaPagoSiguienteCxc((int) $nextCxcId, $fechaPago);
+            }
 
             return [
                 'idcuentasPorCobrar' => $idCxc,
                 'montoPagado' => $montoAplicado,
                 'montoDeduccion' => $montoDeduccion,
                 'montoSaldoFavorAplicado' => $montoFavorAplicado,
+                'montoNotaCreditoAplicado' => $montoNotaCreditoAplicado,
                 'montoRecibido' => $montoRecibido,
                 'montoConvertido' => $montoConvertido,
                 'montoExcedente' => $montoExcedente,
@@ -1144,11 +2367,203 @@ class CxcService
         });
     }
 
+    private function registrarFechaPagoSiguienteCxc(int $nextCxcId, string $fechaPago): void
+    {
+        DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $nextCxcId)
+            ->whereNull('fechaRegistro')
+            ->update(['fechaRegistro' => $fechaPago]);
+    }
+
+    private function paymentDateTime(?string $selectedDate): string
+    {
+        $date = Carbon::parse($selectedDate ?? now())->format('Y-m-d');
+
+        return $date . ' ' . now()->format('H:i:s');
+    }
+
+    public function registrarDetraccionPendiente(
+        int|string $idCxc,
+        ?UploadedFile $comprobante,
+        array|int|string|null $servicioIds = null,
+        string $descripcion = '',
+        ?string $fechaPago = null,
+        bool $preservePendingAmountInDetail = false
+    ): array {
+        $storedPath = $comprobante?->store('comprobantes-pago/cxc', 'public');
+        if ($comprobante !== null && !$storedPath) {
+            throw new \RuntimeException('No se pudo guardar el comprobante de detracción/retención.');
+        }
+
+        try {
+            return DB::transaction(function () use ($idCxc, $storedPath, $servicioIds, $descripcion, $fechaPago, $preservePendingAmountInDetail): array {
+                $cxc = DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $idCxc)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$cxc || !in_array((string) $cxc->estado, ['Cancelado Detracción', 'Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención'], true) || (float) $cxc->montoActual <= 0) {
+                    throw new \RuntimeException('La cuenta no tiene una detracción/retención pendiente por confirmar.');
+                }
+
+                $pendingDetail = DB::table('detallecxc')
+                    ->where('cuentasPorCobrar_idcuentasPorCobrar', $idCxc)
+                    ->where('estado', '0')
+                    ->where(function ($query): void {
+                        $query->where('descripcion', 'like', 'Detracción pendiente:%')
+                            ->orWhere('descripcion', 'like', 'Retención pendiente:%');
+                    })
+                    ->orderByDesc('iddetalleCXC')
+                    ->first();
+                if (!$pendingDetail) {
+                    throw new \RuntimeException('No se encontró el detalle de detracción/retención pendiente de esta cuenta.');
+                }
+
+                $nationBankId = $this->bancoNacionId();
+                $paymentDateTime = $this->paymentDateTime($fechaPago);
+                $deductionAmount = round((float) $cxc->montoActual, 2);
+                $recordedDeductionAmount = preg_match(
+                    '/:\s*([0-9]+(?:\.[0-9]{1,2})?)/',
+                    (string) $pendingDetail->descripcion,
+                    $pendingAmountMatch
+                ) === 1
+                    ? number_format((float) $pendingAmountMatch[1], 2, '.', '')
+                    : number_format($deductionAmount, 2, '.', '');
+                $isRetention = str_starts_with((string) $pendingDetail->descripcion, 'Retención pendiente:');
+                $isAutodetraccion = !$isRetention && (string) $cxc->estado === 'Pendiente Autodetracción';
+                $isAutoretention = $isRetention && (string) $cxc->estado === 'Pendiente Autoretención';
+                $deductionLabel = $isRetention ? 'Retención' : 'Detracción';
+                $quotationNumber = preg_match('/^COTIZACION:(.+)$/u', (string) ($cxc->descripcion ?? ''), $quotationMatch) === 1
+                    ? trim($quotationMatch[1])
+                    : 'CXC #' . $idCxc;
+                $currencySymbol = trim((string) DB::table('moneda')
+                    ->where('idmoneda', $pendingDetail->moneda_idmoneda)
+                    ->value('simbolo')) ?: 'S/';
+                if (mb_strtolower($currencySymbol, 'UTF-8') === 's') {
+                    $currencySymbol = 'S/';
+                }
+                $movementInformation = $isAutodetraccion || $isAutoretention
+                    ? ($isAutodetraccion ? 'Autodetracción' : 'Autoretención') . ' pagada de ' . $quotationNumber . ' | '
+                        . $currencySymbol . ' ' . number_format((float) $cxc->montoOriginal, 2, '.', ',')
+                        . ' | Se pagó ' . ($isAutodetraccion ? 'autodetracción' : 'autoretención') . ': '
+                        . number_format($deductionAmount, 0, '.', ',') . ' soles'
+                    : $deductionLabel . ' pagada de ' . $quotationNumber . ' del monto '
+                        . $currencySymbol . ' ' . number_format((float) $cxc->montoOriginal, 2, '.', ',');
+                $paymentComment = trim($descripcion);
+                if ($preservePendingAmountInDetail && $paymentComment !== '') {
+                    $movementLabel = $isAutodetraccion
+                        ? 'Autodetracción'
+                        : ($isAutoretention ? 'Autoretención' : $deductionLabel);
+                    $movementInformation = $movementLabel . ' pagada de CXC #' . $idCxc . ' | ' . $paymentComment;
+                    if (mb_strlen($movementInformation, 'UTF-8') > 100) {
+                        $movementInformation = $movementLabel . ' #' . $idCxc . ' | ' . $paymentComment;
+                    }
+                } elseif (!$isAutodetraccion && !$isAutoretention && $paymentComment !== '') {
+                    $movementInformation .= ' | ' . $paymentComment;
+                }
+                $bankMovementId = DB::table('bancos')->insertGetId([
+                    'entidadBancaria_identidadBancaria' => $nationBankId,
+                    'fechaRegistro' => $paymentDateTime,
+                    'informacion' => mb_substr($movementInformation, 0, 100),
+                    'monto' => $deductionAmount,
+                    'tipoMov' => 'T',
+                ]);
+
+                if ($storedPath !== null) {
+                    DB::table('evidenciapago')->insert([
+                        'fechaCarga' => now()->format('Y-m-d H:i:s'),
+                        'archivo' => $storedPath,
+                        'bancos_idbancos' => $bankMovementId,
+                    ]);
+                }
+                DB::table('detallecxc')
+                    ->where('iddetalleCXC', $pendingDetail->iddetalleCXC)
+                    ->update([
+                        'fechaPago' => $paymentDateTime,
+                        'bancos_idbancos' => $bankMovementId,
+                        'descripcion' => $deductionLabel . ' aplicada'
+                            . ($preservePendingAmountInDetail ? ': ' . $recordedDeductionAmount : ''),
+                        'estado' => '1',
+                    ]);
+
+                DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $idCxc)
+                    ->update(['montoActual' => 0, 'estado' => '3']);
+
+                $parsedServiceIds = [];
+                if (is_array($servicioIds)) {
+                    $parsedServiceIds = array_values(array_filter(array_map('intval', $servicioIds)));
+                } elseif ($servicioIds !== null && (int) $servicioIds > 0) {
+                    $parsedServiceIds = [(int) $servicioIds];
+                }
+                if ($parsedServiceIds === []
+                    && preg_match('/SC-([0-9,]+)/', (string) ($cxc->descripcion ?? ''), $match) === 1) {
+                    $parsedServiceIds = array_values(array_filter(array_map('intval', explode(',', $match[1]))));
+                }
+
+                $period = $this->periodFromDescription((string) ($cxc->descripcion ?? ''));
+                $periodEnd = $cxc->fechaCancelacion ?? $period[1] ?? null;
+                $nextCxcId = $periodEnd && $parsedServiceIds !== []
+                    ? $this->renovarServicioVinculado(
+                        $cxc,
+                        0,
+                        Carbon::now(),
+                        $parsedServiceIds,
+                        (int) ($cxc->tipoCobro_idtipoCobros ?? 0)
+                    )
+                    : null;
+
+                return [
+                    'idcuentasPorCobrar' => (int) $idCxc,
+                    'montoDeduccion' => $deductionAmount,
+                    'tipoDeduccion' => $deductionLabel,
+                    'estado' => '3',
+                    'renovado' => $nextCxcId !== null,
+                    'siguienteCxcId' => $nextCxcId,
+                ];
+            });
+        } catch (\Throwable $exception) {
+            if ($storedPath !== null && Storage::disk('public')->exists($storedPath)) {
+                Storage::disk('public')->delete($storedPath);
+            }
+            throw $exception;
+        }
+    }
+
+    private function bancoNacionId(): int
+    {
+        $nameColumns = array_values(array_filter(
+            ['razonSocial', 'descripcion'],
+            static fn(string $column): bool => Schema::hasColumn('entidadbancaria', $column)
+        ));
+        if ($nameColumns === []) {
+            throw new \RuntimeException('Debe registrar la entidad bancaria Banco de la Nación para contabilizar la detracción/retención.');
+        }
+
+        $bank = DB::table('entidadbancaria')->get(array_merge(['identidadBancaria'], $nameColumns))
+            ->first(static function ($row) use ($nameColumns): bool {
+                foreach ($nameColumns as $column) {
+                    $name = Str::ascii(mb_strtolower(trim((string) ($row->{$column} ?? '')), 'UTF-8'));
+                    if (preg_match('/\bbanco\s+de\s+la\s+nacion\b/', $name) === 1) {
+                        return true;
+                    }
+                }
+
+                return false;
+            });
+
+        if (!$bank) {
+            throw new \RuntimeException('Debe registrar la entidad bancaria Banco de la Nación para contabilizar la detracción/retención.');
+        }
+
+        return (int) $bank->identidadBancaria;
+    }
+
     /**
      * Renovación automática del servicio vinculado y generación de la siguiente CXC 'PENDIENTE'.
      */
 
-    public function renovarServicioVinculado(object $cxc, float $deudaPendiente = 0, mixed $fechaProceso = null, array|int|string|null $servicioIds = null, ?int $tipoCobroId = null, ?string $periodEndOverride = null, bool $preserveServiceEnd = false, ?string $nextPeriodEndOverride = null): ?int
+    public function renovarServicioVinculado(object $cxc, float $deudaPendiente = 0, mixed $fechaProceso = null, array|int|string|null $servicioIds = null, ?int $tipoCobroId = null, ?string $periodEndOverride = null, bool $preserveServiceEnd = false, ?string $nextPeriodEndOverride = null, ?string $successorRegistrationDate = null): ?int
     {
         $fechaProceso = $fechaProceso !== null
             ? Carbon::parse($fechaProceso)
@@ -1165,6 +2580,12 @@ class CxcService
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'sc.almacen_idalmacen')
             ->where('sc.cliente_idcliente', $cxc->cliente_idcliente)
             ->where('sc.estado', 'activo');
+        if (Schema::hasColumn('serviciocliente', 'observacion')) {
+            $serviciosQuery->where(function ($query): void {
+                $query->whereNull('sc.observacion')
+                    ->orWhere('sc.observacion', 'not like', '%' . self::SCHEDULED_DEACTIVATION_MARKER . '%');
+            });
+        }
 
         if (!empty($parsedServiceIds)) {
             $serviciosQuery->whereIn('sc.idservicioCliente', $parsedServiceIds);
@@ -1207,19 +2628,20 @@ class CxcService
         foreach ($servicios as $servicio) {
             $rec = strtoupper(trim((string) ($tipoCobro->recurrencia ?? '')));
             $tiempo = (int) ($tipoCobro->tiempo ?? 0);
+            $mesesPeriodo = ServicePeriod::months($servicio->servicio_periodo ?? null);
 
-            if ($tipoCobro && $rec === 'M' && $tiempo > 0) {
+            if ($mesesPeriodo !== null) {
+                $nuevaFechaInicio = Carbon::parse($nextStart)->format('Y-m-d');
+                $nuevaFechaVencimiento = ServicePeriod::addToDate($nextStart, $mesesPeriodo)->format('Y-m-d');
+            } elseif ($tipoCobro && $rec === 'M' && $tiempo > 0) {
                 $nuevaFechaInicio = Carbon::parse($nextStart)->format('Y-m-d');
                 $nuevaFechaVencimiento = Carbon::parse($nextStart)->addMonthsNoOverflow($tiempo)->format('Y-m-d');
             } elseif ($tipoCobro && $rec === 'D' && $tiempo > 0) {
                 $nuevaFechaInicio = Carbon::parse($nextStart)->format('Y-m-d');
                 $nuevaFechaVencimiento = Carbon::parse($nextStart)->addDays($tiempo)->format('Y-m-d');
             } else {
-                $diasPeriodo = is_numeric($servicio->servicio_periodo ?? null)
-                    ? max((int) $servicio->servicio_periodo, 1)
-                    : 30;
                 $nuevaFechaInicio = Carbon::parse($nextStart)->format('Y-m-d');
-                $nuevaFechaVencimiento = Carbon::parse($nextStart)->addDays($diasPeriodo)->format('Y-m-d');
+                $nuevaFechaVencimiento = ServicePeriod::addToDate($nextStart, 1)->format('Y-m-d');
             }
 
             if ($nextPeriodEndOverride) {
@@ -1233,12 +2655,24 @@ class CxcService
         $fechaFin = collect($periodos)->max(fn(array $periodo) => $periodo[1]);
         $montoServicios = round((float) $servicios->sum('monto'), 2);
         $serviceMarker = 'SC-' . implode(',', $servicios->pluck('idservicioCliente')->all());
+        if ($servicios->count() > 1) {
+            return $this->renovarServiciosIndividuales(
+                $cxc,
+                $servicios,
+                $fechaInicio,
+                $fechaFin,
+                $resolvedTipoCobroId,
+                $periodEndOverride,
+                $preserveServiceEnd,
+                $successorRegistrationDate
+            );
+        }
         $nextRange = Carbon::parse($fechaInicio)->format('d/m/Y') . ' a ' . Carbon::parse($fechaFin)->format('d/m/Y');
         $existingPeriod = DB::table('cuentasporcobrar')
             ->where('cliente_idcliente', $cxc->cliente_idcliente)
             ->where('moneda_idmoneda', $cxc->moneda_idmoneda)
             ->where('descripcion', 'like', '%' . $nextRange . '%')
-            ->whereIn('estado', ['1', '2', '3', '4', 'PENDIENTE', 'FACTURADO', 'CANCELADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito', 'Cancelado Detracción'])
+            ->whereIn('estado', ['1', '2', '3', '4', 'NUEVO', 'PagoCredito', 'PENDIENTE', 'FACTURADO', 'CANCELADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito', 'Cancelado Detracción', 'Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención'])
             ->value('idcuentasPorCobrar');
         if ($existingPeriod) {
             DB::table('serviciocliente')
@@ -1254,7 +2688,7 @@ class CxcService
                 ->where('cliente_idcliente', $cxc->cliente_idcliente)
                 ->where('moneda_idmoneda', $cxc->moneda_idmoneda)
                 ->where('descripcion', 'like', $successorPrefix . '%')
-                ->whereIn('estado', ['1', '2', '4', 'PENDIENTE', 'FACTURADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito'])
+                ->whereIn('estado', ['1', '2', '4', 'NUEVO', 'PagoCredito', 'PENDIENTE', 'FACTURADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito'])
                 ->orderByDesc('idcuentasPorCobrar')
                 ->first();
             if ($existingSuccessor) {
@@ -1302,6 +2736,121 @@ class CxcService
         return $nextCxcId;
     }
 
+    private function renovarServiciosIndividuales(
+        object $cxc,
+        object $servicios,
+        string $fechaInicio,
+        string $fechaFin,
+        ?int $tipoCobroId,
+        ?string $periodEndOverride,
+        bool $preserveServiceEnd,
+        ?string $successorRegistrationDate
+    ): ?int {
+        $serviceIds = $servicios->pluck('idservicioCliente')->map(fn ($id): int => (int) $id)->all();
+        $serviceTotal = round((float) $servicios->sum('monto'), 2);
+        $openStates = ['1', '2', '4', 'NUEVO', 'PagoCredito', 'PENDIENTE', 'FACTURADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito'];
+        $periodCharges = DB::table('cuentasporcobrar')
+            ->where('cliente_idcliente', $cxc->cliente_idcliente)
+            ->where('moneda_idmoneda', $cxc->moneda_idmoneda)
+            ->whereDate('fechaCancelacion', $fechaFin)
+            ->whereIn('estado', $openStates)
+            ->orderBy('idcuentasPorCobrar')
+            ->get();
+
+        $legacyGroup = $periodCharges->first(fn ($charge): bool =>
+            abs((float) $charge->montoOriginal - $serviceTotal) < 0.005
+            && (float) $charge->montoActual <= (float) $charge->montoOriginal
+            && preg_match('/SC-([0-9,]+)/', (string) ($charge->descripcion ?? '')) === 1
+        );
+        $legacyBalanceRemaining = round((float) ($legacyGroup->montoActual ?? 0), 2);
+        $nextIds = [];
+
+        foreach ($servicios as $index => $servicio) {
+            $serviceId = (int) $servicio->idservicioCliente;
+            $serviceAmount = round((float) $servicio->monto, 2);
+            $serviceDescription = mb_substr(
+                'REN-CXC-' . (int) $cxc->idcuentasPorCobrar
+                    . ' P ' . Carbon::parse($fechaInicio)->format('d/m/Y')
+                    . ' a ' . Carbon::parse($fechaFin)->format('d/m/Y')
+                    . ' SC-' . $serviceId,
+                0,
+                50
+            );
+            $unitBalance = $legacyGroup
+                ? ($index === $servicios->count() - 1
+                    ? $legacyBalanceRemaining
+                    : round((float) $legacyGroup->montoActual * $serviceAmount / max($serviceTotal, 0.01), 2))
+                : $serviceAmount;
+            $legacyBalanceRemaining = round($legacyBalanceRemaining - ($legacyGroup ? $unitBalance : 0), 2);
+            $existingServiceCxc = $periodCharges
+                ->reject(fn ($charge): bool => $legacyGroup
+                    && (int) $charge->idcuentasPorCobrar === (int) $legacyGroup->idcuentasPorCobrar)
+                ->first(function ($charge) use ($serviceId): bool {
+                return preg_match(
+                    '/(^|[^A-Za-z0-9])SC-' . $serviceId . '([^0-9]|$)/',
+                    (string) ($charge->descripcion ?? '')
+                ) === 1;
+                });
+            $successorId = null;
+
+            if ($existingServiceCxc) {
+                $successorId = (int) $existingServiceCxc->idcuentasPorCobrar;
+            } elseif ($legacyGroup && $index === 0) {
+                $successorId = (int) $legacyGroup->idcuentasPorCobrar;
+                DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $successorId)
+                    ->update([
+                        'descripcion' => $serviceDescription,
+                        'montoOriginal' => $serviceAmount,
+                        'montoActual' => $unitBalance,
+                        'fechaCancelacion' => $fechaFin,
+                        'tipoCobro_idtipoCobros' => $tipoCobroId ?? $cxc->tipoCobro_idtipoCobros,
+                    ]);
+            } else {
+                $successorId = $this->crearCobroDesdeServicio([
+                    'cliente_idcliente' => $cxc->cliente_idcliente,
+                    'montoServicioBase' => $serviceAmount,
+                    'moneda_idmoneda' => $cxc->moneda_idmoneda,
+                    'tipoCobro_idtipoCobros' => $tipoCobroId ?? $cxc->tipoCobro_idtipoCobros,
+                    'descripcion' => $serviceDescription,
+                    'vehiculo_placa' => $servicio->vehiculo_placa ?? '',
+                    'idservicioCliente' => $serviceId,
+                    'fechaInicio' => $fechaInicio,
+                    'fecheVencimiento' => $fechaFin,
+                    'docReferencia' => $legacyGroup->docReferencia ?? null,
+                ]);
+            }
+
+            if ($successorId > 0) {
+                if ($legacyGroup && !($index === 0 && (int) $successorId === (int) $legacyGroup->idcuentasPorCobrar)) {
+                    DB::table('cuentasporcobrar')
+                        ->where('idcuentasPorCobrar', $successorId)
+                        ->update([
+                            'montoOriginal' => $serviceAmount,
+                            'montoActual' => $unitBalance,
+                            'estado' => $legacyGroup->estado,
+                            'docReferencia' => $legacyGroup->docReferencia,
+                            'tipoCobro_idtipoCobros' => $tipoCobroId ?? $cxc->tipoCobro_idtipoCobros,
+                        ]);
+                }
+                $nextIds[] = $successorId;
+                $registrationDate = $successorRegistrationDate ?? ($legacyGroup->fechaRegistro ?? null);
+                if ($registrationDate !== null) {
+                    DB::table('cuentasporcobrar')
+                        ->where('idcuentasPorCobrar', $successorId)
+                        ->whereNull('fechaRegistro')
+                        ->update(['fechaRegistro' => $registrationDate]);
+                }
+            }
+        }
+
+        DB::table('serviciocliente')
+            ->whereIn('idservicioCliente', $serviceIds)
+            ->update(['fecheVencimiento' => $preserveServiceEnd && $periodEndOverride ? $periodEndOverride : $fechaFin]);
+
+        return $nextIds[0] ?? null;
+    }
+
     private function cancelarCxcsCubiertasPorAdelanto(object $currentCxc, array $serviceIds, string $periodEnd, string $advanceEnd): void
     {
         $tipoCobro = DB::table('tipocobro')->where('idtipoCobros', $currentCxc->tipoCobro_idtipoCobros)->first();
@@ -1321,7 +2870,7 @@ class CxcService
             ->where('moneda_idmoneda', $currentCxc->moneda_idmoneda)
             ->where('tipoCobro_idtipoCobros', $currentCxc->tipoCobro_idtipoCobros)
             ->where('idcuentasPorCobrar', '!=', $currentCxc->idcuentasPorCobrar)
-            ->whereIn('estado', ['1', '2', '4', 'PENDIENTE', 'FACTURADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito'])
+            ->whereIn('estado', ['1', '2', '4', 'NUEVO', 'PagoCredito', 'PENDIENTE', 'FACTURADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito'])
             ->get(['idcuentasPorCobrar', 'descripcion', 'fechaCancelacion']);
 
         $currentEnd = Carbon::parse($periodEnd)->startOfDay();
@@ -1357,14 +2906,19 @@ class CxcService
         $hoy ??= Carbon::today();
         $generados = 0;
         $this->verificarYActualizarVencidos($hoy);
-        $servicios = DB::table('serviciocliente as sc')
+        $serviciosQuery = DB::table('serviciocliente as sc')
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'sc.almacen_idalmacen')
             ->whereRaw('LOWER(COALESCE(sc.estado, "")) = ?', ['activo'])
             ->whereNotNull('sc.fechaInicio')
             ->whereNotNull('sc.fecheVencimiento')
-            ->select('sc.*', 'a.periodo as servicio_periodo')
-            ->get()
-            ->groupBy('cliente_idcliente');
+            ->select('sc.*', 'a.periodo as servicio_periodo');
+        if (Schema::hasColumn('serviciocliente', 'observacion')) {
+            $serviciosQuery->where(function ($query): void {
+                $query->whereNull('sc.observacion')
+                    ->orWhere('sc.observacion', 'not like', '%' . self::SCHEDULED_DEACTIVATION_MARKER . '%');
+            });
+        }
+        $servicios = $serviciosQuery->get()->groupBy('cliente_idcliente');
 
         foreach ($servicios as $clientServices) {
             foreach ($clientServices->groupBy(fn($service) => implode('|', [
@@ -1432,7 +2986,7 @@ class CxcService
                 throw new \RuntimeException('Cuenta por cobrar no encontrada.');
             }
 
-            if (!in_array((string) $cxc->estado, ['3', 'CANCELADO', 'Cancelado Detracción'], true)) {
+            if (!in_array((string) $cxc->estado, ['3', 'CANCELADO', 'Cancelado Detracción', 'Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención'], true)) {
                 throw new \RuntimeException('Solo se pueden revertir cuentas canceladas.');
             }
 
@@ -1441,6 +2995,14 @@ class CxcService
                 ->where('estado', '1')
                 ->whereNotNull('fechaPago')
                 ->max('fechaPago');
+            $hasCreditNoteApplications = Schema::hasTable('nota_credito_aplicacion');
+            $noteCancelledAt = $hasCreditNoteApplications
+                ? DB::table('nota_credito_aplicacion')
+                    ->where('cuentasPorCobrar_idcuentasPorCobrar', $idCxc)
+                    ->where('estado', '1')
+                    ->max('fechaAplicacion')
+                : null;
+            $cancelledAt = max(array_filter([$cancelledAt, $noteCancelledAt]) ?: [null]);
             if (!$cancelledAt) {
                 throw new \RuntimeException('No se encontró una fecha de pago activa para revertir.');
             }
@@ -1454,14 +3016,33 @@ class CxcService
                 ->where('dc.cuentasPorCobrar_idcuentasPorCobrar', $idCxc)
                 ->whereNotNull('dc.fechaPago')
                 ->where('dc.estado', '1')
-                ->whereIn('b.tipoMov', ['I', 'T', 'C'])
+                ->where(function ($query): void {
+                    $query->whereIn('b.tipoMov', ['I', 'T', 'C'])
+                        ->orWhere(function ($autodetraccionQuery): void {
+                            $autodetraccionQuery
+                                ->where('b.tipoMov', 'S')
+                                ->where('b.informacion', 'like', 'Autodetracción%');
+                        });
+                })
                 ->where('b.informacion', 'not like', '[ANULADO]%')
                 ->select(['dc.iddetalleCXC', 'dc.formaPago_idformaPago', 'dc.moneda_idmoneda', 'b.idbancos', 'b.monto', 'b.entidadBancaria_identidadBancaria'])
                 ->get();
 
-            if ($paymentDetails->isEmpty()) {
+            $noteApplications = $hasCreditNoteApplications
+                ? DB::table('nota_credito_aplicacion')
+                    ->where('cuentasPorCobrar_idcuentasPorCobrar', $idCxc)
+                    ->where('estado', '1')
+                    ->get()
+                : collect();
+
+            if ($paymentDetails->isEmpty() && $noteApplications->isEmpty()) {
                 throw new \RuntimeException('No se encontró un pago activo para revertir.');
             }
+
+            $period = $this->periodFromDescription((string) ($cxc->descripcion ?? ''));
+            $periodEnd = $cxc->fechaCancelacion ?? ($period[1] ?? null);
+            $currentServiceIds = $this->serviceIdsForReversal($cxc);
+            $deletedSuccessorIds = $this->deleteUnpaidSuccessorCxcs($cxc, $periodEnd, $currentServiceIds);
 
             $reason = trim($motivo) !== '' ? trim($motivo) : 'Reversión de pago dentro del plazo permitido';
             foreach ($paymentDetails as $detail) {
@@ -1473,6 +3054,24 @@ class CxcService
                     'estado' => '0',
                 ]);
 
+            }
+            if ($noteApplications->isNotEmpty()) {
+                DB::table('nota_credito_aplicacion')
+                    ->whereIn('idnotaCreditoAplicacion', $noteApplications->pluck('idnotaCreditoAplicacion'))
+                    ->update(['estado' => '0']);
+                foreach ($noteApplications->pluck('nota_credito_idnotacredito')->unique() as $noteId) {
+                    $noteAmount = (float) DB::table('nota_credito')->where('idnotacredito', $noteId)->value('monto');
+                    $noteUsed = (float) DB::table('nota_credito_aplicacion')
+                        ->where('nota_credito_idnotacredito', $noteId)
+                        ->where('estado', '1')
+                        ->sum('monto');
+                    if ($noteAmount > $noteUsed + 0.01) {
+                        DB::table('nota_credito')
+                            ->where('idnotacredito', $noteId)
+                            ->where('estado', 'A')
+                            ->update(['estado' => 'E']);
+                    }
+                }
             }
 
             $creditDetails = DB::table('detallecxc as dc')
@@ -1494,8 +3093,6 @@ class CxcService
 
             }
 
-            $period = $this->periodFromDescription((string) ($cxc->descripcion ?? ''));
-            $periodEnd = $cxc->fechaCancelacion ?? $period[1];
             $restoredState = $periodEnd && Carbon::parse($periodEnd)->startOfDay()->lt(Carbon::today()) ? '4' : '1';
             DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $idCxc)->update([
                 'montoActual' => $cxc->montoOriginal,
@@ -1506,10 +3103,14 @@ class CxcService
 
             $serviceQuery = DB::table('serviciocliente')
                 ->where('cliente_idcliente', $cxc->cliente_idcliente);
-            if ($cxc->docReferencia === null || trim((string) $cxc->docReferencia) === '') {
-                $serviceQuery->whereNull('docReferencia');
+            if ($currentServiceIds !== []) {
+                $serviceQuery->whereIn('idservicioCliente', $currentServiceIds);
             } else {
-                $serviceQuery->where('docReferencia', $cxc->docReferencia);
+                if ($cxc->docReferencia === null || trim((string) $cxc->docReferencia) === '') {
+                    $serviceQuery->whereNull('docReferencia');
+                } else {
+                    $serviceQuery->where('docReferencia', $cxc->docReferencia);
+                }
             }
             $serviceQuery->update(['docReferencia' => null]);
 
@@ -1517,8 +3118,194 @@ class CxcService
                 'idcuentasPorCobrar' => $idCxc,
                 'estado' => $restoredState,
                 'montoActual' => (float) $cxc->montoOriginal,
+                'cxcSiguientesEliminados' => $deletedSuccessorIds,
             ];
         });
+    }
+
+    public function revertirPagoCanceladoGrupo(array $cxcIds, string $usuario, string $motivo): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $cxcIds))));
+        if ($ids === []) {
+            throw new \RuntimeException('Debe seleccionar al menos una cuenta por cobrar para revertir.');
+        }
+
+        return DB::transaction(function () use ($ids, $usuario, $motivo): array {
+            $cxcs = DB::table('cuentasporcobrar')
+                ->whereIn('idcuentasPorCobrar', $ids)
+                ->lockForUpdate()
+                ->get(['idcuentasPorCobrar', 'cliente_idcliente', 'moneda_idmoneda']);
+            if ($cxcs->count() !== count($ids)) {
+                throw new \RuntimeException('Una de las cuentas por cobrar del grupo ya no existe.');
+            }
+            if (
+                $cxcs->pluck('cliente_idcliente')->map(fn ($id): string => (string) $id)->unique()->count() !== 1
+                || $cxcs->pluck('moneda_idmoneda')->map(fn ($id): int => (int) $id)->unique()->count() !== 1
+            ) {
+                throw new \RuntimeException('Las cuentas del grupo deben pertenecer al mismo cliente y moneda.');
+            }
+
+            $results = [];
+            foreach ($ids as $id) {
+                $results[] = $this->revertirPagoCancelado($id, $usuario, $motivo);
+            }
+
+            return [
+                'results' => $results,
+                'count' => count($results),
+                'estado' => collect($results)->contains(fn (array $result): bool => $result['estado'] === '1')
+                    ? '1'
+                    : '4',
+            ];
+        });
+    }
+
+    private function serviceIdsForReversal(object $cxc): array
+    {
+        preg_match('/SC-([0-9,]+)/', (string) ($cxc->descripcion ?? ''), $matches);
+        $serviceIds = isset($matches[1])
+            ? array_values(array_filter(array_map('intval', explode(',', $matches[1]))))
+            : [];
+
+        if (Schema::hasTable(self::CXC_SERVICE_LINK_TABLE)) {
+            $serviceIds = array_merge(
+                $serviceIds,
+                DB::table(self::CXC_SERVICE_LINK_TABLE)
+                    ->where('cuentasPorCobrar_idcuentasPorCobrar', $cxc->idcuentasPorCobrar)
+                    ->pluck('servicioCliente_idservicioCliente')
+                    ->map(fn($id): int => (int) $id)
+                    ->all()
+            );
+        }
+
+        return array_values(array_unique(array_filter($serviceIds)));
+    }
+
+    private function deleteUnpaidSuccessorCxcs(object $cxc, ?string $periodEnd, array $currentServiceIds): array
+    {
+        $successorPrefix = 'REN-CXC-' . $cxc->idcuentasPorCobrar . ' P ';
+        $candidates = DB::table('cuentasporcobrar')
+            ->where('cliente_idcliente', $cxc->cliente_idcliente)
+            ->where('moneda_idmoneda', $cxc->moneda_idmoneda)
+            ->where('idcuentasPorCobrar', '!=', $cxc->idcuentasPorCobrar)
+            ->lockForUpdate()
+            ->get([
+                'idcuentasPorCobrar',
+                'descripcion',
+                'fechaCancelacion',
+                'docReferencia',
+            ]);
+
+        if ($candidates->isEmpty()) {
+            return [];
+        }
+
+        $candidateIds = $candidates->pluck('idcuentasPorCobrar')->all();
+        $serviceIdsBySuccessor = [];
+        foreach ($candidates as $candidate) {
+            preg_match('/SC-([0-9,]+)/', (string) ($candidate->descripcion ?? ''), $matches);
+            $serviceIdsBySuccessor[(int) $candidate->idcuentasPorCobrar] = isset($matches[1])
+                ? array_values(array_filter(array_map('intval', explode(',', $matches[1]))))
+                : [];
+        }
+
+        if (Schema::hasTable(self::CXC_SERVICE_LINK_TABLE)) {
+            $linkedServices = DB::table(self::CXC_SERVICE_LINK_TABLE)
+                ->whereIn('cuentasPorCobrar_idcuentasPorCobrar', $candidateIds)
+                ->get(['cuentasPorCobrar_idcuentasPorCobrar', 'servicioCliente_idservicioCliente']);
+            foreach ($linkedServices as $link) {
+                $serviceIdsBySuccessor[(int) $link->cuentasPorCobrar_idcuentasPorCobrar][] =
+                    (int) $link->servicioCliente_idservicioCliente;
+            }
+        }
+
+        $periodEndDate = $periodEnd ? Carbon::parse($periodEnd)->toDateString() : null;
+        $successors = $candidates->filter(function ($candidate) use (
+            $successorPrefix,
+            $periodEndDate,
+            $currentServiceIds,
+            $serviceIdsBySuccessor
+        ): bool {
+            if (str_starts_with((string) ($candidate->descripcion ?? ''), $successorPrefix)) {
+                return true;
+            }
+
+            if (!$periodEndDate || $currentServiceIds === []) {
+                return false;
+            }
+
+            $candidatePeriod = $this->periodFromDescription((string) ($candidate->descripcion ?? ''));
+            $candidateServiceIds = $serviceIdsBySuccessor[(int) $candidate->idcuentasPorCobrar] ?? [];
+
+            return ($candidatePeriod[0] ?? null) === $periodEndDate
+                && array_intersect($currentServiceIds, $candidateServiceIds) !== [];
+        })->values();
+
+        if ($successors->isEmpty()) {
+            return [];
+        }
+
+        $successorIds = $successors->pluck('idcuentasPorCobrar')->all();
+        foreach ($successors as $successor) {
+            $hasPaymentOrMovement = DB::table('detallecxc')
+                ->where('cuentasPorCobrar_idcuentasPorCobrar', $successor->idcuentasPorCobrar)
+                ->where(function ($query): void {
+                    $query->whereNotNull('fechaPago')
+                        ->orWhereNotNull('bancos_idbancos');
+                })
+                ->exists();
+            $hasCreditNoteApplication = Schema::hasTable('nota_credito_aplicacion')
+                && DB::table('nota_credito_aplicacion')
+                    ->where('cuentasPorCobrar_idcuentasPorCobrar', $successor->idcuentasPorCobrar)
+                    ->where('estado', '1')
+                    ->exists();
+
+            if ($hasPaymentOrMovement || $hasCreditNoteApplication || trim((string) ($successor->docReferencia ?? '')) !== '') {
+                throw new \RuntimeException(
+                    'No se puede revertir el pago porque el CXC siguiente #' . $successor->idcuentasPorCobrar
+                    . ' ya tiene pagos, movimientos o un documento asociado.'
+                );
+            }
+        }
+
+        DB::table('detallecxc')
+            ->whereIn('cuentasPorCobrar_idcuentasPorCobrar', $successorIds)
+            ->delete();
+
+        if (Schema::hasTable(self::CXC_SERVICE_LINK_TABLE)) {
+            DB::table(self::CXC_SERVICE_LINK_TABLE)
+                ->whereIn('cuentasPorCobrar_idcuentasPorCobrar', $successorIds)
+                ->delete();
+        }
+
+        DB::table('cuentasporcobrar')
+            ->whereIn('idcuentasPorCobrar', $successorIds)
+            ->delete();
+
+        if ($periodEnd && Schema::hasTable('serviciocliente')) {
+            foreach ($successors as $successor) {
+                $successorServiceIds = array_values(array_unique(
+                    $serviceIdsBySuccessor[(int) $successor->idcuentasPorCobrar] ?? []
+                ));
+                if ($successorServiceIds === []) {
+                    continue;
+                }
+
+                $successorPeriod = $this->periodFromDescription((string) ($successor->descripcion ?? ''));
+                $successorPeriodEnd = $successor->fechaCancelacion ?? ($successorPeriod[1] ?? null);
+                if (!$successorPeriodEnd) {
+                    continue;
+                }
+
+                DB::table('serviciocliente')
+                    ->where('cliente_idcliente', $cxc->cliente_idcliente)
+                    ->whereIn('idservicioCliente', $successorServiceIds)
+                    ->whereDate('fecheVencimiento', Carbon::parse($successorPeriodEnd)->toDateString())
+                    ->update(['fecheVencimiento' => Carbon::parse($periodEnd)->toDateString()]);
+            }
+        }
+
+        return array_map('intval', $successorIds);
     }
 
     private function periodFromDescription(string $description): array
@@ -1531,6 +3318,25 @@ class CxcService
         }
 
         return [];
+    }
+
+    private function descriptionWithUpdatedServicePeriod(string $description, string $newRange, int $serviceId): string
+    {
+        $serviceMarker = 'SC-' . $serviceId;
+        if (preg_match('/\d{2}\/\d{2}\/\d{4}\s+a\s+\d{2}\/\d{2}\/\d{4}/', $description, $matches) !== 1) {
+            return 'CXC ' . $newRange . ' ' . $serviceMarker;
+        }
+
+        $range = $matches[0];
+        $rangePosition = mb_strpos($description, $range, 0, 'UTF-8');
+        $prefix = mb_substr($description, 0, $rangePosition, 'UTF-8');
+        $suffix = mb_substr($description, $rangePosition + mb_strlen($range, 'UTF-8'), null, 'UTF-8');
+        if (preg_match('/(^|[^A-Za-z0-9])' . preg_quote($serviceMarker, '/') . '([^0-9]|$)/', $description) !== 1) {
+            $suffix .= ' ' . $serviceMarker;
+        }
+
+        $maxPrefixLength = max(0, 50 - mb_strlen($newRange, 'UTF-8') - mb_strlen($suffix, 'UTF-8'));
+        return mb_substr($prefix, 0, $maxPrefixLength, 'UTF-8') . $newRange . $suffix;
     }
 
     private function estadoSegunFechaCorte(?string $fechaFinPeriodo): string
@@ -1584,30 +3390,7 @@ class CxcService
                 ->value('periodo');
         }
 
-        $meses = match (mb_strtolower(trim((string) $periodo), 'UTF-8')) {
-            'mensual', '1 mes', '1 meses' => 1,
-            '3 meses' => 3,
-            '6 meses' => 6,
-            '12 meses' => 12,
-            '24 meses' => 24,
-            '36 meses' => 36,
-            '48 meses' => 48,
-            default => null,
-        };
-
-        if ($meses === null && is_numeric($periodo)) {
-            $meses = match ((int) $periodo) {
-                30 => 1,
-                90 => 3,
-                180 => 6,
-                365 => 12,
-                730 => 24,
-                1095 => 36,
-                1460 => 48,
-                default => null,
-            };
-        }
-
+        $meses = ServicePeriod::months($periodo);
         if ($meses === null) {
             return 0;
         }

@@ -25,6 +25,10 @@ Route::middleware('erp.module:finanzas')->group(function () {
     Route::post('/modulos/finanzas/nota-creditos/export/{format}', [BancosController::class, 'exportNotaCreditos'])
         ->name('modules.finanzas.nota-creditos.export.post')
         ->where('format', 'pdf|xlsx');
+    Route::get('/modulos/finanzas/nota-creditos/crear', [BancosController::class, 'createNotaCredito'])
+        ->name('modules.finanzas.nota-creditos.create');
+    Route::post('/modulos/finanzas/nota-creditos', [BancosController::class, 'storeNotaCredito'])
+        ->name('modules.finanzas.nota-creditos.store');
     Route::get('/modulos/finanzas/bancos/crear', [BancosController::class, 'create'])->name('modules.finanzas.bancos.create');
     Route::post('/modulos/finanzas/bancos', [BancosController::class, 'store'])->name('modules.finanzas.bancos.store');
     Route::get('/modulos/finanzas/bancos/{id}/editar', [BancosController::class, 'edit'])->name('modules.finanzas.bancos.edit');

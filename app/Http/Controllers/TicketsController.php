@@ -118,6 +118,24 @@ class TicketsController extends Controller
                 'v.detalle as vista_actual_detalle'
             );
 
+        $baseQuery->whereNotExists(function ($query): void {
+            $query->selectRaw('1')
+                ->from('cotizacion as annulled_quote')
+                ->join('tipooperacion as quote_operation', 'quote_operation.idtipoOperacion', '=', 't.tipoOperacion_idtipoOperacion')
+                ->where('annulled_quote.estado', \App\Services\CotizacionService::STATE_ANULADO)
+                ->where(function ($referenceQuery): void {
+                    $referenceQuery
+                        ->whereColumn('annulled_quote.nroCotizacion', 't.pedidoReferencia')
+                        ->orWhereColumn('annulled_quote.batch_id', 't.pedidoReferencia');
+                })
+                ->where(function ($operationQuery): void {
+                    $operationQuery
+                        ->where('quote_operation.nomenclatura', 'CT')
+                        ->orWhere('quote_operation.detalle', 'like', '%Cotizaci%');
+                })
+                ->whereRaw("LOWER(COALESCE(t.estado, '')) = 'resuelto'");
+        });
+
         if (!$context['isAdmin']) {
             if (!$context['canSeeFlow'] && $context['allowedVistaIds'] === []) {
                 $baseQuery->whereRaw('1 = 0');

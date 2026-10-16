@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Export\ExportableList;
 use App\Http\Controllers\Permission\HandlesResourceLock;
 use App\Support\ResourceLock;
+use App\Support\ServicePeriod;
 use App\Support\VehiculoData;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -214,25 +215,7 @@ class VehiculosController extends Controller
 
     private function formatPeriodo(mixed $value): string
     {
-        $periodo = trim((string) ($value ?? ''));
-        if ($periodo === '' || strcasecmp($periodo, 'no') === 0) {
-            return '';
-        }
-
-        if (!is_numeric($value)) {
-            return $periodo;
-        }
-
-        return match ((int) $value) {
-            30 => 'Mensual',
-            90 => '3 Meses',
-            180 => '6 Meses',
-            365 => '12 Meses',
-            730 => '24 Meses',
-            1095 => '36 Meses',
-            1460 => '48 Meses',
-            default => $periodo,
-        };
+        return ServicePeriod::label($value);
     }
 
     private function normalizeCurrencySymbol(?string $currency): string
@@ -513,7 +496,6 @@ class VehiculosController extends Controller
                     'label' => 'Marca',
                     'required' => true,
                     'maxlength' => 50,
-                    'minlength' => 2,
                     'helpText' => 'Selecciona o escribe una marca.',
                     'placeholder' => 'Selecciona o escribe una marca',
                     'datalistOptions' => VehiculoData::getBrands(),
@@ -560,7 +542,7 @@ class VehiculosController extends Controller
             'tipoUnidad_idtable1' => ['required', 'exists:tipovehiculo,idtipoVehiculo'],
             'anio' => ['required', 'integer', 'digits:4', 'min:1900', 'max:' . ((int) date('Y') + 1)],
             'color' => ['nullable', 'string', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX],
-            'marca' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'marca' => ['required', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
             'modelo' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
             'tracto' => ['nullable', 'in:Si,No'],
         ], [
@@ -667,7 +649,6 @@ class VehiculosController extends Controller
                     'label' => 'Marca',
                     'required' => true,
                     'maxlength' => 50,
-                    'minlength' => 2,
                     'helpText' => 'Selecciona o escribe una marca.',
                     'placeholder' => 'Selecciona o escribe una marca',
                     'datalistOptions' => VehiculoData::getBrands(),
@@ -724,9 +705,12 @@ class VehiculosController extends Controller
             'tipoUnidad_idtable1' => ['required', 'exists:tipovehiculo,idtipoVehiculo'],
             'anio' => ['required', 'integer', 'digits:4', 'min:1900', 'max:' . ((int) date('Y') + 1)],
             'color' => ['nullable', 'string', 'max:20', 'regex:' . self::SAFE_TEXT_REGEX],
-            'marca' => ['required', 'string', 'min:2', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'marca' => ['required', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
             'modelo' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
             'tracto' => ['nullable', 'in:Si,No'],
+        ], [
+            'placa.unique' => 'La placa ya existe en otro vehículo.',
+            'placa.regex' => 'La placa contiene caracteres inválidos.',
         ]);
 
         $currentCliente = DB::table('vehiculo')->where('placa', $placa)->value('cliente_idcliente');

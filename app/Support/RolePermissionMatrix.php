@@ -141,6 +141,15 @@ class RolePermissionMatrix
         'ventas.cotizaciones',
     ];
 
+    private const MODULES_WITH_APROBAR = [
+        'ventas.cotizaciones',
+        'cuentasporcobrar',
+    ];
+
+    private const MODULES_WITHOUT_DELETE = [
+        'cuentasporcobrar',
+    ];
+
     private const MODULES_WITHOUT_EDIT = [
         'lineas_chips.detallesimcard',
         'lineas_chips.numero_dispositivo',
@@ -199,7 +208,15 @@ class RolePermissionMatrix
                     continue;
                 }
 
-                if (in_array($actionKey, ['aprobar', 'anular'], true) && !in_array($moduleKey, self::MODULES_WITH_APROBAR_ANULAR, true)) {
+                if ($actionKey === 'aprobar' && !in_array($moduleKey, self::MODULES_WITH_APROBAR, true)) {
+                    continue;
+                }
+
+                if ($actionKey === 'anular' && !in_array($moduleKey, self::MODULES_WITH_APROBAR_ANULAR, true)) {
+                    continue;
+                }
+
+                if ($actionKey === 'eliminar' && in_array($moduleKey, self::MODULES_WITHOUT_DELETE, true)) {
                     continue;
                 }
 
@@ -242,7 +259,15 @@ class RolePermissionMatrix
                 continue;
             }
 
-            if (in_array($action, ['aprobar', 'anular'], true) && !in_array($module, self::MODULES_WITH_APROBAR_ANULAR, true)) {
+            if ($action === 'aprobar' && !in_array($module, self::MODULES_WITH_APROBAR, true)) {
+                continue;
+            }
+
+            if ($action === 'anular' && !in_array($module, self::MODULES_WITH_APROBAR_ANULAR, true)) {
+                continue;
+            }
+
+            if ($action === 'eliminar' && in_array($module, self::MODULES_WITHOUT_DELETE, true)) {
                 continue;
             }
 
@@ -291,7 +316,15 @@ class RolePermissionMatrix
                     continue;
                 }
 
-                if (in_array($actionKey, ['aprobar', 'anular'], true) && !in_array($moduleKey, self::MODULES_WITH_APROBAR_ANULAR, true)) {
+                if ($actionKey === 'aprobar' && !in_array($moduleKey, self::MODULES_WITH_APROBAR, true)) {
+                    continue;
+                }
+
+                if ($actionKey === 'anular' && !in_array($moduleKey, self::MODULES_WITH_APROBAR_ANULAR, true)) {
+                    continue;
+                }
+
+                if ($actionKey === 'eliminar' && in_array($moduleKey, self::MODULES_WITHOUT_DELETE, true)) {
                     continue;
                 }
 

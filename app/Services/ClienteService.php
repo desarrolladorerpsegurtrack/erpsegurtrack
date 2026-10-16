@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\ServicePeriod;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
@@ -1115,25 +1116,7 @@ class ClienteService
 
     private function formatPeriodo(mixed $value): string
     {
-        $periodo = trim((string) ($value ?? ''));
-        if ($periodo === '' || strcasecmp($periodo, 'no') === 0) {
-            return '';
-        }
-
-        if (!is_numeric($value)) {
-            return $periodo;
-        }
-
-        return match ((int) $value) {
-            30 => 'Mensual',
-            90 => '3 Meses',
-            180 => '6 Meses',
-            365 => '12 Meses',
-            730 => '24 Meses',
-            1095 => '36 Meses',
-            1460 => '48 Meses',
-            default => $periodo,
-        };
+        return ServicePeriod::label($value);
     }
 
     private function normalizeCurrencySymbol(?string $currency): string

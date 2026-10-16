@@ -9,7 +9,55 @@
             ->map(fn($role) => mb_strtolower(trim((string) $role)))
             ->contains('admin');
         $canEditServicePrice = $isErpAdmin || $servicePriceActions->contains('editar');
+        $erpPermissions = collect($erpAuthState['permissions'] ?? []);
+        $cxcActions = collect($erpPermissions->get('cuentasporcobrar', []))
+            ->map(fn($action) => \App\Support\ErpPermission::normalizeAction((string) $action));
+        $canCreateCxc = $isErpAdmin || $cxcActions->contains('crear');
+        $canApproveCxc = $isErpAdmin || $cxcActions->contains('aprobar');
+        $canExportCxc = $isErpAdmin || $cxcActions->contains('exportar');
+        $canDeactivateCxcServices = $isErpAdmin || $cxcActions->contains('dar_de_baja');
+        $quotationActions = collect($erpPermissions->get('ventas.cotizaciones', []))
+            ->map(fn($action) => \App\Support\ErpPermission::normalizeAction((string) $action));
+        if (!$isErpAdmin && $quotationActions->isEmpty()) {
+            $hasGranularSalesPermissions = $erpPermissions->keys()
+                ->contains(fn($key) => is_string($key) && str_starts_with(mb_strtolower(trim($key)), 'ventas.'));
+            if (!$hasGranularSalesPermissions) {
+                $quotationActions = collect($erpPermissions->get('ventas', []))
+                    ->map(fn($action) => \App\Support\ErpPermission::normalizeAction((string) $action));
+            }
+        }
+        $canAnnulQuotations = $isErpAdmin || $quotationActions->contains('anular');
     @endphp
+    @if($canAnnulQuotations)
+        @push('modals')
+            <div id="quote-annul-modal" class="erp-modal-backdrop items-center justify-center p-4"
+                style="z-index:2147483647 !important;background:rgba(0,0,0,.8);"
+                role="dialog" aria-modal="true" aria-labelledby="quote-annul-title">
+                <div style="width:720px;max-width:92%;min-height:260px;margin:0 auto;padding:32px;position:relative;border-radius:10px;background:#ffffff;box-shadow:0 20px 40px rgba(2,6,23,0.22);">
+                    <button type="button" data-quote-annul-close aria-label="Cerrar" title="Si confirmas, el registro quedará anulado."
+                        style="position:absolute;right:16px;top:16px;height:40px;width:40px;border-radius:9999px;border:1px solid #e2e8f0;background:#ffffff;color:#64748b;display:flex;align-items:center;justify-content:center;">
+                        <i data-lucide="x" aria-hidden="true" class="h-4 w-4"></i>
+                    </button>
+                    <div style="margin:0 auto 24px;display:flex;height:64px;width:64px;align-items:center;justify-content:center;border-radius:9999px;border:1px solid #ef4444;background:#fff7f7;color:#ef4444;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="x-circle" style="width:22px;height:22px" class="lucide lucide-x-circle"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>
+                    </div>
+                    <h2 id="quote-annul-title" class="text-left text-lg font-semibold text-slate-800">¿Estás seguro de anular?</h2>
+                    <p id="quote-annul-summary" class="mt-2 text-sm leading-5 text-slate-500"></p>
+                    <p class="mt-2 text-sm leading-5 text-slate-500">Si confirmas, el registro quedará anulado.</p>
+                    <div class="mt-5 flex justify-end gap-3">
+                        <button type="button" data-quote-annul-close class="erp-btn-secondary"
+                            style="min-width:120px;justify-content:center;">Cancelar</button>
+                        <form method="POST" action="{{ route('modules.cuentasporcobrar.quotations.anular') }}">
+                            @csrf
+                            <div id="quote-annul-hidden-ids"></div>
+                            <button type="submit" class="erp-btn-primary"
+                                style="min-width:120px;justify-content:center;background-color:#b41B29;">Anular</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        @endpush
+    @endif
     <div class="erp-cuentas-layout">
         <div id="cxc-list-wrapper" class="erp-cuentas-card" data-loaded-tab="{{ $activeTab }}">
             <div class="erp-cuentas-header">
@@ -43,6 +91,17 @@
                             onclick="this.parentElement.style.display='none';">&times;</button>
                     </div>
                 @endif
+                @if($errors->any())
+                    <div data-cxc-session-notice class="mb-4 rounded-lg border px-4 py-3 text-sm font-semibold"
+                        style="border-color:#a31616;background-color:#fcdcdc;color:#531414;">
+                        No se pudo procesar la solicitud:
+                        <ul class="mt-1 list-disc pl-5 font-normal">
+                            @foreach($errors->all() as $error)
+                                <li>{{ $error }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                @endif
 
                 <div id="tab-cotizaciones" class="tab-panel {{ request('tab') === 'servicios' ? 'hidden' : '' }}">
                     <div id="quote-stats" class="erp-section-stats">
@@ -56,132 +115,90 @@
                     <div class="erp-toolbar">
                         <span class="erp-subtitle">Cotizaciones en estado <strong id="quote-subtitle-status">Aprobado(SP) -
                                 Pendiente</strong></span>
-                    </div>
-
-                    <div class="flex flex-col gap-y-2 py-3 px-1 sm:flex-row sm:items-center">
-                        <div class="flex w-full flex-col gap-y-2 sm:flex-row sm:items-center">
-                            <!-- BUSCADOR EN TIEMPO REAL -->
-                            <div class="flex flex-col gap-y-2 sm:flex-row sm:items-center">
-                                <div class="relative">
-                                    <i data-tw-merge="" data-lucide="search"
-                                        class="absolute inset-y-0 left-0 z-10 my-auto ml-3 h-4 w-4 stroke-[1.3] text-slate-500"></i>
-                                    <input id="quote-search-input" name="quote_q" type="text" autocomplete="off"
-                                        value="{{ $quoteFilters['quote_q'] ?? '' }}" placeholder="Buscar..."
-                                        class="disabled:bg-slate-100 disabled:cursor-not-allowed transition duration-200 ease-in-out w-full pr-10 text-sm border-slate-200 shadow-sm placeholder:text-slate-400/90 focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus:border-primary focus:border-opacity-40 rounded-[0.5rem] pl-9 sm:w-64">
-                                    <button type="button" id="quote-search-clear" style="display: none;"
-                                        class="absolute inset-y-0 right-0 z-10 mr-2 flex items-center justify-center rounded-full bg-transparent px-2 text-slate-500 transition hover:bg-transparent hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-40">
-                                        <i data-tw-merge="" data-lucide="x" class="h-4 w-4 stroke-[1.3]"></i>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="flex flex-col gap-x-3 gap-y-2 sm:ml-auto sm:flex-row">
-                                <!-- EXPORTAR DROPDOWN -->
-                                <div class="relative inline-block text-left erp-dropdown-container">
-                                    <button type="button"
-                                        class="erp-dropdown-btn transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 w-full sm:w-auto">
-                                        <i data-tw-merge="" data-lucide="download" class="mr-2 h-4 w-4 stroke-[1.3]"></i>
-                                        Exportar
-                                        <i data-tw-merge="" data-lucide="chevron-down"
-                                            class="ml-2 h-4 w-4 stroke-[1.3]"></i>
-                                    </button>
-                                    <div class="erp-dropdown-panel hidden absolute right-0 top-full mt-2 w-36 rounded-md border border-slate-200 bg-white p-2 shadow-xl"
-                                        style="position: absolute; right: 0; top: 100%; z-index: 99999; min-width: 140px; background: #ffffff;">
-                                        <a href="{{ route('modules.cuentasporcobrar.quotations.export', array_merge(['format' => 'pdf'], $quoteFilters ?? [])) }}"
-                                            id="export-pdf-link"
-                                            class="cursor-pointer flex items-center p-2 transition duration-200 ease-in-out rounded-md hover:bg-slate-100 text-slate-700 text-sm font-medium">
-                                            <i data-tw-merge="" data-lucide="file-bar-chart"
-                                                class="stroke-[1.3] mr-2 h-4 w-4 text-slate-500"></i>
-                                            PDF
-                                        </a>
-                                        <a href="{{ route('modules.cuentasporcobrar.quotations.export', array_merge(['format' => 'xlsx'], $quoteFilters ?? [])) }}"
-                                            id="export-xlsx-link"
-                                            class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-100 text-slate-700 text-sm font-medium">
-                                            <i data-tw-merge="" data-lucide="file-bar-chart"
-                                                class="stroke-[1.3] mr-2 h-4 w-4 text-slate-500"></i>
-                                            XLSX
-                                        </a>
-                                    </div>
-                                </div>
-
-                                <!-- FILTRO DROPDOWN -->
-                                <div class="relative inline-block text-left erp-dropdown-container">
-                                    <button type="button"
-                                        class="erp-dropdown-btn transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 w-full sm:w-auto">
-                                        <i data-tw-merge="" data-lucide="arrow-down-wide-narrow"
-                                            class="mr-2 h-4 w-4 stroke-[1.3]"></i>
-                                        Filtro
-                                        <span id="quote-filter-badge"
-                                            class="ml-2 hidden h-5 items-center justify-center rounded-full border bg-slate-100 px-1.5 text-xs font-medium">0</span>
-                                    </button>
-                                    <div class="erp-dropdown-panel hidden absolute right-0 top-full mt-2 w-64 rounded-xl border border-slate-200 bg-white p-4 shadow-xl"
-                                        style="position: absolute; right: 0; top: 100%; z-index: 99999; min-width: 260px; background: #ffffff;">
-                                        <form id="quote-filter-dropdown-form" onsubmit="return false;">
-                                            <div class="mb-3">
-                                                <div class="text-xs font-medium uppercase text-slate-500">Grupo</div>
-                                                <input type="text" id="quote-filter-group" name="quote_group"
-                                                    value="{{ $quoteFilters['quote_group'] ?? '' }}"
-                                                    placeholder="GRP-62 o IND-34"
-                                                    class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20">
-                                            </div>
-                                            <div class="mb-3">
-                                                <div class="text-xs font-medium uppercase text-slate-500">Cliente</div>
-                                                <input type="text" id="quote-filter-client" name="quote_client"
-                                                    value="{{ $quoteFilters['quote_client'] ?? '' }}"
-                                                    placeholder="Buscar cliente"
-                                                    class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20">
-                                            </div>
-                                            <div class="mb-3">
-                                                <div class="text-xs font-medium uppercase text-slate-500">Moneda</div>
-                                                <select id="quote-filter-currency" name="quote_currency"
-                                                    class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20">
-                                                    <option value="">Todas</option>
-                                                    <option value="sol" @selected(($quoteFilters['quote_currency'] ?? '') === 'sol')>Soles</option>
-                                                    <option value="dolar" @selected(($quoteFilters['quote_currency'] ?? '') === 'dolar')>Dólares</option>
-                                                    <option value="euro" @selected(($quoteFilters['quote_currency'] ?? '') === 'euro')>Euros</option>
-                                                </select>
-                                            </div>
-                                            <div class="mb-3">
-                                                <div class="text-xs font-medium uppercase text-slate-500">Servicio</div>
-                                                <select id="quote-filter-service" name="quote_service"
-                                                    class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20">
-                                                    <option value="">Todos</option>
-                                                    <option value="EQUIPAMIENTO" @selected(($quoteFilters['quote_service'] ?? '') === 'EQUIPAMIENTO')>EQUIPAMIENTO</option>
-                                                    <option value="PLANES" @selected(($quoteFilters['quote_service'] ?? '') === 'PLANES')>PLANES</option>
-                                                    <option value="SERVICIOS TÉCNICOS" @selected(($quoteFilters['quote_service'] ?? '') === 'SERVICIOS TÉCNICOS')>SERVICIOS TÉCNICOS</option>
-                                                </select>
-                                            </div>
-                                            <div class="mb-3">
-                                                <div class="text-xs font-medium uppercase text-slate-500">Estado</div>
-                                                <select id="quote-filter-status" name="quote_status"
-                                                    class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20">
-                                                    <option value="1" @selected(($quoteFilters['quote_status'] ?? '1') === '1')>Aprobado(SP) - Pendiente</option>
-                                                    <option value="2" @selected(($quoteFilters['quote_status'] ?? '') === '2')>Aprobado - Con pago</option>
-                                                </select>
-                                            </div>
-                                            <div class="mb-3">
-                                                <div class="text-xs font-medium uppercase text-slate-500">Fecha de emisión
-                                                </div>
-                                                <input type="date" id="quote-filter-date" name="quote_date"
-                                                    value="{{ $quoteFilters['quote_date'] ?? '' }}"
-                                                    class="mt-2 w-full rounded-[0.5rem] border-slate-200 text-sm shadow-sm transition duration-200 ease-in-out focus:border-primary focus:ring-4 focus:ring-primary focus:ring-opacity-20">
-                                            </div>
-                                            <div class="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3">
-                                                <button type="button" id="quote-filter-apply-btn"
-                                                    class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none bg-primary border-primary text-white">
-                                                    Aplicar
-                                                </button>
-                                                <button type="button" id="quote-filter-clear-btn"
-                                                    class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none border-secondary text-slate-500">
-                                                    Limpiar
-                                                </button>
-                                            </div>
-                                        </form>
-                                    </div>
-                                </div>
-                            </div>
+                        <div class="flex items-center gap-2">
+                            @if($canAnnulQuotations)
+                                <button type="button" id="quote-annul-open" class="erp-btn-primary bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-1.5 rounded-md text-xs transition duration-200"
+                                    style="background-color: #b41B29;" disabled>
+                                    Anular
+                                </button>
+                            @endif
+                            @if($canExportCxc)
+                                <a href="{{ route('modules.cuentasporcobrar.quotations.export', ['format' => 'xlsx', 'quote_status' => 'pending']) }}"
+                                    id="quote-export-xlsx"
+                                    class="erp-btn-secondary"
+                                    style="display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none;">
+                                    <i data-lucide="download" aria-hidden="true" class="h-4 w-4"></i>
+                                    Exportar XLSX
+                                </a>
+                            @endif
                         </div>
                     </div>
+
+                    <form id="quote-filter-form" class="erp-service-filters" onsubmit="return false;">
+                        <label class="erp-service-filter-field">
+                            <span>N° Cotiz</span>
+                            <input type="search" id="quote-filter-number"
+                                value="{{ $quoteFilters['quote_number'] ?? '' }}" placeholder="N° de cotización"
+                                autocomplete="off">
+                        </label>
+                        <label class="erp-service-filter-field">
+                            <span>Cliente</span>
+                            <input type="search" id="quote-filter-client"
+                                value="{{ $quoteFilters['quote_client'] ?? '' }}"
+                                placeholder="Nombre o ID del cliente" autocomplete="off">
+                        </label>
+                        <label class="erp-service-filter-field">
+                            <span>Formato de pago</span>
+                            <select id="quote-filter-payment-format">
+                                <option value="">Todos</option>
+                                @foreach($formaPagoOptions as $paymentOption)
+                                    <option value="{{ $paymentOption['value'] }}" @selected(($quoteFilters['quote_payment_format'] ?? '') === $paymentOption['value'])>{{ $paymentOption['label'] }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+                        <label class="erp-service-filter-field">
+                            <span>Vigencia de oferta</span>
+                            <select id="quote-filter-validity">
+                                <option value="">Todas</option>
+                                @foreach($quoteValidityOptions as $validityOption)
+                                    <option value="{{ $validityOption['value'] }}" @selected(($quoteFilters['quote_validity'] ?? '') === $validityOption['value'])>{{ $validityOption['label'] }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+                        <label class="erp-service-filter-field">
+                            <span>Estado</span>
+                            <select id="quote-filter-status">
+                                <option value="pending" @selected(in_array(($quoteFilters['quote_status'] ?? 'pending'), ['1', 'pending'], true))>Pendiente</option>
+                                <option value="pending_credit" @selected(($quoteFilters['quote_status'] ?? '') === 'pending_credit')>Pendiente Credito</option>
+                                <option value="pending_autodetraccion" @selected(($quoteFilters['quote_status'] ?? '') === 'pending_autodetraccion')>Pendiente Autodetracción</option>
+                                <option value="pending_detraccion" @selected(($quoteFilters['quote_status'] ?? '') === 'pending_detraccion')>Pendiente Detracción</option>
+                                <option value="pending_retencion" @selected(($quoteFilters['quote_status'] ?? '') === 'pending_retencion')>Pendiente Retención</option>
+                                <option value="approved" @selected(in_array(($quoteFilters['quote_status'] ?? ''), ['2', 'approved'], true))>Aprobado</option>
+                                <option value="all" @selected(in_array(($quoteFilters['quote_status'] ?? ''), ['', 'all'], true))>Todos</option>
+                            </select>
+                        </label>
+                        <label class="erp-service-filter-field">
+                            <span>Servicio</span>
+                            <select id="quote-filter-service">
+                                <option value="">Todos</option>
+                                @foreach(['EQUIPAMIENTO' => 'EQUIPAMIENTO', 'PLANES' => 'PLANES', 'SERVICIOS TÉCNICOS' => 'SERVICIOS TÉCNICOS'] as $serviceValue => $serviceLabel)
+                                    <option value="{{ $serviceValue }}" @selected(($quoteFilters['quote_service'] ?? '') === $serviceValue)>{{ $serviceLabel }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+                         <label class="erp-service-filter-field">
+                            <span>Fecha Emisión</span>
+                            <input type="date" id="quote-filter-date" value="{{ $quoteFilters['quote_date'] ?? '' }}">
+                        </label>
+                        <div class="erp-service-filter-actions">
+                            <button type="button" id="quote-filter-apply-btn" class="erp-btn-primary">
+                                <i data-lucide="list-filter" aria-hidden="true"></i> Aplicar
+                            </button>
+                            <button type="button" id="quote-filter-clear-btn" class="erp-btn-secondary">
+                                Limpiar
+                            </button>
+                        </div>
+                    </form>
 
                     <div id="quote-results">
                         @if($activeTab !== 'cotizaciones')
@@ -220,7 +237,7 @@
                                             <th class="bg-slate-50">Fecha Emision</th>
                                             <th class="bg-slate-50">Grupo</th>
                                             <th class="bg-slate-50">Servicio</th>
-                                            <th class="bg-slate-50">Archivo</th>
+                                            <th class="bg-slate-50">Estado</th>
                                             <th class="bg-slate-50">Acción</th>
                                         </tr>
                                     </thead>
@@ -228,9 +245,17 @@
                                         @foreach($cotizacionesPendientes as $cotizacion)
                                             <tr data-estado="{{ (string) ($cotizacion->estado ?? '1') }}">
                                                 <td class="text-center">
+                                                    @php
+                                                        $quoteHasPayment = !empty($cotizacion->cxc_id)
+                                                            && (string) ($cotizacion->cxc_estado ?? '') !== 'NUEVO';
+                                                        $quoteCanBeAnnulled = in_array((string) ($cotizacion->estado ?? ''), ['0', '1'], true)
+                                                            && !$quoteHasPayment;
+                                                    @endphp
                                                     <input type="checkbox" class="quote-row-select"
                                                         value="{{ $cotizacion->nroCotizacion ?? '' }}"
-                                                        aria-label="Seleccionar cotización {{ $cotizacion->nroCotizacion ?? '-' }}">
+                                                        aria-label="Seleccionar cotización {{ $cotizacion->nroCotizacion ?? '-' }}"
+                                                        @disabled(!$quoteCanBeAnnulled)
+                                                        @if(!$quoteCanBeAnnulled) title="No se puede anular una cotización aprobada que ya tiene pagos registrados" @endif>
                                                 </td>
                                                 <td>
                                                     <button type="button" class="erp-quote-number" style="text-decoration: none"
@@ -268,15 +293,52 @@
                                                     <span class="erp-service-badge">{{ $cotizacion->servicio ?? 'EQUIPAMIENTO' }}</span>
                                                 </td>
                                                 <td>
-                                                    @if((string) ($cotizacion->estado ?? '') === '2' || !empty($cotizacion->archivoPago))
+                                                    @if(($cotizacion->cxc_estado ?? '') === 'NUEVO')
+                                                        <span class="erp-badge warning">Pendiente</span>
+                                                    @elseif(in_array(($cotizacion->cxc_estado ?? ''), ['PagoCredito', 'Pendiente a credito'], true) || str_starts_with(mb_strtolower((string) ($cotizacion->cxc_estado ?? ''), 'UTF-8'), 'pendiente a credito'))
+                                                        <span class="erp-badge warning">Pendiente Credito</span>
+                                                    @elseif(($cotizacion->cxc_estado ?? '') === 'Pendiente Autodetracción')
+                                                        <span class="erp-badge warning">Pendiente Autodetraer</span>
+                                                    @elseif(($cotizacion->cxc_estado ?? '') === 'Pendiente a Detracción')
+                                                        <span class="erp-badge warning">Pendiente Detracción</span>
+                                                    @elseif(($cotizacion->cxc_estado ?? '') === 'Pendiente a Retención')
+                                                        <span class="erp-badge warning">Pendiente Retención</span>
+                                                    @elseif(in_array(($cotizacion->cxc_estado ?? ''), ['Cancelado', 'CANCELADO', 'Aprobado'], true) || (string) ($cotizacion->estado ?? '') === '2')
+                                                        <span class="erp-badge success">Aprobado</span>
+                                                    @elseif(!empty($cotizacion->archivoPago))
                                                         <span class="erp-badge success">Adjunto</span>
                                                     @else
                                                         <span class="erp-badge warning">Pendiente</span>
                                                     @endif
                                                 </td>
                                                 <td>
-                                                    @if(!empty($cotizacion->archivoPago))
-                                                        <a href="{{ asset('storage/' . $cotizacion->archivoPago) }}" target="_blank"
+                                                    @php
+                                                        $cxcStatus = (string) ($cotizacion->cxc_estado ?? '');
+                                                        $isPendingWithholdingQuote = in_array($cxcStatus, ['Pendiente Autodetracción', 'Pendiente a Detracción', 'Pendiente a Retención'], true);
+                                                        $isPendingCreditQuote = in_array($cxcStatus, ['PagoCredito', 'Pendiente a credito'], true)
+                                                            || str_starts_with(mb_strtolower($cxcStatus, 'UTF-8'), 'pendiente a credito');
+                                                        $isPendingQuote = $cxcStatus === 'NUEVO' || $isPendingCreditQuote || $isPendingWithholdingQuote;
+                                                        $hasPaymentReceipt = !empty($cotizacion->payment_receipt_url) || !empty($cotizacion->archivoPago);
+                                                        $isApprovedQuote = !$isPendingQuote && (
+                                                            in_array($cxcStatus, ['Cancelado', 'CANCELADO', 'Aprobado'], true)
+                                                            || (string) ($cotizacion->estado ?? '') === '2'
+                                                        );
+                                                        $hasQuoteReceipt = $isApprovedQuote;
+                                                    @endphp
+                                                    @if($hasQuoteReceipt)
+                                                        <button type="button"
+                                                            data-open-quotation-receipts
+                                                            data-quotation-number="{{ $cotizacion->nroCotizacion ?? '' }}"
+                                                            data-payment-receipt-url="{{ $cotizacion->payment_receipt_url ?? ($cotizacion->archivo_pago_url ?? '') }}"
+                                                            data-withholding-receipt-url="{{ $cotizacion->withholding_proof_url ?? '' }}"
+                                                            data-withholding-applies="{{ !empty($cotizacion->withholding_applies) ? '1' : '0' }}"
+                                                            data-withholding-type="{{ $cotizacion->withholding_type ?? 'detracción' }}"
+                                                            data-invoice-number="{{ $cotizacion->cxc_doc_referencia ?? '' }}"
+                                                            data-payment-date="{{ $cotizacion->quote_payment_date ?? '' }}"
+                                                            data-payment-amount="{{ $cotizacion->quote_payment_amount_display ?? '' }}"
+                                                            data-payment-comment="{{ $cotizacion->quote_payment_comment ?? '' }}"
+                                                            data-withholding-date="{{ $cotizacion->quote_withholding_date ?? '' }}"
+                                                            data-withholding-amount="{{ $cotizacion->quote_withholding_amount_display ?? '' }}"
                                                             class="erp-btn-secondary"
                                                             style="display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.35rem 0.35rem; text-decoration: none; font-size: 0.8125rem; font-weight: 600; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 0.375rem; color: #334155; transition: all 0.2s ease;">
                                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
@@ -285,20 +347,34 @@
                                                                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                                                                 <circle cx="12" cy="12" r="3"></circle>
                                                             </svg>
-                                                            Comprobante
-                                                        </a>
-                                                    @else
+                                                            Recibo
+                                                        </button>
+                                                    @endif
+                                                    @if($canApproveCxc && !$isApprovedQuote && (!$hasPaymentReceipt || $isPendingWithholdingQuote))
                                                         <button type="button" class="erp-btn-primary erp-btn-gestion"
                                                             data-cotizacion-id="{{ $cotizacion->nroCotizacion ?? '' }}"
                                                             data-cotizacion-number="{{ $cotizacion->nroCotizacion ?? '' }}"
                                                             data-cotizacion-client="{{ $cotizacion->cliente_nombre ?? '-' }}"
                                                             data-cotizacion-amount="{{ $cotizacion->monto_display ?? '-' }}"
                                                             data-cotizacion-payment="{{ $cotizacion->forma_pago_detalle ?? '' }}"
+                                                            data-cotizacion-payment-id="{{ $cotizacion->formaPago_idformaPago ?? '' }}"
+                                                            data-cotizacion-service="{{ $cotizacion->servicio ?? 'EQUIPAMIENTO' }}"
+                                                            data-cotizacion-complete-withholding="{{ in_array(($cotizacion->cxc_estado ?? ''), ['Pendiente Autodetracción', 'Pendiente a Detracción', 'Pendiente a Retención'], true) ? '1' : '0' }}"
+                                                            data-cotizacion-currency-id="{{ $cotizacion->cxc_moneda_id ?? $cotizacion->moneda_idmoneda ?? '' }}"
+                                                            data-cotizacion-balance="{{ $cotizacion->cxc_monto_pendiente ?? $cotizacion->total ?? 0 }}"
+                                                            data-cotizacion-credit-total="{{ $cotizacion->cxc_monto_total ?? '' }}"
+                                                            data-cotizacion-first-installment-paid="{{ $cotizacion->cxc_primera_cuota_pagada ?? '' }}"
+                                                            data-cotizacion-currency-symbol="{{ $cotizacion->cxc_moneda_simbolo ?? '' }}"
+                                                            data-cotizacion-next-installment="{{ $cotizacion->cxc_proxima_cuota_numero ?? '' }}"
+                                                            data-cotizacion-next-installment-amount="{{ $cotizacion->cxc_proxima_cuota_monto ?? '' }}"
+                                                            data-cotizacion-next-installment-date="{{ $cotizacion->cxc_proxima_cuota_fecha ?? '' }}"
+                                                            data-cotizacion-reference="{{ $cotizacion->cxc_doc_referencia ?? '' }}"
+                                                            data-cotizacion-cxc-state="{{ $cotizacion->cxc_estado ?? '' }}"
                                                             data-cotizacion-group="{{ $cotizacion->batch_id ?? '' }}"
                                                             data-cotizacion-is-group="{{ !empty($cotizacion->es_grupo) ? '1' : '0' }}"
                                                             data-cotizacion-group-count="{{ $cotizacion->grupo_count ?? 1 }}"
                                                             data-cotizacion-approve-url="{{ route('modules.cuentasporcobrar.quotations.approve', ['id' => $cotizacion->nroCotizacion]) }}">
-                                                            Aprobar
+                                                            {{ in_array(($cotizacion->cxc_estado ?? ''), ['Pendiente Autodetracción', 'Pendiente a Detracción', 'Pendiente a Retención'], true) ? 'Registrar depósito' : (in_array(($cotizacion->cxc_estado ?? ''), ['PagoCredito', 'Pendiente a credito'], true) || str_starts_with(mb_strtolower((string) ($cotizacion->cxc_estado ?? ''), 'UTF-8'), 'pendiente a credito') ? 'Continuar pago' : 'Registrar pago') }}
                                                         </button>
                                                     @endif
                                                 </td>
@@ -343,16 +419,28 @@
                                 vencidos</span>
                         </div>
                         <div class="flex items-center gap-2 sm:ml-auto">
-                            <button type="button" id="btn-dar-de-baja"
-                                class="erp-btn-primary bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-1.5 rounded-md text-xs transition duration-200"
-                                disabled style="background-color: #b41B29;">
-                                Dar de baja
-                            </button>
-                            <button type="button" id="open-service-payment" class="erp-btn-primary" disabled
-                                style="display: none;">
-                                <i data-lucide="wallet-cards" class="mr-2 h-4 w-4"></i>
-                                Cobrar seleccionados
-                            </button>
+                            @if($canDeactivateCxcServices)
+                                <button type="button" id="btn-dar-de-baja"
+                                    class="erp-btn-primary bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-1.5 rounded-md text-xs transition duration-200"
+                                    disabled style="background-color: #b41B29;">
+                                    Dar de baja
+                                </button>
+                            @endif
+                            @if($canExportCxc)
+                                <a href="{{ route('modules.cuentasporcobrar.services.export', ['format' => 'xlsx']) }}"
+                                    id="service-export-xlsx" class="erp-btn-secondary"
+                                    style="display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none;">
+                                    <i data-lucide="download" aria-hidden="true" class="h-4 w-4"></i>
+                                    Exportar XLSX
+                                </a>
+                            @endif
+                            @if($canCreateCxc)
+                                <button type="button" id="open-service-payment" class="erp-btn-primary" disabled
+                                    style="display: none;">
+                                    <i data-lucide="wallet-cards" class="mr-2 h-4 w-4"></i>
+                                    Cobrar seleccionados
+                                </button>
+                            @endif
                         </div>
                     </div>
 
@@ -419,14 +507,17 @@
                             <span>Estado</span>
                             <select id="service-filter-status">
                                 <option value="" @selected(($serviceFilters['service_status'] ?? '') === '')>Todos</option>
-                                <option value="pendiente" @selected(($serviceFilters['service_status'] ?? '') === 'pendiente')>Pendiente</option>
+                                <option value="facturado" @selected(($serviceFilters['service_status'] ?? '') === 'facturado')>Facturado</option>
                                 <option value="pendiente pago parcial" @selected(($serviceFilters['service_status'] ?? '') === 'pendiente pago parcial')>Pendiente Pago parcial</option>
                                 <option value="pendiente a credito" @selected(($serviceFilters['service_status'] ?? '') === 'pendiente a credito')>Pendiente a credito</option>
-                                <option value="facturado" @selected(($serviceFilters['service_status'] ?? '') === 'facturado')>Facturado</option>
-                                <option value="vencido" @selected(($serviceFilters['service_status'] ?? '') === 'vencido')>
-                                    Vencido</option>
+                                <option value="pagocredito" @selected(($serviceFilters['service_status'] ?? '') === 'pagocredito')>PagoCredito</option>
+                                <option value="pendiente autodetracción" @selected(($serviceFilters['service_status'] ?? '') === 'pendiente autodetracción')>Pendiente Autodetracción</option>
+                                <option value="pendiente autoretención" @selected(($serviceFilters['service_status'] ?? '') === 'pendiente autoretención')>Pendiente Autoretención</option>
+                                <option value="pendiente a detracción" @selected(($serviceFilters['service_status'] ?? '') === 'pendiente a detracción')>Pendiente a Detracción</option>
+                                <option value="pendiente a retención" @selected(($serviceFilters['service_status'] ?? '') === 'pendiente a retención')>Pendiente a Retención</option>
+                                <option value="pendiente" @selected(($serviceFilters['service_status'] ?? '') === 'pendiente')>Pendiente</option>
+                                <option value="vencido" @selected(($serviceFilters['service_status'] ?? '') === 'vencido')>Vencido</option>
                                 <option value="cancelado" @selected(($serviceFilters['service_status'] ?? '') === 'cancelado')>Cancelado</option>
-                                <option value="cancelado detracción" @selected(($serviceFilters['service_status'] ?? '') === 'cancelado detracción')>Cancelado Detracción</option>
                             </select>
                         </label>
                         <label class="erp-service-filter-field">
@@ -494,6 +585,7 @@
                                                 $allServiceIdsStr = implode(',', $clientGroup['all_service_ids']);
                                                 $isVencido = in_array((string) ($clientGroup['cxc_estado'] ?? ''), ['4', 'VENCIDO'], true);
                                                 $isCanceladoGroup = in_array((string) ($clientGroup['cxc_estado'] ?? ''), ['3', 'CANCELADO', 'Cancelado Detracción'], true) || str_starts_with(strtolower($clientGroup['estado_pago'] ?? ''), 'cancelado');
+                                                $isWithholdingPendingGroup = in_array((string) ($clientGroup['cxc_estado'] ?? ''), ['Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención', 'Cancelado Detracción'], true);
                                             @endphp
                                             <!-- NIVEL 1: CLIENTE -->
                                             <tr class="stair-client-row cursor-pointer hover:bg-slate-50/80 transition-colors text-xs"
@@ -505,6 +597,7 @@
                                                 data-month="{{ strtolower((string) ($clientGroup['mes'] ?? '')) }}"
                                                 data-year="{{ $clientGroup['anio'] ?? '' }}"
                                                 data-document="{{ $clientGroup['documento'] ?? '' }}"
+                                                data-registration-date="{{ $clientGroup['fecha_registro_iso'] ?? '' }}"
                                                 data-end-date="{{ $clientGroup['fecha_fin_iso'] ?? '' }}"
                                                 data-all-service-ids="{{ $allServiceIdsStr }}"
                                                 data-monto-total="{{ $clientGroup['monto_total'] }}">
@@ -555,17 +648,26 @@
                                                 <td class="text-center py-2 px-2">
                                                     @php
                                                         $statusLabel = $clientGroup['estado_pago'];
+                                                        $statusDisplayLabel = $statusLabel === 'Pendiente Autodetracción'
+                                                            ? 'Pendiente Autodetraer'
+                                                            : $statusLabel;
                                                         $statusClass = match (strtolower($statusLabel)) {
                                                             'cancelado' => 'service-days-green',
-                                                            'cancelado detracción' => 'service-days-green',
+                                                            'pendiente a detracción' => 'service-days-yellow',
+                                                            'pendiente a retención' => 'service-days-yellow',
+                                                            'pendiente autodetracción' => 'service-days-yellow',
+                                                            'pendiente autoretención' => 'service-days-yellow',
+                                                            'cancelado detracción' => 'service-days-yellow',
                                                             'facturado' => 'service-days-yellow',
                                                             'pendiente pago parcial' => 'service-days-yellow',
                                                             'pendiente a credito' => 'service-days-yellow',
+                                                            'nuevo' => 'service-days-yellow',
+                                                            'pagocredito' => 'service-days-yellow',
                                                             'vencido' => 'service-days-gray',
                                                             default => 'service-days-red',
                                                         };
                                                     @endphp
-                                                    <span class="erp-badge {{ $statusClass }}">{{ $statusLabel }}</span>
+                                                    <span class="erp-badge service-status-badge {{ $statusClass }}">{{ $statusDisplayLabel }}</span>
                                                 </td>
                                                 <td class="text-center py-2 px-2">
                                                     <span
@@ -585,8 +687,8 @@
                                                             data-service-ids="{{ $allServiceIdsStr }}"
                                                             data-client-id="{{ $clientId }}"
                                                             data-client-name="{{ $clientGroup['cliente_nombre'] }}"
-                                                            data-amount="{{ $clientGroup['monto_total'] }}"
-                                                            data-payment-amount="{{ $clientGroup['monto_saldo'] }}"
+                                                            data-amount="{{ $clientGroup['monto_factura'] ?? $clientGroup['monto_total'] }}"
+                                                            data-payment-amount="{{ $isWithholdingPendingGroup ? ($clientGroup['monto_saldo'] ?? 0) : ($clientGroup['monto_factura'] ?? $clientGroup['monto_saldo']) }}"
                                                             data-amount-display="{{ $clientGroup['monto_total_display'] }}"
                                                             data-tipo-cobro-id="{{ $clientGroup['tipo_cobro_id'] ?? '' }}"
                                                             data-moneda-id="{{ $clientGroup['moneda_idmoneda'] ?? 1 }}"
@@ -598,12 +700,13 @@
                                                             data-period-end="{{ $clientGroup['fecha_fin_iso'] ?? '' }}"
                                                             data-next-period-end="{{ $clientGroup['fecha_fin_siguiente_iso'] ?? '' }}"
                                                             data-doc-ref="{{ $clientGroup['cxc_doc'] ?? '' }}">
-                                                            {{ $isCanceladoGroup ? 'Ver' : 'Gestionar'  }}
+                                                            {{ $isWithholdingPendingGroup ? 'Registrar depósito' : ($isCanceladoGroup ? 'Ver' : 'Gestionar') }}
                                                         </button>
                                                         @if($isCanceladoGroup && !empty($clientGroup['cxc_id']) && !empty($clientGroup['puede_revertir']))
                                                             <button type="button"
                                                                 class="btn-revert-payment inline-flex items-center justify-center rounded-md border border-amber-500 px-2 py-1 text-[11px] font-bold text-amber-700 transition duration-200 hover:bg-amber-50"
                                                                 data-revert-url="{{ route('modules.cuentasporcobrar.revertir-pago', ['id' => $clientGroup['cxc_id']]) }}"
+                                                                data-revert-cxc-ids="{{ implode(',', $clientGroup['cxc_reversion_ids'] ?? []) }}"
                                                                 title="Revertir pago dentro de 7 días">
                                                                 Anular
                                                             </button>
@@ -657,6 +760,7 @@
                                                                         $typeDetailId = "type-detail-{$groupId}-{$typeIndex}";
                                                                         $serviceIdsStr = implode(',', $typeGroup['service_ids']);
                                                                         $typeCxcIdsStr = implode(',', $typeGroup['cxc_ids'] ?? []);
+                                                                        $isTypeWithholdingPending = in_array((string) ($typeGroup['cxc_estado'] ?? ''), ['Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención', 'Cancelado Detracción'], true);
                                                                     @endphp
                                                                     <!-- NIVEL 2: FILA DE TIPO DE SERVICIO -->
                                                                     <tr class="stair-service-row border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
@@ -683,8 +787,8 @@
                                                                                     data-service-ids="{{ $serviceIdsStr }}"
                                                                                     data-client-id="{{ $clientId }}"
                                                                                     data-client-name="{{ $clientGroup['cliente_nombre'] }}"
-                                                                                    data-amount="{{ $typeGroup['monto_subtotal'] }}"
-                                                                                    data-payment-amount="{{ $typeGroup['monto_saldo'] }}"
+                                                                                    data-amount="{{ $typeGroup['monto_factura'] ?? $typeGroup['monto_subtotal'] }}"
+                                                                                    data-payment-amount="{{ $isTypeWithholdingPending ? ($typeGroup['monto_saldo'] ?? 0) : ($typeGroup['monto_factura'] ?? $typeGroup['monto_saldo']) }}"
                                                                                     data-amount-display="{{ $typeGroup['monto_subtotal_display'] }}"
                                                                                     data-tipo-cobro-id="{{ $typeGroup['tipo_cobro_id'] ?? ($clientGroup['tipo_cobro_id'] ?? '') }}"
                                                                                     data-moneda-id="{{ $clientGroup['moneda_idmoneda'] ?? 1 }}"
@@ -1610,6 +1714,19 @@
             white-space: nowrap;
         }
 
+        .erp-staircase-table tbody td:nth-child(10) {
+            overflow: visible;
+            text-overflow: clip;
+            white-space: normal;
+        }
+
+        .erp-staircase-table tbody td:nth-child(10) .service-status-badge {
+            max-width: 100%;
+            white-space: normal;
+            line-height: 1.25;
+            text-align: center;
+        }
+
         .erp-staircase-table .stair-client-row td {
             padding-top: 15px;
             padding-bottom: 15px;
@@ -1953,8 +2070,25 @@
             text-overflow: ellipsis;
         }
 
+        .erp-quotations-table tbody td:nth-child(10) {
+            white-space: normal;
+            overflow: visible;
+            text-overflow: clip;
+        }
+
+        .erp-quotations-table tbody td:nth-child(10) .erp-badge {
+            max-width: 100%;
+            white-space: normal;
+            line-height: 1.25;
+            text-align: center;
+        }
+
         .erp-quotations-table .erp-btn-primary {
-            min-width: 101px;
+            box-sizing: border-box;
+            width: 100%;
+            min-width: 0;
+            padding: 6px 5px;
+            font-size: 0.68rem;
             white-space: nowrap;
         }
 
@@ -2002,7 +2136,7 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            border-radius: 9999px;
+            border-radius: 25px;
             padding: 8px 10px;
             font-size: 0.75rem;
             font-weight: 700;
@@ -2047,6 +2181,40 @@
 
         .erp-modal-backdrop.visible {
             display: flex;
+        }
+
+        #withholding-warning-modal {
+            z-index: 100001 !important;
+            padding: 16px;
+        }
+
+        #quotation-withholding-proof-modal {
+            z-index: 100002 !important;
+            padding: 16px;
+        }
+
+        #quotation-withholding-proof-modal .erp-upload-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 112px;
+            padding: 0.875rem;
+        }
+
+        #quotation-withholding-proof-modal .erp-upload-title {
+            font-size: 0.875rem;
+        }
+
+        #quotation-withholding-proof-modal .erp-upload-help,
+        #quotation-withholding-proof-modal .erp-upload-file-name {
+            font-size: 0.75rem;
+        }
+
+        #withholding-warning-modal .erp-modal-card {
+            width: min(540px, calc(100vw - 32px));
+            max-width: 500px;
+            max-height: calc(100dvh - 32px);
         }
 
         #service-factura-modal input:focus,
@@ -2302,6 +2470,23 @@
             max-height: calc(90vh - 60px);
         }
 
+        #service-factura-modal .erp-modal-body * {
+            font-size: 0.8rem;
+        }
+
+        #service-factura-modal .erp-modal-header h3 {
+            font-size: 0.95rem;
+        }
+
+        #service-factura-modal .erp-modal-body .erp-factura-mode-title,
+        #service-factura-modal .erp-modal-body .erp-factura-mode-desc {
+            font-size: 0.75rem;
+        }
+
+        #service-factura-modal .erp-modal-body h4 {
+            font-size: 0.78rem;
+        }
+
         #service-payment-modal .erp-modal-card {
             max-height: 94vh;
         }
@@ -2317,6 +2502,37 @@
             min-height: 0;
             flex: 1;
             color: #334155;
+        }
+
+        #erp-gestion-modal {
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        #erp-gestion-modal .erp-modal-card {
+            width: min(560px, 100%);
+            max-height: calc(100vh - 20px);
+            max-height: calc(100dvh - 20px);
+            margin: auto;
+        }
+
+        #erp-gestion-modal form {
+            display: flex;
+            min-height: 0;
+            flex: 1;
+            flex-direction: column;
+        }
+
+        #erp-gestion-modal .erp-modal-body {
+            min-height: 0;
+            max-height: none;
+            flex: 1;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }
+
+        #erp-gestion-modal .erp-modal-actions {
+            flex-shrink: 0;
         }
 
         #service-payment-modal label,
@@ -2335,6 +2551,26 @@
             color: #334155;
             font-size: 0.82rem;
             box-shadow: none;
+        }
+
+        #service-payment-modal #payment-original {
+            min-height: 0;
+            border: 0 !important;
+            border-radius: 0;
+            box-shadow: none !important;
+        }
+
+        #service-payment-modal #payment-original::-webkit-inner-spin-button,
+        #service-payment-modal #payment-original::-webkit-outer-spin-button,
+        #service-factura-modal #factura-amount::-webkit-inner-spin-button,
+        #service-factura-modal #factura-amount::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        #service-payment-modal #payment-original,
+        #service-factura-modal #factura-amount {
+            -moz-appearance: textfield;
         }
 
         #service-payment-modal input:not([type="radio"]):focus,
@@ -2658,14 +2894,36 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            const searchInput = document.getElementById('quote-search-input');
-            let quoteSearchTimer;
+            const pendingCxcSuccessNotice = sessionStorage.getItem('cxc-pending-success-notice');
+            if (pendingCxcSuccessNotice) {
+                sessionStorage.removeItem('cxc-pending-success-notice');
+                const noticeContainer = document.querySelector('.erp-cuentas-body');
+                if (noticeContainer) {
+                    const notice = document.createElement('div');
+                    notice.dataset.cxcSessionNotice = '';
+                    notice.className = 'mb-4 rounded-lg border px-4 py-3 text-base font-semibold relative';
+                    notice.setAttribute('role', 'status');
+                    notice.setAttribute('aria-live', 'polite');
+                    notice.style.cssText = 'border-color:#16a34a;background-color:#dcfce7;color:#14532d;';
+                    notice.append(document.createTextNode(`✓ ${pendingCxcSuccessNotice}`));
+
+                    const closeButton = document.createElement('button');
+                    closeButton.type = 'button';
+                    closeButton.className = 'absolute top-0 right-0 mt-2 mr-2 text-lg font-bold text-gray-600 hover:text-gray-800';
+                    closeButton.setAttribute('aria-label', 'Cerrar notificación');
+                    closeButton.textContent = '×';
+                    closeButton.addEventListener('click', () => notice.remove());
+                    notice.append(closeButton);
+                    noticeContainer.prepend(notice);
+                } else {
+                    console.error('No se pudo mostrar la notificación de Cuentas por Cobrar: falta el contenedor.');
+                }
+            }
+
             let cxcRequestController = null;
             let cxcRequestId = 0;
             let cxcQuery = new URLSearchParams(window.location.search);
             let loadedCxcTab = document.getElementById('cxc-list-wrapper')?.dataset.loadedTab || 'cotizaciones';
-            let appliedQuoteStatus = document.getElementById('quote-filter-status')?.value || '1';
-
             function refreshCxcIcons() {
                 try {
                     if (typeof createIcons === 'function' && typeof icons !== 'undefined') {
@@ -2688,6 +2946,47 @@
                 }
             }
 
+            const quoteExportUrl = @json(route('modules.cuentasporcobrar.quotations.export', ['format' => 'xlsx']));
+            function refreshQuoteExportUrl() {
+                const exportLink = document.getElementById('quote-export-xlsx');
+                if (!exportLink) return;
+
+                const exportUrl = new URL(quoteExportUrl, window.location.origin);
+                ['quote_client', 'quote_number', 'quote_payment_format', 'quote_validity', 'quote_service', 'quote_status', 'quote_date']
+                    .forEach((name) => {
+                        const value = cxcQuery.get(name);
+                        if (value !== null) exportUrl.searchParams.set(name, value);
+                    });
+                if (!exportUrl.searchParams.has('quote_status')) {
+                    exportUrl.searchParams.set('quote_status', 'pending');
+                }
+                exportLink.href = exportUrl.toString();
+            }
+
+            const serviceExportUrl = @json(route('modules.cuentasporcobrar.services.export', ['format' => 'xlsx']));
+            function refreshServiceExportUrl() {
+                const exportLink = document.getElementById('service-export-xlsx');
+                if (!exportLink) return;
+
+                const exportUrl = new URL(serviceExportUrl, window.location.origin);
+                ['service_client', 'service_month', 'service_year', 'service_document', 'service_date', 'service_expiration_date', 'service_status']
+                    .forEach((name) => {
+                        const value = cxcQuery.get(name);
+                        if (value !== null) exportUrl.searchParams.set(name, value);
+                    });
+                exportLink.href = exportUrl.toString();
+            }
+
+            function refreshQuoteAnnulButton() {
+                    const annulButton = document.getElementById('quote-annul-open');
+                    if (!annulButton) return;
+
+                    const selectedCount = document.querySelectorAll('#quote-results .quote-row-select:checked:not(:disabled)').length;
+                    annulButton.disabled = selectedCount === 0;
+                    annulButton.style.opacity = selectedCount === 0 ? '0.75' : '1';
+                    annulButton.style.cursor = selectedCount === 0 ? 'not-allowed' : 'pointer';
+            }
+
             async function loadCxcResults(url, tab, options = {}) {
                 const requestId = ++cxcRequestId;
                 cxcRequestController?.abort();
@@ -2705,6 +3004,8 @@
                     const documentHtml = new DOMParser().parseFromString(await response.text(), 'text/html');
                     if (requestId !== cxcRequestId) return;
                     cxcQuery = new URLSearchParams(requestUrl.search);
+                    if (tab === 'cotizaciones') refreshQuoteExportUrl();
+                    if (tab === 'servicios') refreshServiceExportUrl();
 
                     const resultId = tab === 'servicios' ? 'service-results' : 'quote-results';
                     const currentResults = document.getElementById(resultId);
@@ -2737,6 +3038,7 @@
                     applyServicioSearch();
                     refreshServiceSelection();
                     refreshBajaBtn();
+                    refreshQuoteAnnulButton();
                 } catch (error) {
                     if (error.name !== 'AbortError') {
                         console.error('Error actualizando Cuentas por Cobrar:', error);
@@ -2748,21 +3050,24 @@
                 const quoteSelectAll = event.target.closest('#quote-select-all');
                 if (quoteSelectAll) {
                     document.querySelectorAll('#quote-results .quote-row-select').forEach((checkbox) => {
-                        checkbox.checked = quoteSelectAll.checked;
+                        if (!checkbox.disabled) checkbox.checked = quoteSelectAll.checked;
                     });
                     quoteSelectAll.indeterminate = false;
+                    refreshQuoteAnnulButton();
                     return;
                 }
 
                 const quoteRowSelect = event.target.closest('.quote-row-select');
                 if (quoteRowSelect) {
                     const quoteCheckboxes = Array.from(document.querySelectorAll('#quote-results .quote-row-select'));
+                    const selectableCheckboxes = quoteCheckboxes.filter((checkbox) => !checkbox.disabled);
                     const quoteSelectAllInput = document.getElementById('quote-select-all');
                     if (quoteSelectAllInput) {
-                        const selectedCount = quoteCheckboxes.filter((checkbox) => checkbox.checked).length;
-                        quoteSelectAllInput.checked = quoteCheckboxes.length > 0 && selectedCount === quoteCheckboxes.length;
-                        quoteSelectAllInput.indeterminate = selectedCount > 0 && selectedCount < quoteCheckboxes.length;
+                        const selectedCount = selectableCheckboxes.filter((checkbox) => checkbox.checked).length;
+                        quoteSelectAllInput.checked = selectableCheckboxes.length > 0 && selectedCount === selectableCheckboxes.length;
+                        quoteSelectAllInput.indeterminate = selectedCount > 0 && selectedCount < selectableCheckboxes.length;
                     }
+                    refreshQuoteAnnulButton();
                     return;
                 }
 
@@ -2775,6 +3080,7 @@
                 const activeTab = document.querySelector('.tab-button.active')?.dataset.tab || 'cotizaciones';
                 loadCxcResults(`${window.location.pathname}?${params.toString()}`, activeTab);
             });
+            refreshQuoteAnnulButton();
 
             document.addEventListener('click', function (event) {
                 const link = event.target.closest('[data-cxc-pagination] nav a[href]');
@@ -2784,6 +3090,60 @@
                 const tab = link.closest('#quote-results') ? 'cotizaciones' : 'servicios';
                 loadCxcResults(link.href, tab);
             }, true);
+
+            let quoteAnnulPreviousOverflow = null;
+            function closeQuoteAnnulModal() {
+                const annulModal = document.getElementById('quote-annul-modal');
+                annulModal?.classList.remove('visible');
+                if (quoteAnnulPreviousOverflow !== null) {
+                    document.documentElement.style.overflow = quoteAnnulPreviousOverflow.html;
+                    document.body.style.overflow = quoteAnnulPreviousOverflow.body;
+                    quoteAnnulPreviousOverflow = null;
+                }
+            }
+
+            document.addEventListener('click', function (event) {
+                const openButton = event.target.closest('#quote-annul-open');
+                const closeButton = event.target.closest('[data-quote-annul-close]');
+                const annulModal = document.getElementById('quote-annul-modal');
+
+                if (openButton) {
+                    const selectedQuotes = Array.from(document.querySelectorAll('#quote-results .quote-row-select:checked:not(:disabled)'));
+                    if (selectedQuotes.length === 0 || !annulModal) return;
+
+                    const hiddenInputs = document.getElementById('quote-annul-hidden-ids');
+                    const selectedNumbers = selectedQuotes.map((checkbox) => checkbox.value);
+                    if (hiddenInputs) {
+                        hiddenInputs.replaceChildren(...selectedNumbers.map((quoteId) => {
+                            const input = document.createElement('input');
+                            input.type = 'hidden';
+                            input.name = 'quotation_ids[]';
+                            input.value = quoteId;
+                            return input;
+                        }));
+                    }
+                    const quoteSummary = document.getElementById('quote-annul-summary');
+                    if (quoteSummary) {
+                        quoteSummary.textContent = selectedNumbers.length === 1
+                            ? `Vas a anular "${selectedNumbers[0]}". Si continúas, el registro quedará marcado como anulado.`
+                            : `Vas a anular ${selectedNumbers.length} cotizaciones (${selectedNumbers.join(', ')}). Si continúas, los registros quedarán marcados como anulados.`;
+                    }
+                    if (quoteAnnulPreviousOverflow === null) {
+                        quoteAnnulPreviousOverflow = {
+                            html: document.documentElement.style.overflow,
+                            body: document.body.style.overflow
+                        };
+                    }
+                    document.documentElement.style.overflow = 'hidden';
+                    document.body.style.overflow = 'hidden';
+                    annulModal.classList.add('visible');
+                    return;
+                }
+
+                if (closeButton) {
+                    closeQuoteAnnulModal();
+                }
+            });
 
             function navigateToFilteredPage(tab, pageName, filters, options = {}) {
                 const params = new URLSearchParams(cxcQuery);
@@ -2805,36 +3165,24 @@
             }
 
             function submitQuoteFilters(options = {}) {
+                ['quote_q', 'quote_group', 'quote_currency', 'quote_month', 'quote_year', 'quote_document', 'quote_expiration_date'].forEach((name) => cxcQuery.delete(name));
                 const filters = [
-                    { name: 'quote_q', value: searchInput?.value },
-                    { name: 'quote_group', value: document.getElementById('quote-filter-group')?.value },
                     { name: 'quote_client', value: document.getElementById('quote-filter-client')?.value },
-                    { name: 'quote_currency', value: document.getElementById('quote-filter-currency')?.value },
+                    { name: 'quote_number', value: document.getElementById('quote-filter-number')?.value },
+                    { name: 'quote_payment_format', value: document.getElementById('quote-filter-payment-format')?.value },
+                    { name: 'quote_validity', value: document.getElementById('quote-filter-validity')?.value },
                     { name: 'quote_service', value: document.getElementById('quote-filter-service')?.value },
-                    { name: 'quote_status', value: appliedQuoteStatus },
+                    { name: 'quote_status', value: document.getElementById('quote-filter-status')?.value, emptyValue: '' },
                     { name: 'quote_date', value: document.getElementById('quote-filter-date')?.value }
                 ];
-                const params = new URLSearchParams();
-                filters.forEach(({ name, value }) => {
-                    const normalizedValue = String(value ?? '').trim();
-                    if (normalizedValue !== '') params.set(name, normalizedValue);
-                });
-                document.querySelectorAll('#export-pdf-link, #export-xlsx-link').forEach((link) => {
-                    const exportUrl = new URL(link.href, window.location.origin);
-                    ['quote_q', 'quote_group', 'quote_client', 'quote_currency', 'quote_service', 'quote_status', 'quote_date'].forEach((name) => {
-                        exportUrl.searchParams.delete(name);
-                    });
-                    params.forEach((value, name) => exportUrl.searchParams.set(name, value));
-                    link.href = exportUrl.toString();
-                });
                 navigateToFilteredPage('cotizaciones', 'quotes_page', filters, options);
             }
+            refreshQuoteExportUrl();
 
-            const searchClearBtn = document.getElementById('quote-search-clear');
-            const filterBadge = document.getElementById('quote-filter-badge');
             const serviceSearchInput = document.getElementById('service-filter-client');
             const serviceDocumentInput = document.getElementById('service-filter-document');
             const serviceDateInput = document.getElementById('service-filter-date');
+            const serviceExpirationDateInput = document.getElementById('service-filter-expiration-date');
             const serviceMonthSummary = document.querySelector('#service-month-summary span');
             const serviceMonthInputs = document.querySelectorAll('#service-month-picker input[type="checkbox"]');
             const serviceMonthSelectAll = document.getElementById('service-month-select-all');
@@ -2856,13 +3204,186 @@
             const paymentConvertedTotalInput = document.getElementById('payment-converted-total');
             const partialPaymentField = document.getElementById('partial-payment-field');
             const selectedServiceInputs = document.getElementById('selected-service-inputs');
+            const paymentDetailsUrlTemplate = @json(route('modules.cuentasporcobrar.detalle', ['id' => '__id__']));
+            const paymentDetailsUpdateUrlTemplate = @json(route('modules.cuentasporcobrar.detalle.update', ['id' => '__id__']));
+            let paymentDetailsRequestToken = 0;
+
+            function setPaymentViewMode(isViewMode, isEditing = false) {
+                if (!servicePaymentModal || !servicePaymentForm) return;
+                servicePaymentModal.classList.toggle('is-payment-view-mode', isViewMode);
+                servicePaymentModal.classList.toggle('is-payment-editing', isViewMode && isEditing);
+                servicePaymentModal.dataset.paymentViewMode = isViewMode ? '1' : '0';
+                servicePaymentModal.dataset.paymentEditing = isEditing ? '1' : '0';
+
+                servicePaymentForm.querySelectorAll('input, select, textarea').forEach((field) => {
+                    if (field.type === 'hidden' || field.name === '_token' || field.name === '_method') return;
+                    if (!isViewMode) {
+                        if (field.dataset.disabledForPaymentView === '1') {
+                            field.disabled = field.dataset.disabledBeforePaymentView === '1';
+                            delete field.dataset.disabledForPaymentView;
+                            delete field.dataset.disabledBeforePaymentView;
+                        }
+                        if (field.dataset.readonlyForPaymentView === '1') {
+                            field.readOnly = field.dataset.readonlyBeforePaymentView === '1';
+                            delete field.dataset.readonlyForPaymentView;
+                            delete field.dataset.readonlyBeforePaymentView;
+                        }
+                        if (field.dataset.requiredForPaymentView === '1') {
+                            field.required = field.dataset.requiredBeforePaymentView === '1';
+                            delete field.dataset.requiredForPaymentView;
+                            delete field.dataset.requiredBeforePaymentView;
+                        }
+                        return;
+                    }
+
+                    if (field.dataset.disabledForPaymentView !== '1') {
+                        field.dataset.disabledBeforePaymentView = field.disabled ? '1' : '0';
+                    }
+                    field.dataset.disabledForPaymentView = '1';
+                    const canEdit = isEditing && ['payment-description', 'payment-comprobante', 'payment-remove-comprobante'].includes(field.id);
+                    field.disabled = !canEdit;
+
+                    if (field.id === 'payment-date' || field.id === 'payment-period-end') {
+                        if (field.dataset.readonlyForPaymentView !== '1') {
+                            field.dataset.readonlyBeforePaymentView = field.readOnly ? '1' : '0';
+                        }
+                        field.dataset.readonlyForPaymentView = '1';
+                        field.readOnly = true;
+                    }
+                    if (field.id === 'payment-comprobante') {
+                        if (field.dataset.requiredForPaymentView !== '1') {
+                            field.dataset.requiredBeforePaymentView = field.required ? '1' : '0';
+                        }
+                        field.dataset.requiredForPaymentView = '1';
+                        field.required = false;
+                    }
+                });
+                if (paymentOriginal) {
+                    paymentOriginal.closest('#payment-original-input-shell')?.classList.toggle('hidden', isViewMode);
+                }
+                document.getElementById('payment-original-display')?.classList.toggle('hidden', !isViewMode);
+
+                const editButton = document.getElementById('payment-view-edit-btn');
+                const cancelEditButton = document.getElementById('payment-view-cancel-edit-btn');
+                const submitButton = document.getElementById('payment-submit-btn');
+                if (editButton) editButton.classList.toggle('hidden', !isViewMode || isEditing);
+                if (cancelEditButton) cancelEditButton.classList.toggle('hidden', !isViewMode || !isEditing);
+                if (submitButton) {
+                    submitButton.classList.toggle('hidden', isViewMode && !isEditing);
+                    if (isViewMode) submitButton.textContent = isEditing ? 'Guardar cambios' : 'Registrar cobro';
+                }
+            }
+
+            async function loadPaymentDetails(cxcId, requestToken = ++paymentDetailsRequestToken) {
+                const detailsUrl = paymentDetailsUrlTemplate.replace('__id__', encodeURIComponent(cxcId));
+                const response = await fetch(detailsUrl, { headers: { Accept: 'application/json' } });
+                const result = await response.json();
+                if (!response.ok || !result.success || !result.data) {
+                    throw new Error(result.message || 'No se pudieron cargar los datos del pago.');
+                }
+                if (requestToken !== paymentDetailsRequestToken) return false;
+
+                const details = result.data;
+                const dateInput = document.getElementById('payment-date');
+                const periodInput = document.getElementById('payment-period-end');
+                const referenceInput = document.getElementById('payment-reference');
+                const bankSelect = document.getElementById('payment-bank');
+                const methodSelect = document.getElementById('payment-method');
+                const descriptionInput = servicePaymentForm?.querySelector('#payment-description');
+                const proofInput = document.getElementById('payment-comprobante');
+                const proofName = document.getElementById('payment-comprobante-name');
+                const existingProof = document.getElementById('payment-existing-proof');
+                const removeProofInput = document.getElementById('payment-remove-comprobante');
+                const removeProofButton = document.getElementById('payment-clear-comprobante');
+                const withholdingReceiptSection = document.getElementById('payment-withholding-receipt-view');
+                const withholdingReceiptLink = document.getElementById('payment-withholding-receipt-link');
+                const withholdingReceiptMissing = document.getElementById('payment-withholding-receipt-missing');
+
+                if (paymentClient) paymentClient.value = details.cliente_nombre || '';
+                if (dateInput) dateInput.value = (details.fechaPago || '').slice(0, 10);
+                if (periodInput) periodInput.value = (details.fechaFin || '').slice(0, 10);
+                if (referenceInput) referenceInput.value = details.docReferencia || '-';
+                if (bankSelect) bankSelect.value = details.entidadBancaria_identidadBancaria
+                    ? String(details.entidadBancaria_identidadBancaria)
+                    : '';
+                if (methodSelect) methodSelect.value = details.formaPago_idformaPago
+                    ? String(details.formaPago_idformaPago)
+                    : '';
+                if (descriptionInput) descriptionInput.value = details.detalle_descripcion || '';
+                withholdingReceiptSection?.classList.toggle('hidden', !details.withholding_applies);
+                if (withholdingReceiptSection && details.withholding_applies) {
+                    const type = details.withholding_type || 'detracción';
+                    const title = document.getElementById('payment-withholding-receipt-title');
+                    const dateLabel = document.getElementById('payment-withholding-date-label');
+                    const amountLabel = document.getElementById('payment-withholding-amount-label');
+                    const date = document.getElementById('payment-withholding-date');
+                    const amount = document.getElementById('payment-withholding-amount');
+                    const comment = document.getElementById('payment-withholding-comment');
+                    if (title) title.textContent = `Detalle de ${type}:`;
+                    if (dateLabel) dateLabel.textContent = `Fecha de pago de ${type}`;
+                    if (amountLabel) amountLabel.textContent = `Monto de ${type}`;
+                    if (date) date.value = details.withholding_fecha || '—';
+                    if (amount) amount.value = details.withholding_monto_display || '—';
+                    if (comment) comment.value = details.withholding_comment || '—';
+                    if (withholdingReceiptLink) {
+                        withholdingReceiptLink.dataset.receiptUrl = details.withholding_comprobante_url || '';
+                        withholdingReceiptLink.dataset.missingMessage = `Sin recibo de ${type}`;
+                        withholdingReceiptLink.textContent = `Ver recibo de ${type}`;
+                    }
+                    if (withholdingReceiptMissing) {
+                        withholdingReceiptMissing.textContent = `Sin recibo de ${type}`;
+                        withholdingReceiptMissing.classList.add('hidden');
+                    }
+                }
+                const paymentCurrencySymbol = normalizeCurrencySymbol(details.moneda_simbolo, details.moneda_idmoneda);
+                if (paymentOriginal) {
+                    paymentOriginal.value = Number(details.montoOriginal || 0).toFixed(2);
+                    if (paymentOriginalCurrency) paymentOriginalCurrency.textContent = paymentCurrencySymbol;
+                }
+                const paymentOriginalDisplay = document.getElementById('payment-original-display');
+                if (paymentOriginalDisplay) {
+                    const displayAmount = servicePaymentModal?.dataset.paymentDisplayAmount
+                        || `${paymentCurrencySymbol} ${Number(details.montoOriginal || 0).toFixed(2)}`;
+                    paymentOriginalDisplay.textContent = displayAmount;
+                }
+                if (proofInput) proofInput.value = '';
+                if (proofName) proofName.textContent = '';
+                if (removeProofInput) removeProofInput.value = '0';
+                if (removeProofButton) removeProofButton.classList.add('hidden');
+                if (existingProof) {
+                    existingProof.replaceChildren();
+                    if (details.comprobante_url) {
+                        const link = document.createElement('a');
+                        link.href = details.comprobante_url;
+                        link.target = '_blank';
+                        link.rel = 'noopener noreferrer';
+                        link.className = 'erp-btn-secondary';
+                        link.textContent = 'Ver comprobante de pago adjunto';
+                        existingProof.append(link);
+                        existingProof.classList.remove('hidden');
+                    } else {
+                        existingProof.textContent = 'No hay comprobante de pago adjunto.';
+                        existingProof.classList.remove('hidden');
+                    }
+                }
+
+                return true;
+            }
 
             function getCurrencySymbolFromText(valueText = '') {
                 const text = String(valueText || '').trim();
                 if (text.includes('US$') || text.includes('$')) return '$';
                 if (text.includes('€')) return '€';
-                if (text.includes('S/') || text.includes('soles') || text.includes('sol')) return 'S/';
+                if (text === 'S' || text.includes('S/') || text.includes('soles') || text.includes('sol')) return 'S/';
                 return '';
+            }
+
+            function normalizeCurrencySymbol(symbol = '', monedaId = '') {
+                const value = String(symbol || '').trim();
+                return getCurrencySymbolFromText(value)
+                    || value
+                    || getCurrencySymbolFromMonedaId(monedaId)
+                    || 'S/';
             }
 
             function getCurrencySymbolFromMonedaId(monedaId) {
@@ -2892,7 +3413,7 @@
                 return 'S/';
             }
 
-            function formatMoney(value, symbol = getCurrencySymbolFromText(paymentOriginal?.value || '')) {
+            function formatMoney(value, symbol = paymentOriginalCurrency?.textContent || 'S/') {
                 const numericValue = Number(value || 0);
                 if (!symbol) {
                     return numericValue.toFixed(2);
@@ -2900,13 +3421,14 @@
                 return `${symbol} ${numericValue.toFixed(2)}`;
             }
 
-            function updateBalanceAndCreditDisplay(totalAmount, paidAmount, balanceId, creditId, symbol) {
+            function updateBalanceAndCreditDisplay(totalAmount, paidAmount, balanceId, creditId, symbol, creditThreshold = totalAmount) {
                 const total = Math.max(Number(totalAmount) || 0, 0);
                 const paid = Math.max(Number(paidAmount) || 0, 0);
+                const creditLimit = Math.max(Number(creditThreshold) || 0, 0);
                 const balance = document.getElementById(balanceId);
                 const credit = document.getElementById(creditId);
                 const remaining = Math.max(total - paid, 0);
-                const creditAmount = Math.max(paid - total, 0);
+                const creditAmount = Math.max(paid - creditLimit, 0);
 
                 if (balance) balance.textContent = formatMoney(remaining, symbol);
                 if (credit) {
@@ -2927,37 +3449,28 @@
                 partialPaymentField?.classList.toggle('hidden', !isPartial);
                 if (paymentAmount) paymentAmount.required = isPartial;
                 if (paymentBalance) {
-                    const currentSymbol = getCurrencySymbolFromText(paymentOriginal?.value || '');
+                    const currentSymbol = paymentOriginalCurrency?.textContent || 'S/';
                     if (isPartial) {
                         const currentTotal = Number(paymentConvertedTotalInput?.value || paymentAmount?.value || 0);
                         const paidValue = Number(paymentAmount?.value || currentTotal || 0);
-                        updateBalanceAndCreditDisplay(getPaymentBaseAmount(), paidValue, 'payment-balance', 'payment-credit-summary', currentSymbol);
+                        updateBalanceAndCreditDisplay(
+                            getPaymentBaseAmount(),
+                            paidValue,
+                            'payment-balance',
+                            'payment-credit-summary',
+                            currentSymbol,
+                            Number(servicePaymentModal?.dataset.grossAmount || getPaymentBaseAmount())
+                        );
                     } else {
-                        updateBalanceAndCreditDisplay(getPaymentBaseAmount(), 0, 'payment-balance', 'payment-credit-summary', currentSymbol);
+                        updateBalanceAndCreditDisplay(
+                            getPaymentBaseAmount(),
+                            0,
+                            'payment-balance',
+                            'payment-credit-summary',
+                            currentSymbol,
+                            Number(servicePaymentModal?.dataset.grossAmount || getPaymentBaseAmount())
+                        );
                     }
-                }
-                syncWithholdingDecisionUI();
-            }
-
-            function syncWithholdingDecisionUI() {
-                const grossValue = Number(String(paymentOriginal?.value || '').replace(/[^0-9.-]+/g, '') || 0);
-                const decisionGroup = document.getElementById('payment-withholding-decision-group');
-                const radios = document.querySelectorAll('input[name="withholding_decision"]');
-                if (!decisionGroup || radios.length === 0) return;
-
-                const shouldShow = grossValue > 700;
-                decisionGroup.classList.toggle('hidden', !shouldShow);
-                if (!shouldShow) {
-                    radios.forEach((radio) => { radio.checked = false; });
-                    return;
-                }
-
-                const enteredAmount = Number(paymentAmount?.value || 0);
-                const selectedDecision = document.querySelector('input[name="withholding_decision"]:checked');
-                if (!selectedDecision) {
-                    const defaultChoice = enteredAmount >= grossValue ? 'full_pending' : 'pending';
-                    const fallback = document.querySelector(`input[name="withholding_decision"][value="${defaultChoice}"]`);
-                    if (fallback) fallback.checked = true;
                 }
             }
 
@@ -2985,7 +3498,7 @@
                 if (!isOtherCurrency) {
                     paymentConvertedTotalInput.value = baseAmount.toFixed(2);
                     if (paymentAmount) paymentAmount.value = baseAmount.toFixed(2);
-                    if (paymentBalance) paymentBalance.textContent = formatMoney(0, getCurrencySymbolFromText(paymentOriginal?.value || ''));
+                    if (paymentBalance) paymentBalance.textContent = formatMoney(0, paymentOriginalCurrency?.textContent || 'S/');
                     if (totalRadio) totalRadio.checked = true;
                     if (partialRadio) partialRadio.checked = false;
                     syncPaymentModeUI();
@@ -3004,7 +3517,7 @@
                 if (totalRadio) totalRadio.checked = true;
                 if (partialRadio) partialRadio.checked = false;
                 paymentAmount.value = paymentValue.toFixed(2);
-                paymentBalance.textContent = formatMoney(Math.max(baseAmount - paymentValue, 0), getCurrencySymbolFromText(paymentOriginal?.value || ''));
+                paymentBalance.textContent = formatMoney(Math.max(baseAmount - paymentValue, 0), paymentOriginalCurrency?.textContent || 'S/');
                 syncPaymentModeUI();
             }
 
@@ -3044,6 +3557,9 @@
                 if (!servicePaymentModal || selected.length === 0) {
                     return;
                 }
+                const pendingFlag = document.getElementById('payment-complete-withholding');
+                if (pendingFlag) pendingFlag.value = '0';
+                setWithholdingCompletionModalMode(false);
                 const clients = [...new Set(selected.map((row) => row.dataset.serviceClient))];
                 if (clients.length !== 1) {
                     if (serviceSelectionError) {
@@ -3059,7 +3575,6 @@
                 const total = selected.reduce((sum, row) => sum + Number(row.dataset.serviceAmount || 0), 0);
                 const firstAmountDisplay = selected[0]?.dataset?.serviceAmountDisplay || selected[0]?.dataset?.amountDisplay || '';
                 const detectedSymbol = getCurrencySymbolFromText(firstAmountDisplay || selected[0]?.dataset?.serviceClientAmountDisplay || '');
-                const normalizedAmountDisplay = firstAmountDisplay || `${detectedSymbol} ${total.toFixed(2)}`;
                 const creditCheckbox = document.getElementById('payment-use-credit');
                 if (creditCheckbox) creditCheckbox.checked = false;
                 const creditSummary = document.getElementById('payment-credit-summary');
@@ -3068,7 +3583,22 @@
                 const selectedTypes = [...new Set(selected.map((row) => row.dataset.tipoCobroId).filter(Boolean))];
                 setPaymentType(selectedTypes.length === 1 ? selectedTypes[0] : '');
                 if (paymentClient) paymentClient.value = selected[0].dataset.serviceClientName || '-';
-                if (paymentOriginal) paymentOriginal.value = normalizedAmountDisplay;
+                if (paymentOriginal) paymentOriginal.value = total.toFixed(2);
+                if (paymentOriginalCurrency) paymentOriginalCurrency.textContent = detectedSymbol || 'S/';
+                if (paymentAdvanceMonths) paymentAdvanceMonths.value = '';
+                if (paymentAdvanceMonthsCount) {
+                    paymentAdvanceMonthsCount.value = '';
+                    paymentAdvanceMonthsCount.disabled = true;
+                    paymentAdvanceMonthsCount.required = false;
+                }
+                paymentAdvanceFields?.classList.add('hidden');
+                if (paymentAdvanceToggle) {
+                    paymentAdvanceToggle.textContent = 'Pagar adelantado';
+                    paymentAdvanceToggle.setAttribute('aria-expanded', 'false');
+                    paymentAdvanceToggle.disabled = false;
+                }
+                paymentAmountWasEdited = false;
+                paymentAdvanceSummary?.classList.add('hidden');
                 if (paymentBalance) paymentBalance.textContent = formatMoney(total, detectedSymbol);
                 const totalPaymentRadio = document.querySelector('#service-payment-modal input[name="modo_pago"][value="total"]');
                 if (totalPaymentRadio) totalPaymentRadio.checked = true;
@@ -3080,7 +3610,8 @@
                     paymentAmount.value = total.toFixed(2);
                     paymentAmount.required = false;
                 }
-                document.querySelectorAll('input[name="withholding_decision"]').forEach((radio) => { radio.checked = false; });
+                const withholdingDecision = document.getElementById('payment-withholding-decision');
+                if (withholdingDecision) withholdingDecision.value = '';
                 syncPaymentModeUI();
                 if (paymentConvertedTotalInput) paymentConvertedTotalInput.value = total.toFixed(2);
                 if (paymentExchangeRateInput) paymentExchangeRateInput.value = '';
@@ -3101,7 +3632,8 @@
                     detectedSymbol,
                     'pay',
                     selected.map((row) => row.dataset.serviceId).filter(Boolean),
-                    selected[0]?.dataset.serviceClientName || ''
+                    selected[0]?.dataset.serviceClientName || '',
+                    resolveSelectedCurrencyId()
                 );
                 servicePaymentModal.classList.add('visible');
                 document.body.style.overflow = 'hidden';
@@ -3126,7 +3658,11 @@
             }
 
             function resetServicePaymentForm() {
+                setPaymentViewMode(false);
                 if (servicePaymentForm) servicePaymentForm.reset();
+                const pendingFlag = document.getElementById('payment-complete-withholding');
+                if (pendingFlag) pendingFlag.value = '0';
+                setWithholdingCompletionModalMode(false);
                 const paymentSubmitButton = servicePaymentForm?.querySelector('button[type="submit"]');
                 if (paymentSubmitButton) {
                     paymentSubmitButton.disabled = false;
@@ -3134,6 +3670,22 @@
                 }
                 if (paymentClient) paymentClient.value = '';
                 if (paymentOriginal) paymentOriginal.value = '';
+                if (paymentOriginalCurrency) paymentOriginalCurrency.textContent = 'S/';
+                if (paymentAdvanceMonths) paymentAdvanceMonths.value = '';
+                if (paymentAdvanceMonthsCount) {
+                    paymentAdvanceMonthsCount.value = '';
+                    paymentAdvanceMonthsCount.disabled = true;
+                    paymentAdvanceMonthsCount.required = false;
+                    paymentAdvanceMonthsCount.setCustomValidity('');
+                }
+                paymentAdvanceFields?.classList.add('hidden');
+                if (paymentAdvanceToggle) {
+                    paymentAdvanceToggle.textContent = 'Pagar adelantado';
+                    paymentAdvanceToggle.setAttribute('aria-expanded', 'false');
+                    paymentAdvanceToggle.disabled = false;
+                }
+                paymentAdvanceSummary?.classList.add('hidden');
+                paymentAmountWasEdited = false;
                 if (paymentBalance) paymentBalance.textContent = 'S/ 0.00';
                 if (paymentAmount) {
                     paymentAmount.value = '';
@@ -3148,7 +3700,8 @@
                 const paymentMonedaIdInput = document.getElementById('payment-moneda-id');
                 if (paymentMonedaIdInput) paymentMonedaIdInput.value = '';
                 if (partialPaymentField) partialPaymentField.classList.add('hidden');
-                document.querySelectorAll('input[name="withholding_decision"]').forEach((radio) => { radio.checked = false; });
+                const withholdingDecision = document.getElementById('payment-withholding-decision');
+                if (withholdingDecision) withholdingDecision.value = '';
                 const sameCurrencyMode = document.querySelector('#service-payment-modal input[name="payment_currency_mode"][value="same"]');
                 const totalPaymentRadio = document.querySelector('#service-payment-modal input[name="modo_pago"][value="total"]');
                 if (sameCurrencyMode) sameCurrencyMode.checked = true;
@@ -3164,14 +3717,23 @@
                 const paymentComprobanteName = document.getElementById('payment-comprobante-name');
                 if (paymentComprobanteInput) paymentComprobanteInput.value = '';
                 if (paymentComprobanteName) paymentComprobanteName.textContent = '';
+                document.getElementById('payment-clear-comprobante')?.classList.add('hidden');
+                const existingProof = document.getElementById('payment-existing-proof');
+                if (existingProof) {
+                    existingProof.replaceChildren();
+                    existingProof.classList.add('hidden');
+                }
+                document.getElementById('payment-withholding-receipt-view')?.classList.add('hidden');
+                document.getElementById('payment-withholding-receipt-missing')?.classList.add('hidden');
                 const paymentDropzone = document.getElementById('payment-dropzone');
                 if (paymentDropzone) paymentDropzone.classList.remove('is-invalid');
-                const paymentDescription = document.getElementById('payment-description');
+                const paymentDescription = servicePaymentForm?.querySelector('#payment-description');
                 if (paymentDescription) paymentDescription.value = '';
             }
 
             function closeServicePaymentModal() {
                 if (!servicePaymentModal) return;
+                paymentDetailsRequestToken++;
                 resetServicePaymentForm();
                 servicePaymentModal.classList.remove('visible');
                 servicePaymentModal.classList.add('hidden');
@@ -3192,7 +3754,14 @@
                     if (paymentAmount) paymentAmount.required = isPartial;
                     if (event.target.value === 'total') {
                         if (paymentAmount) paymentAmount.value = getPaymentBaseAmount().toFixed(2);
-                        updateBalanceAndCreditDisplay(getPaymentBaseAmount(), 0, 'payment-balance', 'payment-credit-summary', getCurrencySymbolFromText(paymentOriginal?.value || ''));
+                        updateBalanceAndCreditDisplay(
+                            getPaymentBaseAmount(),
+                            0,
+                            'payment-balance',
+                            'payment-credit-summary',
+                            paymentOriginalCurrency?.textContent || 'S/',
+                            Number(servicePaymentModal?.dataset.grossAmount || getPaymentBaseAmount())
+                        );
                     }
                 }
                 if (event.target.matches('input[name="payment_currency_mode"]')) {
@@ -3201,7 +3770,7 @@
                     if (!isOther) {
                         paymentConvertedTotalInput.value = getPaymentBaseAmount().toFixed(2);
                         paymentAmount.value = getPaymentBaseAmount().toFixed(2);
-                        paymentBalance.textContent = formatMoney(0, getCurrencySymbolFromText(paymentOriginal?.value || ''));
+                        paymentBalance.textContent = formatMoney(0, paymentOriginalCurrency?.textContent || 'S/');
                         syncPaymentModeUI();
                     } else {
                         updateConvertedPaymentAmount();
@@ -3221,18 +3790,30 @@
             openServicePayment?.addEventListener('click', openServicePaymentModal);
             document.addEventListener('click', function (event) {
                 if (event.target.closest('[data-close-service-payment]')) closeServicePaymentModal();
+                const receiptButton = event.target.closest('[data-open-service-withholding-receipt]');
+                if (receiptButton) {
+                    const receiptUrl = receiptButton.dataset.receiptUrl || '';
+                    const missing = document.getElementById('payment-withholding-receipt-missing');
+                    if (receiptUrl) {
+                        window.open(receiptUrl, '_blank', 'noopener');
+                    } else if (missing) {
+                        missing.textContent = receiptButton.dataset.missingMessage || 'Sin recibo de detracción/retención';
+                        missing.classList.remove('hidden');
+                    }
+                }
             });
             paymentAmount?.addEventListener('input', function () {
                 const total = Number(paymentOriginal?.value.replace(/[^0-9.-]+/g, '') || 0);
                 const paid = Math.max(Number(paymentAmount.value || 0), 0);
-                const currentSymbol = getCurrencySymbolFromText(paymentOriginal?.value || '');
-                updateBalanceAndCreditDisplay(total, paid, 'payment-balance', 'payment-credit-summary', currentSymbol);
-                syncWithholdingDecisionUI();
-            });
-            document.querySelectorAll('input[name="withholding_decision"]').forEach((radio) => {
-                radio.addEventListener('change', function () {
-                    syncWithholdingDecisionUI();
-                });
+                const currentSymbol = paymentOriginalCurrency?.textContent || 'S/';
+                updateBalanceAndCreditDisplay(
+                    total,
+                    paid,
+                    'payment-balance',
+                    'payment-credit-summary',
+                    currentSymbol,
+                    Number(servicePaymentModal?.dataset.grossAmount || total)
+                );
             });
             paymentCurrencyModeInputs?.forEach(function (input) {
                 input.addEventListener('change', function () {
@@ -3254,8 +3835,389 @@
             });
             paymentExchangeRateInput?.addEventListener('input', updateConvertedPaymentAmount);
             paymentConvertedAmountInput?.addEventListener('input', updateConvertedPaymentAmount);
+
+            let withholdingWarningConfirm;
+            let quotationWithholdingSubmit = null;
+            const quotationWithholdingProofModal = document.getElementById('quotation-withholding-proof-modal');
+            const quotationWithholdingProofInput = document.getElementById('quotation-withholding-proof');
+            const quotationWithholdingProofName = document.getElementById('quotation-withholding-proof-name');
+            const quotationWithholdingProofBox = document.getElementById('quotation-withholding-proof-box');
+
+            function showWithholdingWarning(grossAmount, isRetention, decisionInput, onConfirm, currencySymbol = '', subject = 'periodo') {
+                const modal = document.getElementById('withholding-warning-modal');
+                const message = document.getElementById('withholding-warning-message');
+                const payment = document.getElementById('withholding-warning-payment');
+                const title = document.getElementById('withholding-warning-title');
+                const deductionAmount = calculateDeduction(grossAmount, isRetention);
+                const deductionName = isRetention ? 'Retención' : 'Detracción';
+                const symbol = currencySymbol || currentVencidosState.currencySymbol || 'S/';
+                if (!modal || !message || !payment || !decisionInput) return;
+
+                if (title) title.textContent = `Confirmación de ${deductionName}`;
+                message.replaceChildren(
+                    document.createTextNode(`¿El cliente ya pagó la ${deductionName} de `)
+                );
+                const highlightedAmount = document.createElement('span');
+                highlightedAmount.className = 'font-bold text-danger';
+                highlightedAmount.textContent = formatMoney(deductionAmount, symbol);
+                message.append(highlightedAmount, document.createTextNode(subject === 'cotización' ? '?' : ' de este periodo?'));
+                const withholdingType = isRetention ? 'Pendiente a Retención' : 'Pendiente a Detracción';
+                const paidAmountText = `Monto de la ${subject}: ${formatMoney(grossAmount, symbol)}. Monto a pagar: ${formatMoney(calculateNetPayable(grossAmount, isRetention), symbol)}.`;
+                payment.textContent = subject === 'cotización'
+                    ? `${paidAmountText} Si responde Sí, la cotización quedará aprobada. Si responde No, quedará como ${withholdingType} hasta registrar la ${deductionName}.`
+                    : `${paidAmountText} Si responde No, el periodo quedará como ${withholdingType} hasta cargar el comprobante.`;
+                withholdingWarningConfirm = (answer) => {
+                    const enteredAmount = Number(onConfirm.getEnteredAmount() || 0);
+                    const netAmount = Number(onConfirm.getNetAmount() || 0);
+                    const grossAmountDue = Number(onConfirm.getGrossAmount?.() ?? grossAmount);
+                    if (enteredAmount + 0.01 < netAmount) {
+                        alert(`El monto pagado debe ser al menos el neto calculado de ${formatMoney(netAmount, symbol)}.`);
+                        return;
+                    }
+                    if (answer === 'no' && enteredAmount > netAmount + 0.01
+                        && enteredAmount + 0.01 < grossAmountDue) {
+                        alert(`Si la ${deductionName.toLowerCase()} aún no fue pagada, el monto debe ser el neto (${formatMoney(netAmount, symbol)}) o el bruto completo (${formatMoney(grossAmountDue, symbol)}).`);
+                        return;
+                    }
+
+                    decisionInput.value = answer === 'yes'
+                        ? 'paid'
+                        : (enteredAmount + 0.01 >= grossAmountDue
+                            ? 'full_pending'
+                            : 'pending');
+                    modal.classList.add('hidden');
+                    modal.classList.remove('visible');
+                    document.body.style.overflow = '';
+                    if (answer === 'yes' && typeof onConfirm.onPaid === 'function') {
+                        quotationWithholdingSubmit = onConfirm.submit;
+                        onConfirm.onPaid();
+                        return;
+                    }
+                    withholdingWarningConfirm = null;
+                    quotationWithholdingSubmit = null;
+                    onConfirm.submit();
+                };
+                modal.classList.remove('hidden');
+                modal.classList.add('visible');
+                document.body.style.overflow = 'hidden';
+            }
+
+            document.querySelectorAll('[data-withholding-answer]').forEach((button) => {
+                button.addEventListener('click', () => withholdingWarningConfirm?.(button.dataset.withholdingAnswer));
+            });
+            document.querySelectorAll('[data-close-withholding-warning]').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const modal = document.getElementById('withholding-warning-modal');
+                    modal?.classList.add('hidden');
+                    modal?.classList.remove('visible');
+                    document.body.style.overflow = '';
+                    withholdingWarningConfirm = null;
+                    quotationWithholdingSubmit = null;
+                });
+            });
+
+            function openQuotationWithholdingProof() {
+                const warningModal = document.getElementById('withholding-warning-modal');
+                const decisionInput = document.getElementById('erp-gestion-withholding-decision');
+                const dateInput = document.getElementById('quotation-withholding-date');
+                const amountDisplay = document.getElementById('quotation-withholding-amount');
+                const typeDisplay = document.getElementById('quotation-withholding-type');
+                const titleDisplay = document.getElementById('quotation-withholding-proof-title');
+                const dateLabel = document.getElementById('quotation-withholding-date-label');
+                const amountLabel = document.getElementById('quotation-withholding-amount-label');
+                const uploadTitle = quotationWithholdingProofBox?.querySelector('[data-quotation-withholding-upload-title]');
+                const paymentDate = document.getElementById('erp-gestion-date');
+                if (!quotationWithholdingProofModal || !quotationWithholdingProofInput || !decisionInput) return;
+
+                quotationWithholdingProofModal.dataset.targetForm = 'quotation';
+                quotationWithholdingProofInput.name = 'comprobante_detraccion';
+                quotationWithholdingProofInput.setAttribute('form', 'erp-gestion-form');
+                dateInput?.setAttribute('form', 'erp-gestion-form');
+                if (dateInput) dateInput.name = 'fecha_detraccion';
+                document.getElementById('quotation-withholding-description')?.setAttribute('form', 'erp-gestion-form');
+                const withholdingDescription = document.getElementById('quotation-withholding-description');
+                if (withholdingDescription) withholdingDescription.name = 'descripcion_detraccion';
+                decisionInput.value = '';
+                if (dateInput) dateInput.value = paymentDate?.value || new Date().toISOString().slice(0, 10);
+                const withholdingType = gestionWithholdingType === 'retención' ? 'retención' : 'detracción';
+                if (amountDisplay) {
+                    const symbol = document.getElementById('erp-gestion-amount-currency')?.textContent
+                        || document.getElementById('erp-gestion-payment-amount-currency')?.textContent
+                        || 'S/';
+                    amountDisplay.textContent = `${symbol} ${Number(gestionDeductionAmount || 0).toFixed(2)}`;
+                }
+                if (typeDisplay) {
+                    typeDisplay.textContent = `Comprobante de ${withholdingType}`;
+                }
+                if (titleDisplay) {
+                    titleDisplay.textContent = `Cargar comprobante de ${withholdingType}`;
+                }
+                if (dateLabel) dateLabel.textContent = `Fecha de pago de ${withholdingType}`;
+                if (amountLabel) amountLabel.textContent = `Monto ${withholdingType}`;
+                if (uploadTitle) uploadTitle.textContent = `Cargar el archivo de ${withholdingType}`;
+                quotationWithholdingProofInput.value = '';
+                if (quotationWithholdingProofName) quotationWithholdingProofName.textContent = '';
+                const descriptionInput = document.getElementById('quotation-withholding-description');
+                if (descriptionInput) {
+                    descriptionInput.value = '';
+                    descriptionInput.placeholder = `Describe sobre el depósito de ${withholdingType}...`;
+                }
+                quotationWithholdingProofBox?.classList.remove('is-invalid');
+                warningModal?.classList.add('hidden');
+                warningModal?.classList.remove('visible');
+                quotationWithholdingProofModal.classList.remove('hidden');
+                quotationWithholdingProofModal.classList.add('visible');
+                document.body.style.overflow = 'hidden';
+            }
+
+            function openServiceWithholdingProof() {
+                if (!quotationWithholdingProofModal || !quotationWithholdingProofInput || !servicePaymentForm) return;
+
+                const grossAmount = currentVencidosState.baseAmount + currentVencidosState.selectedIds.reduce((total, id) => {
+                    const cxc = currentVencidosState.cxcs.find((item) => String(item.idcuentasPorCobrar) === String(id));
+                    return total + Number(cxc?.montoActual || 0);
+                }, 0);
+                const isRetention = !!currentVencidosState.esRetencion;
+                const withholdingType = isRetention ? 'retención' : 'detracción';
+                const withholdingTitle = isRetention ? 'Retención' : 'Detracción';
+                const symbol = currentVencidosState.currencySymbol || paymentOriginalCurrency?.textContent || 'S/';
+                const dateInput = document.getElementById('quotation-withholding-date');
+                const paymentDate = document.getElementById('payment-date');
+                const amountDisplay = document.getElementById('quotation-withholding-amount');
+                const typeDisplay = document.getElementById('quotation-withholding-type');
+                const titleDisplay = document.getElementById('quotation-withholding-proof-title');
+                const dateLabel = document.getElementById('quotation-withholding-date-label');
+                const amountLabel = document.getElementById('quotation-withholding-amount-label');
+                const uploadTitle = quotationWithholdingProofBox?.querySelector('[data-quotation-withholding-upload-title]');
+                const descriptionInput = document.getElementById('quotation-withholding-description');
+
+                quotationWithholdingProofModal.dataset.targetForm = 'service';
+                quotationWithholdingProofInput.name = 'withholding_proof';
+                quotationWithholdingProofInput.setAttribute('form', 'service-payment-form');
+                if (dateInput) {
+                    dateInput.name = 'withholding_fecha';
+                    dateInput.setAttribute('form', 'service-payment-form');
+                    dateInput.value = paymentDate?.value || new Date().toISOString().slice(0, 10);
+                }
+                if (descriptionInput) {
+                    descriptionInput.name = 'withholding_description';
+                    descriptionInput.setAttribute('form', 'service-payment-form');
+                    descriptionInput.value = '';
+                    descriptionInput.placeholder = `Describe sobre el depósito de ${withholdingType}...`;
+                }
+                if (amountDisplay) amountDisplay.textContent = formatMoney(calculateDeduction(grossAmount, isRetention), symbol);
+                if (typeDisplay) typeDisplay.textContent = `Comprobante de ${withholdingType}`;
+                if (titleDisplay) titleDisplay.textContent = `Cargar comprobante de ${withholdingType}`;
+                if (dateLabel) dateLabel.textContent = `Fecha de pago de ${withholdingType}`;
+                if (amountLabel) amountLabel.textContent = `Monto ${withholdingType}`;
+                if (uploadTitle) uploadTitle.textContent = `Cargar el archivo de ${withholdingType}`;
+                quotationWithholdingProofInput.value = '';
+                if (quotationWithholdingProofName) quotationWithholdingProofName.textContent = '';
+                quotationWithholdingProofBox?.classList.remove('is-invalid');
+                quotationWithholdingProofModal.classList.remove('hidden');
+                quotationWithholdingProofModal.classList.add('visible');
+                document.body.style.overflow = 'hidden';
+                const modalTitle = document.getElementById('quotation-withholding-proof-title');
+                if (modalTitle) modalTitle.textContent = `Cargar comprobante de ${withholdingTitle}`;
+            }
+
+            function openFacturaWithholdingProof() {
+                if (!quotationWithholdingProofModal || !quotationWithholdingProofInput || !serviceFacturaForm) return;
+
+                const grossAmount = Number(facturaModal?.dataset.grossAmount || 0);
+                const isRetention = !!currentVencidosState.esRetencion;
+                const withholdingType = isRetention ? 'retención' : 'detracción';
+                const withholdingTitle = isRetention ? 'Retención' : 'Detracción';
+                const symbol = currentVencidosState.currencySymbol || facturaModal?.dataset.currencySymbol || 'S/';
+                const dateInput = document.getElementById('quotation-withholding-date');
+                const paymentDate = document.getElementById('factura-payment-date');
+                const amountDisplay = document.getElementById('quotation-withholding-amount');
+                const typeDisplay = document.getElementById('quotation-withholding-type');
+                const titleDisplay = document.getElementById('quotation-withholding-proof-title');
+                const dateLabel = document.getElementById('quotation-withholding-date-label');
+                const amountLabel = document.getElementById('quotation-withholding-amount-label');
+                const uploadTitle = quotationWithholdingProofBox?.querySelector('[data-quotation-withholding-upload-title]');
+                const descriptionInput = document.getElementById('quotation-withholding-description');
+
+                quotationWithholdingProofModal.dataset.targetForm = 'factura';
+                quotationWithholdingProofInput.name = 'withholding_proof';
+                quotationWithholdingProofInput.setAttribute('form', 'service-factura-form');
+                if (dateInput) {
+                    dateInput.name = 'withholding_fecha';
+                    dateInput.setAttribute('form', 'service-factura-form');
+                    dateInput.value = paymentDate?.value || new Date().toISOString().slice(0, 10);
+                }
+                if (descriptionInput) {
+                    descriptionInput.name = 'withholding_description';
+                    descriptionInput.setAttribute('form', 'service-factura-form');
+                    descriptionInput.value = '';
+                    descriptionInput.placeholder = `Describe sobre el depósito de ${withholdingType}...`;
+                }
+                if (amountDisplay) amountDisplay.textContent = formatMoney(calculateDeduction(grossAmount, isRetention), symbol);
+                if (typeDisplay) typeDisplay.textContent = `Comprobante de ${withholdingType}`;
+                if (titleDisplay) titleDisplay.textContent = `Cargar comprobante de ${withholdingType}`;
+                if (dateLabel) dateLabel.textContent = `Fecha de pago de ${withholdingType}`;
+                if (amountLabel) amountLabel.textContent = `Monto ${withholdingType}`;
+                if (uploadTitle) uploadTitle.textContent = `Cargar el archivo de ${withholdingType}`;
+                quotationWithholdingProofInput.value = '';
+                if (quotationWithholdingProofName) quotationWithholdingProofName.textContent = '';
+                quotationWithholdingProofBox?.classList.remove('is-invalid');
+                document.getElementById('withholding-warning-modal')?.classList.add('hidden');
+                document.getElementById('withholding-warning-modal')?.classList.remove('visible');
+                quotationWithholdingProofModal.classList.remove('hidden');
+                quotationWithholdingProofModal.classList.add('visible');
+                document.body.style.overflow = 'hidden';
+                if (titleDisplay) titleDisplay.textContent = `Cargar comprobante de ${withholdingTitle}`;
+            }
+
+            function returnToWithholdingWarning() {
+                quotationWithholdingProofModal?.classList.add('hidden');
+                quotationWithholdingProofModal?.classList.remove('visible');
+                const warningModal = document.getElementById('withholding-warning-modal');
+                warningModal?.classList.remove('hidden');
+                warningModal?.classList.add('visible');
+                document.body.style.overflow = 'hidden';
+            }
+
+            quotationWithholdingProofInput?.addEventListener('change', function () {
+                setQuotationWithholdingProof(this.files?.[0]);
+            });
+            function setQuotationWithholdingProof(file) {
+                if (!file || !quotationWithholdingProofInput) return;
+                const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
+                if (!allowedTypes.includes(file.type) || file.size > 5 * 1024 * 1024) {
+                    quotationWithholdingProofInput.value = '';
+                    if (quotationWithholdingProofName) {
+                        quotationWithholdingProofName.textContent = 'Selecciona un JPG, PNG o PDF de máximo 5 MB.';
+                    }
+                    quotationWithholdingProofBox?.classList.add('is-invalid');
+                    return;
+                }
+                const transfer = new DataTransfer();
+                transfer.items.add(file);
+                quotationWithholdingProofInput.files = transfer.files;
+                if (quotationWithholdingProofName) quotationWithholdingProofName.textContent = file.name;
+                quotationWithholdingProofBox?.classList.remove('is-invalid');
+            }
+            if (quotationWithholdingProofBox) {
+                ['dragenter', 'dragover'].forEach((eventName) => {
+                    quotationWithholdingProofBox.addEventListener(eventName, (event) => {
+                        event.preventDefault();
+                        quotationWithholdingProofBox.classList.add('is-dragging');
+                    });
+                });
+                ['dragleave', 'drop'].forEach((eventName) => {
+                    quotationWithholdingProofBox.addEventListener(eventName, (event) => {
+                        event.preventDefault();
+                        quotationWithholdingProofBox.classList.remove('is-dragging');
+                    });
+                });
+                quotationWithholdingProofBox.addEventListener('drop', (event) => {
+                    setQuotationWithholdingProof(event.dataTransfer?.files?.[0]);
+                });
+            }
+            document.addEventListener('paste', function (event) {
+                if (!quotationWithholdingProofModal?.classList.contains('visible')) return;
+                const pastedItem = Array.from(event.clipboardData?.items || [])
+                    .find((item) => item.kind === 'file');
+                if (pastedItem) {
+                    event.preventDefault();
+                    setQuotationWithholdingProof(pastedItem.getAsFile());
+                }
+            });
+            document.querySelectorAll('[data-cancel-quotation-withholding]').forEach((button) => {
+                button.addEventListener('click', returnToWithholdingWarning);
+            });
+            document.getElementById('quotation-withholding-proof-save')?.addEventListener('click', function () {
+                const proofFile = quotationWithholdingProofInput?.files?.[0];
+                const proofDate = document.getElementById('quotation-withholding-date');
+                if (!proofFile) {
+                    alert('Debe cargar el comprobante de detracción/retención.');
+                    quotationWithholdingProofInput?.focus();
+                    return;
+                }
+                if (!proofDate?.value) {
+                    alert('Debe indicar la fecha de pago de la detracción/retención.');
+                    proofDate?.focus();
+                    return;
+                }
+
+                const proofTarget = quotationWithholdingProofModal?.dataset.targetForm;
+                const decisionInput = document.getElementById(proofTarget === 'service'
+                    ? 'payment-withholding-decision'
+                    : proofTarget === 'factura'
+                        ? 'factura-withholding-decision'
+                        : 'erp-gestion-withholding-decision');
+                if (decisionInput) decisionInput.value = 'paid';
+                quotationWithholdingProofModal?.classList.add('hidden');
+                quotationWithholdingProofModal?.classList.remove('visible');
+                document.body.style.overflow = '';
+                withholdingWarningConfirm = null;
+                const submit = quotationWithholdingSubmit;
+                quotationWithholdingSubmit = null;
+                submit?.();
+            });
+
             servicePaymentForm?.addEventListener('submit', function (event) {
                 event.preventDefault();
+
+                if (servicePaymentModal?.dataset.paymentViewMode === '1') {
+                    if (servicePaymentModal.dataset.paymentEditing !== '1') return;
+
+                    const submitButton = document.getElementById('payment-submit-btn');
+                    if (submitButton) {
+                        submitButton.disabled = true;
+                        submitButton.textContent = 'Guardando cambios...';
+                    }
+                    const updateUrl = paymentDetailsUpdateUrlTemplate.replace(
+                        '__id__',
+                        encodeURIComponent(servicePaymentModal.dataset.paymentCxcId || '')
+                    );
+                    const updateData = new FormData(servicePaymentForm);
+                    updateData.set('_method', 'PATCH');
+                    fetch(updateUrl, {
+                        method: 'POST',
+                        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: updateData
+                    })
+                        .then(async (response) => {
+                            const result = await response.json();
+                            if (!response.ok || !result.success) {
+                                throw new Error(result.message || 'No se pudieron actualizar los datos del pago.');
+                            }
+                            await loadPaymentDetails(servicePaymentModal.dataset.paymentCxcId);
+                            setPaymentViewMode(true, false);
+                        })
+                        .catch((error) => alert(error.message || 'No se pudieron actualizar los datos del pago.'))
+                        .finally(() => {
+                            if (submitButton) {
+                                submitButton.disabled = false;
+                                submitButton.textContent = 'Guardar cambios';
+                            }
+                        });
+                    return;
+                }
+
+                const isPendingWithholdingCompletion = document.getElementById('payment-complete-withholding')?.value === '1';
+                if (isPendingWithholdingCompletion) {
+                    if (!paymentComprobanteInput?.files?.length) {
+                        paymentComprobanteInput?.setCustomValidity('Adjunta el comprobante de pago al Banco de la Nación.');
+                        paymentComprobanteInput?.reportValidity();
+                        return;
+                    }
+                    paymentComprobanteInput.setCustomValidity('');
+                    if (!servicePaymentForm.checkValidity()) {
+                        servicePaymentForm.reportValidity();
+                        return;
+                    }
+                    const submitButton = servicePaymentForm.querySelector('button[type="submit"]');
+                    if (submitButton) {
+                        submitButton.disabled = true;
+                        submitButton.textContent = 'Registrando comprobante...';
+                    }
+                    servicePaymentForm.submit();
+                    return;
+                }
 
                 const selectedRows = selectedServiceRows();
                 const hasHiddenServices = selectedServiceInputs && selectedServiceInputs.children.length > 0;
@@ -3276,29 +4238,55 @@
                 }
 
                 const isTotalPayment = document.querySelector('#service-payment-modal input[name="modo_pago"][value="total"]')?.checked;
+                const usesOtherPaymentCurrency = document.querySelector('#service-payment-modal input[name="payment_currency_mode"][value="other"]')?.checked;
                 if (isTotalPayment && paymentAmount) {
-                    const baseTotal = Number((paymentOriginal?.value || '').replace(/[^0-9.-]+/g, '') || 0);
+                    const baseTotal = Number(
+                        !usesOtherPaymentCurrency && servicePaymentModal?.dataset.expectedCashDue
+                            ? servicePaymentModal.dataset.expectedCashDue
+                            : (paymentOriginal?.value || '').replace(/[^0-9.-]+/g, '') || 0
+                    );
                     paymentAmount.value = Number.isFinite(baseTotal) ? baseTotal.toFixed(2) : (paymentAmount.value || '0.00');
                 }
 
-                const grossValue = Number(String(paymentOriginal?.value || '').replace(/[^0-9.-]+/g, '') || 0);
-                if (grossValue > 700) {
-                    const selectedDecision = document.querySelector('input[name="withholding_decision"]:checked');
-                    if (!selectedDecision) {
-                        const decisionGroup = document.getElementById('payment-withholding-decision-group');
-                        decisionGroup?.classList.remove('hidden');
-                        alert('Confirma si la detracción/retención ya fue pagada antes de guardar.');
+                const paymentDecision = document.getElementById('payment-withholding-decision');
+                const selectedAmount = currentVencidosState.selectedIds.reduce((total, id) => {
+                    const cxc = currentVencidosState.cxcs.find((item) => String(item.idcuentasPorCobrar) === String(id));
+                    return total + Number(cxc?.montoActual || 0);
+                }, 0);
+                const gross = currentVencidosState.baseAmount + selectedAmount;
+                if (gross > 700 && !paymentDecision?.value) {
+                    const paymentTotal = Number(paymentAmount?.value || 0);
+                    const isTotal = document.querySelector('#service-payment-modal input[name="modo_pago"][value="total"]')?.checked;
+                    const selectedNotesAmount = selectedCreditNotesAmount('payment');
+                    const bankCreditAmount = document.getElementById('payment-use-credit')?.checked
+                        ? currentVencidosState.saldoFavorDisponible
+                        : 0;
+                    const creditApplied = Math.min(
+                        calculateNetPayable(gross, currentVencidosState.esRetencion),
+                        selectedNotesAmount + bankCreditAmount
+                    );
+                    const cashDue = Math.max(calculateNetPayable(gross, currentVencidosState.esRetencion) - creditApplied, 0);
+                    const grossDue = Math.max(gross - creditApplied, 0);
+                    const cashEntered = isTotal && !usesOtherPaymentCurrency
+                        ? Number(servicePaymentModal?.dataset.expectedCashDue || paymentTotal)
+                        : paymentTotal;
+                    if (isTotal && cashEntered + 0.01 < cashDue) {
+                        alert(`El monto pagado debe ser al menos el neto calculado de ${formatMoney(cashDue, currentVencidosState.currencySymbol)}.`);
+                        return;
+                    }
+                    if (Math.abs(cashEntered - grossDue) <= 0.01) {
+                        paymentDecision.value = 'full_pending';
+                    } else if (isTotal || cashEntered + 0.01 >= cashDue) {
+                        showWithholdingWarning(gross, currentVencidosState.esRetencion, paymentDecision, {
+                            getEnteredAmount: () => isTotal ? paymentTotal : Number(paymentAmount?.value || 0),
+                            getNetAmount: () => cashDue,
+                            getGrossAmount: () => grossDue,
+                            submit: () => servicePaymentForm.requestSubmit(),
+                            onPaid: openServiceWithholdingProof
+                        });
                         return;
                     }
                 }
-
-                const fileInput = document.getElementById('payment-comprobante');
-                if (fileInput && !fileInput.files?.length) {
-                    fileInput.setCustomValidity('Debes adjuntar el comprobante de pago.');
-                    fileInput.reportValidity();
-                    return;
-                }
-                if (fileInput) fileInput.setCustomValidity('');
 
                 if (!servicePaymentForm.checkValidity()) {
                     servicePaymentForm.reportValidity();
@@ -3522,13 +4510,20 @@
             const facturaRealizarCobroInput = document.getElementById('factura-realizar-cobro-input');
             const facturaSubmitBtn = document.getElementById('factura-submit-btn');
             const facturaModal = document.getElementById('service-factura-modal');
+            const facturaClientField = document.getElementById('factura-client-field');
             const facturaAdvanceToggle = document.getElementById('btn-factura-advance-toggle');
             const facturaAdvanceFields = document.getElementById('factura-advance-fields');
             const facturaAdvanceMonths = document.getElementById('factura-advance-months');
             const facturaAmountDisplay = document.getElementById('factura-amount');
             const facturaAmountCurrency = document.getElementById('factura-amount-currency');
+            const paymentAdvanceToggle = document.getElementById('btn-payment-advance-toggle');
+            const paymentAdvanceFields = document.getElementById('payment-advance-fields');
+            const paymentAdvanceMonthsCount = document.getElementById('payment-advance-months-count');
+            const paymentAdvanceMonths = document.getElementById('payment-advance-months');
+            const paymentOriginalCurrency = document.getElementById('payment-original-currency');
+            const paymentAdvanceSummary = document.getElementById('payment-advance-summary');
             let facturaAmountWasEdited = false;
-            let facturaManualUnitAmount = null;
+            let paymentAmountWasEdited = false;
 
             function isCreditPayment(select) {
                 const option = select?.selectedOptions?.[0];
@@ -3550,7 +4545,7 @@
                     const dueDate = new Date(firstDate);
                     dueDate.setDate(firstDate.getDate() + (creditDays * (index - 1)));
                     const row = document.createElement('div');
-                    row.className = 'mb-2';
+                    row.className = 'mb-2 ';
                     row.innerHTML = `
                                                         <span class="mb-1 block text-xs font-bold text-slate-600">Cuota ${index}</span>
                                                         <div class="grid grid-cols-2 gap-1.5">
@@ -3657,6 +4652,28 @@
                 if (facturaModeDesc) facturaModeDesc.textContent = isFacturarYCancelar
                     ? 'Factura y procesa el pago en un solo paso (Estado cambiará a CANCELADO)'
                     : 'Estado cambiará a FACTURADO. Activa el switch si deseas Facturar y Cancelar a la vez.';
+                facturaClientField?.classList.toggle('sm:col-span-2', !isFacturarYCancelar);
+                if (facturaAmountDisplay) facturaAmountDisplay.readOnly = !isFacturarYCancelar;
+                if (facturaAmountDisplay) facturaAmountDisplay.classList.toggle('bg-slate-50', !isFacturarYCancelar);
+                if (facturaAdvanceToggle) facturaAdvanceToggle.classList.toggle('hidden', !isFacturarYCancelar);
+                const facturaPeriodsButton = document.getElementById('btn-factura-periodos-vencidos');
+                facturaPeriodsButton?.classList.toggle('hidden', !isFacturarYCancelar);
+                const facturaCreditNoteButton = document.getElementById('factura-select-credit-note');
+                facturaCreditNoteButton?.classList.toggle('hidden', !isFacturarYCancelar);
+                if (!isFacturarYCancelar) {
+                    facturaAdvanceFields?.classList.add('hidden');
+                    if (facturaAdvanceToggle) {
+                        facturaAdvanceToggle.textContent = 'Pagar adelantado';
+                        facturaAdvanceToggle.setAttribute('aria-expanded', 'false');
+                    }
+                    if (facturaAdvanceMonths) {
+                        facturaAdvanceMonths.value = '';
+                        facturaAdvanceMonths.disabled = true;
+                    }
+                    facturaAmountWasEdited = false;
+                } else {
+                    applyDeductionLogic();
+                }
                 if (facturaCobroExtraSection) {
                     facturaCobroExtraSection.setAttribute('aria-hidden', isFacturarYCancelar ? 'false' : 'true');
                 }
@@ -3674,29 +4691,10 @@
                 if (paymentTypeSelect) paymentTypeSelect.required = isFacturarYCancelar;
                 if (paymentMethodSelect) paymentMethodSelect.required = isFacturarYCancelar;
                 if (paymentBankSelect) paymentBankSelect.required = isFacturarYCancelar;
-                if (paymentDescTextarea) paymentDescTextarea.required = isFacturarYCancelar;
+                if (paymentDescTextarea) paymentDescTextarea.required = false;
                 document.getElementById('factura-payment-date-field')?.classList.toggle('hidden', !isFacturarYCancelar);
                 const facturaPeriodEnd = document.getElementById('factura-period-end');
                 if (facturaPeriodEnd) facturaPeriodEnd.required = isFacturarYCancelar;
-                updateFacturaWithholdingDecisionUI(isFacturarYCancelar);
-            }
-
-            function updateFacturaWithholdingDecisionUI(
-                isFacturarYCancelar = facturaModeToggle?.dataset.mode === 'cancelar',
-                grossAmount = null
-            ) {
-                const group = document.getElementById('factura-withholding-decision-group');
-                const invoiceAmount = Number(
-                    grossAmount ?? facturaModal?.dataset.grossAmount
-                    ?? document.getElementById('factura-invoice-amount')?.value
-                    ?? 0
-                );
-                const shouldShow = isFacturarYCancelar && invoiceAmount > 700;
-                group?.classList.toggle('hidden', !shouldShow);
-                if (!shouldShow) {
-                    document.querySelectorAll('input[name="factura_withholding_decision"]')
-                        .forEach((radio) => { radio.checked = false; });
-                }
             }
 
             facturaModeToggle?.addEventListener('click', function () {
@@ -3732,16 +4730,32 @@
                 targetModal: 'pay',
                 selectedIds: [],
                 esRetencion: false,
-                saldoFavorDisponible: 0
+                saldoFavorDisponible: 0,
+                monedaId: '',
+                notasCredito: [],
+                notaCreditoSeleccionadaId: '',
+                notasCreditoCargadas: false,
+                errorNotasCredito: false
             };
+            let creditNotesRequestToken = 0;
+            let pendingCreditNoteId = '';
+            let creditNoteModalPrefix = 'payment';
+            const creditNotesUrlTemplate = @json(route('modules.cuentasporcobrar.cliente.notas-credito', ['id' => '__CLIENT__']));
 
             function resetVencidosState() {
                 const btnPay = document.getElementById('btn-periodos-vencidos');
                 const btnFactura = document.getElementById('btn-factura-periodos-vencidos');
+                const notePay = document.getElementById('payment-select-credit-note');
+                const noteFactura = document.getElementById('factura-select-credit-note');
                 [btnPay, btnFactura].forEach((button) => {
                     if (!button) return;
                     button.disabled = false;
                     button.textContent = 'P. vencidos';
+                });
+                [notePay, noteFactura].forEach((button) => {
+                    if (!button) return;
+                    button.disabled = false;
+                    button.textContent = 'N. crédito';
                 });
                 currentVencidosState.cxcs = [];
                 currentVencidosState.baseCxcId = '';
@@ -3749,6 +4763,178 @@
                 currentVencidosState.clientId = '';
                 currentVencidosState.serviceIds = [];
                 currentVencidosState.selectedIds = [];
+                currentVencidosState.monedaId = '';
+                currentVencidosState.notasCredito = [];
+                currentVencidosState.notaCreditoSeleccionadaId = '';
+                currentVencidosState.notasCreditoCargadas = false;
+                currentVencidosState.errorNotasCredito = false;
+                ['factura', 'payment'].forEach((prefix) => {
+                    const selectedInput = document.getElementById(`${prefix}-credit-note-id`);
+                    if (selectedInput) {
+                        selectedInput.value = '';
+                        selectedInput.disabled = true;
+                    }
+                });
+            }
+
+            function selectedCreditNotesAmount(prefix) {
+                const selectedInput = document.getElementById(`${prefix}-credit-note-id`);
+                const selectedId = selectedInput?.value || '';
+                const note = currentVencidosState.notasCredito.find(
+                    (item) => String(item.idnotacredito) === String(selectedId)
+                );
+                return note ? Number(note.monto_disponible || 0) : 0;
+            }
+
+            async function loadCreditNotes(clientId, currencyId, prefix) {
+                const button = document.getElementById(`${prefix}-select-credit-note`);
+                const requestToken = ++creditNotesRequestToken;
+                currentVencidosState.notasCredito = [];
+                currentVencidosState.notaCreditoSeleccionadaId = '';
+                currentVencidosState.notasCreditoCargadas = false;
+                currentVencidosState.errorNotasCredito = false;
+                const selectedInput = document.getElementById(`${prefix}-credit-note-id`);
+                if (selectedInput) {
+                    selectedInput.value = '';
+                    selectedInput.disabled = true;
+                }
+                if (!button) {
+                    return;
+                }
+
+                button.disabled = false;
+                if (!clientId || !currencyId) {
+                    currentVencidosState.notasCreditoCargadas = true;
+                    return;
+                }
+                try {
+                    const endpoint = creditNotesUrlTemplate.replace('__CLIENT__', encodeURIComponent(clientId));
+                    const url = new URL(endpoint, window.location.origin);
+                    url.searchParams.set('moneda_idmoneda', currencyId);
+                    const response = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const data = await response.json();
+                    if (!data.success) throw new Error(data.message || 'No se pudieron consultar las notas de crédito.');
+                    if (requestToken !== creditNotesRequestToken) return;
+
+                    const notes = Array.isArray(data.notas_credito) ? data.notas_credito : [];
+                    currentVencidosState.notasCredito = notes;
+                    currentVencidosState.notasCreditoCargadas = true;
+                    button.textContent = 'N. crédito';
+                    if (
+                        creditNoteModalPrefix === prefix
+                        && document.getElementById('credit-note-selector-modal')?.classList.contains('visible')
+                    ) openCreditNoteModal(prefix);
+                } catch (error) {
+                    if (requestToken !== creditNotesRequestToken) return;
+                    currentVencidosState.errorNotasCredito = true;
+                    button.disabled = false;
+                    button.textContent = 'N. crédito';
+                    console.error('No se pudieron cargar las notas de crédito:', error);
+                    if (
+                        creditNoteModalPrefix === prefix
+                        && document.getElementById('credit-note-selector-modal')?.classList.contains('visible')
+                    ) openCreditNoteModal(prefix);
+                }
+            }
+
+            function openCreditNoteModal(prefix) {
+                const modal = document.getElementById('credit-note-selector-modal');
+                const list = document.getElementById('credit-note-selector-list');
+                const confirmButton = document.getElementById('credit-note-selector-confirm');
+                if (!modal || !list) return;
+
+                creditNoteModalPrefix = prefix;
+                pendingCreditNoteId = document.getElementById(`${prefix}-credit-note-id`)?.value || '';
+                list.replaceChildren();
+
+                const addOption = (id, label, detail = '') => {
+                    const wrapper = document.createElement('label');
+                    wrapper.className = 'flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-3 text-sm hover:border-red-300 hover:bg-red-50/40';
+                    const radio = document.createElement('input');
+                    radio.type = 'radio';
+                    radio.name = 'credit-note-selector-choice';
+                    radio.value = id;
+                    radio.checked = String(pendingCreditNoteId) === String(id);
+                    radio.className = 'mt-0.5 accent-[#b41B29]';
+                    radio.addEventListener('change', () => {
+                        pendingCreditNoteId = radio.value;
+                        if (confirmButton) confirmButton.disabled = false;
+                    });
+                    const text = document.createElement('span');
+                    text.className = 'flex min-w-0 flex-col gap-0.5';
+                    const title = document.createElement('strong');
+                    title.className = 'text-slate-800';
+                    title.textContent = label;
+                    text.appendChild(title);
+                    if (detail) {
+                        const description = document.createElement('span');
+                        description.className = 'text-xs text-slate-500';
+                        description.textContent = detail;
+                        text.appendChild(description);
+                    }
+                    wrapper.append(radio, text);
+                    list.appendChild(wrapper);
+                };
+
+                if (!currentVencidosState.notasCreditoCargadas) {
+                    const message = document.createElement('p');
+                    message.className = 'rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600';
+                    message.textContent = currentVencidosState.errorNotasCredito
+                        ? 'No se pudieron cargar las notas de crédito. Cierra y vuelve a abrir el cobro para intentar nuevamente.'
+                        : 'Cargando notas de crédito...';
+                    list.appendChild(message);
+                } else if (currentVencidosState.notasCredito.length === 0) {
+                    const message = document.createElement('p');
+                    message.className = 'rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600';
+                    message.textContent = 'Este cliente no tiene notas de crédito disponibles.';
+                    list.appendChild(message);
+                } else {
+                    addOption('', 'No aplicar nota de crédito');
+                    currentVencidosState.notasCredito.forEach((note) => {
+                        const reference = note.docReferencia || `Nota #${note.idnotacredito}`;
+                        const details = [
+                            `Disponible: ${formatMoney(Number(note.monto_disponible || 0), currentVencidosState.currencySymbol)}`,
+                            note.descripcion ? `Comentario: ${note.descripcion}` : ''
+                        ].filter(Boolean).join(' · ');
+                        addOption(String(note.idnotacredito), reference, details);
+                    });
+                }
+
+                if (confirmButton) {
+                    confirmButton.disabled = !currentVencidosState.notasCreditoCargadas
+                        || currentVencidosState.notasCredito.length === 0;
+                }
+                modal.classList.remove('hidden');
+                modal.classList.add('visible');
+            }
+
+            function closeCreditNoteModal() {
+                const modal = document.getElementById('credit-note-selector-modal');
+                modal?.classList.remove('visible');
+                modal?.classList.add('hidden');
+            }
+
+            function confirmCreditNoteSelection() {
+                const prefix = creditNoteModalPrefix;
+                const selectedInput = document.getElementById(`${prefix}-credit-note-id`);
+                if (!selectedInput) return;
+                const selectedRadio = document.querySelector('input[name="credit-note-selector-choice"]:checked');
+                const selectedId = selectedRadio?.value || '';
+                selectedInput.value = selectedId;
+                selectedInput.disabled = !selectedId;
+                currentVencidosState.notaCreditoSeleccionadaId = selectedId;
+                const button = document.getElementById(`${prefix}-select-credit-note`);
+                const selectedNote = currentVencidosState.notasCredito.find(
+                    (note) => String(note.idnotacredito) === String(selectedId)
+                );
+                if (button) {
+                    button.textContent = selectedNote
+                        ? `N. crédito: ${selectedNote.docReferencia || `#${selectedNote.idnotacredito}`}`
+                        : 'N. crédito';
+                }
+                closeCreditNoteModal();
+                applyDeductionLogic();
             }
 
             function calculateNetPayable(grossTotal, isRetencion) {
@@ -3759,7 +4945,7 @@
             function calculateDeduction(grossTotal, isRetencion) {
                 grossTotal = Number(grossTotal) || 0;
                 if (grossTotal <= 700) return 0;
-                return Math.round((grossTotal * (isRetencion ? 0.03 : 0.12) + Number.EPSILON) * 100) / 100;
+                return Math.round(grossTotal * (isRetencion ? 0.03 : 0.12) + Number.EPSILON);
             }
 
             function renderDeductionSummary(elementId, grossTotal, deductionAmount, creditApplied, isRetencion, symbol) {
@@ -3772,12 +4958,12 @@
                     return;
                 }
 
-                const parts = [`Total de la fila: ${formatMoney(grossTotal, symbol)}`];
+                const parts = [`Total: ${formatMoney(grossTotal, symbol)}`];
                 if (deductionAmount > 0) {
                     const deductionName = isRetencion ? 'Retención (3%)' : 'Detracción (12%)';
                     parts.push(`${deductionName}: ${formatMoney(deductionAmount, symbol)}`);
                 }
-                if (creditApplied > 0) parts.push(`Saldo a favor aplicado: ${formatMoney(creditApplied, symbol)}`);
+                if (creditApplied > 0) parts.push(`Crédito del cliente aplicado: ${formatMoney(creditApplied, symbol)}`);
                 summary.textContent = parts.join(' | ');
                 summary.classList.remove('hidden');
             }
@@ -3791,76 +4977,111 @@
                     }
                 });
 
-                let grossTotal = currentVencidosState.baseAmount + selectedAmount;
-                const advancePeriods = currentVencidosState.targetModal === 'factura'
+                const isFacturaTarget = currentVencidosState.targetModal === 'factura';
+                const advancePeriods = isFacturaTarget
                     ? Number(facturaAdvanceMonths?.value || 0)
-                    : 0;
-                const invoiceUnitAmount = currentVencidosState.targetModal === 'factura'
-                    && facturaAmountWasEdited
-                    && facturaManualUnitAmount !== null
-                    ? facturaManualUnitAmount
-                    : currentVencidosState.baseAmount;
-                grossTotal = selectedAmount + invoiceUnitAmount * Math.max(1, advancePeriods);
+                    : Number(paymentAdvanceMonthsCount?.value || 0);
+                const invoiceUnitAmount = Number(currentVencidosState.baseAmount) || 0;
+                const grossTotal = selectedAmount + invoiceUnitAmount * Math.max(1, advancePeriods);
                 const isRetencion = !!currentVencidosState.esRetencion;
                 const deductionAmount = calculateDeduction(grossTotal, isRetencion);
                 const afterDeduction = calculateNetPayable(grossTotal, isRetencion);
                 const symbol = currentVencidosState.currencySymbol || 'S/';
                 const useCreditCheckbox = document.getElementById(currentVencidosState.targetModal === 'pay' ? 'payment-use-credit' : 'factura-use-credit');
-                const useCredit = !!useCreditCheckbox?.checked;
-                const creditApplied = useCredit ? Math.min(afterDeduction, currentVencidosState.saldoFavorDisponible) : 0;
+                const prefix = currentVencidosState.targetModal === 'pay' ? 'payment' : 'factura';
+                const bankCreditSelected = !!useCreditCheckbox?.checked;
+                const selectedNotesAmount = selectedCreditNotesAmount(prefix);
+                const availableBankCredit = bankCreditSelected ? currentVencidosState.saldoFavorDisponible : 0;
+                const creditApplied = Math.min(afterDeduction, availableBankCredit + selectedNotesAmount);
+                const noteCreditApplied = Math.min(creditApplied, selectedNotesAmount);
+                const bankCreditApplied = Math.max(0, creditApplied - noteCreditApplied);
                 const cashDue = Math.max(afterDeduction - creditApplied, 0);
 
-                const formattedNet = `${symbol} ${cashDue.toFixed(2)}`;
-
                 if (currentVencidosState.targetModal === 'pay') {
+                    if (servicePaymentModal) servicePaymentModal.dataset.grossAmount = String(grossTotal);
                     renderDeductionSummary('payment-amount-summary', grossTotal, deductionAmount, creditApplied, isRetencion, symbol);
-                    renderCreditChoice('payment', currentVencidosState.saldoFavorDisponible, creditApplied, afterDeduction, symbol);
+                    renderCreditChoice('payment', currentVencidosState.saldoFavorDisponible, bankCreditApplied, afterDeduction, symbol);
                     const paymentOriginal = document.getElementById('payment-original');
                     const paymentAmount = document.getElementById('payment-amount');
+                    const paymentInvoiceTotal = document.getElementById('payment-invoice-total');
                     const totalRadio = document.querySelector('#service-payment-modal input[name="modo_pago"][value="total"]');
                     const expectedBefore = Number(servicePaymentModal?.dataset.expectedCashDue ?? currentVencidosState.baseAmount);
                     const enteredAmount = Number(paymentAmount?.value || 0);
                     const shouldRefreshAmount = totalRadio?.checked || !paymentAmount?.value || Math.abs(enteredAmount - expectedBefore) < 0.01;
-
-                    if (paymentOriginal) paymentOriginal.value = formattedNet;
-                    if (paymentAmount && shouldRefreshAmount) paymentAmount.value = cashDue.toFixed(2);
+                    const manualAmount = paymentAmountWasEdited ? Number(paymentOriginal?.value || 0) : null;
+                    const isManualPartial = manualAmount !== null && manualAmount + 0.01 < cashDue && advancePeriods <= 1;
+                    const partialRadio = document.querySelector('#service-payment-modal input[name="modo_pago"][value="parcial"]');
+                    if (advancePeriods > 1 || manualAmount !== null) {
+                        if (totalRadio) totalRadio.checked = !isManualPartial;
+                        if (partialRadio) partialRadio.checked = isManualPartial;
+                        partialPaymentField?.classList.toggle('hidden', !isManualPartial);
+                        if (paymentAmount) paymentAmount.required = isManualPartial;
+                    }
+                    if (paymentOriginal && !paymentAmountWasEdited) paymentOriginal.value = cashDue.toFixed(2);
+                    if (paymentOriginal && advancePeriods > 1) paymentOriginal.value = cashDue.toFixed(2);
+                    if (paymentOriginalCurrency) paymentOriginalCurrency.textContent = symbol;
+                    if (paymentAmount && manualAmount !== null && advancePeriods <= 1) {
+                        paymentAmount.value = manualAmount > 0 ? manualAmount.toFixed(2) : '';
+                    } else if (paymentAmount && (shouldRefreshAmount || advancePeriods > 1)) {
+                        paymentAmount.value = cashDue.toFixed(2);
+                    }
+                    if (paymentInvoiceTotal) {
+                        paymentInvoiceTotal.value = advancePeriods > 0
+                            ? Math.max(0, invoiceUnitAmount * Math.max(1, advancePeriods)).toFixed(2)
+                            : Number(currentVencidosState.baseAmount || 0).toFixed(2);
+                    }
+                    if (paymentAdvanceMonths && !paymentAdvanceFields?.classList.contains('hidden')) {
+                        paymentAdvanceMonths.value = advancePeriods > 1 ? String(advancePeriods) : '';
+                    }
+                    const displayedAdvancePeriods = advancePeriods > 1
+                        ? advancePeriods
+                        : (paymentAdvanceFields?.classList.contains('hidden') ? Number(paymentAdvanceMonths?.value || 0) : 0);
+                    if (paymentAdvanceSummary) {
+                        paymentAdvanceSummary.textContent = displayedAdvancePeriods > 1
+                            ? `Este monto incluye ${displayedAdvancePeriods} mensualidades (periodo actual y meses adelantados).`
+                            : '';
+                        paymentAdvanceSummary.classList.toggle('hidden', displayedAdvancePeriods <= 1);
+                    }
                     if (servicePaymentModal) servicePaymentModal.dataset.expectedCashDue = String(cashDue);
-                    updateBalanceAndCreditDisplay(cashDue, paymentAmount?.value || 0, 'payment-balance', 'payment-credit-summary', symbol);
+                    updateBalanceAndCreditDisplay(cashDue, paymentAmount?.value || 0, 'payment-balance', 'payment-credit-summary', symbol, grossTotal);
                 } else if (currentVencidosState.targetModal === 'factura') {
                     if (facturaModal) facturaModal.dataset.grossAmount = String(grossTotal);
                     renderDeductionSummary('factura-amount-summary', grossTotal, deductionAmount, creditApplied, isRetencion, symbol);
-                    renderCreditChoice('factura', currentVencidosState.saldoFavorDisponible, creditApplied, afterDeduction, symbol);
+                    renderCreditChoice('factura', currentVencidosState.saldoFavorDisponible, bankCreditApplied, afterDeduction, symbol);
                     const facturaAmount = document.getElementById('factura-amount');
                     const totalRadio = document.querySelector('input[name="factura_modo_pago"][value="total"]');
                     const partialAmount = document.getElementById('factura-partial-payment-amount');
                     const expectedBefore = Number(facturaModal?.dataset.expectedCashDue ?? currentVencidosState.baseAmount);
                     const enteredAmount = Number(partialAmount?.value || 0);
                     const shouldRefreshAmount = totalRadio?.checked || !partialAmount?.value || Math.abs(enteredAmount - expectedBefore) < 0.01;
+                    const isManualAmountBlank = facturaAmountWasEdited && facturaAmountDisplay?.value === '';
 
-                    const manualAmount = facturaAmountWasEdited
+                    const manualAmount = facturaAmountWasEdited && !isManualAmountBlank
                         ? Number(facturaAmountDisplay?.value || 0)
                         : null;
                     const visibleDue = advancePeriods > 1 || manualAmount === null ? cashDue : manualAmount;
-                    if (facturaAmount) facturaAmount.value = visibleDue.toFixed(2);
+                    if (facturaAmount && !facturaAmountWasEdited) facturaAmount.value = visibleDue.toFixed(2);
                     const invoiceAmountInput = document.getElementById('factura-invoice-amount');
-                    if (invoiceAmountInput) {
+                    if (invoiceAmountInput && !isManualAmountBlank) {
                         invoiceAmountInput.value = Math.max(0, invoiceUnitAmount * Math.max(1, advancePeriods)).toFixed(2);
                     }
                     if (facturaAmountCurrency) facturaAmountCurrency.textContent = symbol;
-                    if (facturaModal) facturaModal.dataset.payableAmount = String(visibleDue);
-                    if (partialAmount && (shouldRefreshAmount || manualAmount !== null)) partialAmount.value = visibleDue.toFixed(2);
+                    if (facturaModal) facturaModal.dataset.payableAmount = isManualAmountBlank ? '' : String(visibleDue);
+                    if (partialAmount && !isManualAmountBlank && (shouldRefreshAmount || manualAmount !== null)) {
+                        partialAmount.value = manualAmount !== null ? facturaAmountDisplay.value : visibleDue.toFixed(2);
+                    }
                     if (facturaModal) facturaModal.dataset.expectedCashDue = String(cashDue);
                     updateBalanceAndCreditDisplay(
                         cashDue,
                         advancePeriods > 0 ? Math.min(Number(facturaAmount?.value || 0), cashDue) : (partialAmount?.value || 0),
                         'factura-payment-balance',
                         'factura-payment-credit-summary',
-                        symbol
+                        symbol,
+                        grossTotal
                     );
                     if (advancePeriods > 0) {
                         document.getElementById('factura-payment-credit-summary')?.classList.add('hidden');
                     }
-                    updateFacturaWithholdingDecisionUI(undefined, grossTotal);
                 }
             }
 
@@ -3882,23 +5103,16 @@
             }
 
             function syncFacturaAdvanceAmount() {
-                const amount = Math.max(0, Number(facturaAmountDisplay?.value || 0));
+                const rawAmount = String(facturaAmountDisplay?.value ?? '');
+                const isBlank = rawAmount.trim() === '';
+                const amount = isBlank ? 0 : Math.max(0, Number(rawAmount) || 0);
                 facturaAmountWasEdited = true;
-                const selectedAmount = currentVencidosState.selectedIds.reduce((total, id) => {
-                    const cxc = currentVencidosState.cxcs.find(item => String(item.idcuentasPorCobrar) === String(id));
-                    return total + Number(cxc?.montoActual || 0);
-                }, 0);
                 const advancePeriods = Number(facturaAdvanceMonths?.value || 0);
-                facturaManualUnitAmount = Math.max(0, amount - selectedAmount) / Math.max(1, advancePeriods);
-                const invoiceAmountInput = document.getElementById('factura-invoice-amount');
-                if (invoiceAmountInput) {
-                    invoiceAmountInput.value = Math.max(0, amount - selectedAmount).toFixed(2);
-                }
                 const symbol = facturaModal?.dataset.currencySymbol || 'S/';
                 if (facturaAmountCurrency) facturaAmountCurrency.textContent = symbol;
-                if (facturaModal) facturaModal.dataset.payableAmount = String(amount);
+                if (facturaModal) facturaModal.dataset.payableAmount = isBlank ? '' : String(amount);
                 const partialAmount = document.getElementById('factura-partial-payment-amount');
-                if (partialAmount) partialAmount.value = amount.toFixed(2);
+                if (partialAmount) partialAmount.value = isBlank ? '' : rawAmount;
                 const totalRadio = document.querySelector('input[name="factura_modo_pago"][value="total"]');
                 const partialRadio = document.querySelector('input[name="factura_modo_pago"][value="parcial"]');
                 const partialField = document.getElementById('factura-partial-payment-field');
@@ -3907,9 +5121,15 @@
                     if (partialRadio) partialRadio.checked = false;
                     partialField?.classList.add('hidden');
                 } else {
-                    if (partialRadio) partialRadio.checked = true;
-                    if (totalRadio) totalRadio.checked = false;
-                    partialField?.classList.remove('hidden');
+                    const amountToPayInFull = Number(
+                        facturaModal?.dataset.expectedCashDue
+                        || facturaModal?.dataset.grossAmount
+                        || 0
+                    );
+                    const isPartialPayment = amount + 0.01 < amountToPayInFull;
+                    if (partialRadio) partialRadio.checked = isPartialPayment;
+                    if (totalRadio) totalRadio.checked = !isPartialPayment;
+                    partialField?.classList.toggle('hidden', !isPartialPayment);
                 }
                 applyDeductionLogic();
             }
@@ -3955,10 +5175,97 @@
                 syncFacturaAdvancePaymentMode();
             });
 
-            function checkAndRenderVencidosButton(clientId, currentCxcId, baseAmount, currencySymbol, targetModal, serviceIds = [], clientName = '') {
+            paymentAdvanceMonthsCount?.addEventListener('input', function () {
+                this.setCustomValidity(this.value && (Number(this.value) < 1 || Number(this.value) > 120)
+                    ? 'Indica entre 1 y 120 mensualidades.'
+                    : '');
+                if (paymentAdvanceMonths) {
+                    paymentAdvanceMonths.value = Number(this.value) > 1 && Number(this.value) <= 120
+                        ? String(Number(this.value))
+                        : '';
+                }
+
+                if (Number(this.value) > 1) {
+                    const totalRadio = document.querySelector('#service-payment-modal input[name="modo_pago"][value="total"]');
+                    const partialRadio = document.querySelector('#service-payment-modal input[name="modo_pago"][value="parcial"]');
+                    if (totalRadio) totalRadio.checked = true;
+                    if (partialRadio) partialRadio.checked = false;
+                    partialPaymentField?.classList.add('hidden');
+                    if (paymentAmount) paymentAmount.required = false;
+                }
+                applyDeductionLogic();
+            });
+
+            paymentAdvanceToggle?.addEventListener('click', function () {
+                const opening = paymentAdvanceFields?.classList.contains('hidden');
+                paymentAdvanceFields?.classList.toggle('hidden', !opening);
+                this.textContent = opening ? 'Ocultar meses' : 'Pagar adelantado';
+                this.setAttribute('aria-expanded', opening ? 'true' : 'false');
+                if (paymentAdvanceMonthsCount) {
+                    paymentAdvanceMonthsCount.disabled = !opening;
+                    paymentAdvanceMonthsCount.required = opening;
+                }
+
+                if (opening) {
+                    paymentAdvanceMonthsCount?.focus();
+                    return;
+                }
+
+                if (paymentAdvanceMonthsCount) {
+                    paymentAdvanceMonthsCount.value = '';
+                    paymentAdvanceMonthsCount.setCustomValidity('');
+                }
+                if (paymentAdvanceMonths) paymentAdvanceMonths.value = '';
+                paymentAmountWasEdited = false;
+                const totalRadio = document.querySelector('#service-payment-modal input[name="modo_pago"][value="total"]');
+                const partialRadio = document.querySelector('#service-payment-modal input[name="modo_pago"][value="parcial"]');
+                if (totalRadio) totalRadio.checked = true;
+                if (partialRadio) partialRadio.checked = false;
+                partialPaymentField?.classList.add('hidden');
+                if (paymentAmount) paymentAmount.required = false;
+                if (paymentOriginal) paymentOriginal.value = Number(currentVencidosState.baseAmount || 0).toFixed(2);
+                applyDeductionLogic();
+            });
+
+            paymentOriginal?.addEventListener('input', function () {
+                this.setCustomValidity('');
+                paymentAmountWasEdited = true;
+                const enteredAmount = Number(this.value || 0);
+                const advancePeriods = Math.max(1, Number(paymentAdvanceMonthsCount?.value || 0));
+
+                const expectedAmount = Number(servicePaymentModal?.dataset.expectedCashDue || currentVencidosState.baseAmount || 0);
+                const isPartial = enteredAmount + 0.01 < expectedAmount && advancePeriods <= 1;
+                const totalRadio = document.querySelector('#service-payment-modal input[name="modo_pago"][value="total"]');
+                const partialRadio = document.querySelector('#service-payment-modal input[name="modo_pago"][value="parcial"]');
+                if (totalRadio) totalRadio.checked = !isPartial;
+                if (partialRadio) partialRadio.checked = isPartial;
+                partialPaymentField?.classList.toggle('hidden', !isPartial);
+                if (paymentAmount) {
+                    paymentAmount.value = enteredAmount > 0 ? enteredAmount.toFixed(2) : '';
+                    paymentAmount.required = isPartial;
+                }
+
+                if (advancePeriods > 1) {
+                    applyDeductionLogic();
+                    return;
+                }
+
+                updateBalanceAndCreditDisplay(
+                    expectedAmount,
+                    enteredAmount,
+                    'payment-balance',
+                    'payment-credit-summary',
+                    currentVencidosState.currencySymbol || 'S/',
+                    Number(servicePaymentModal?.dataset.grossAmount || expectedAmount)
+                );
+            });
+
+            if (paymentAdvanceMonthsCount) paymentAdvanceMonthsCount.disabled = true;
+
+            function checkAndRenderVencidosButton(clientId, currentCxcId, baseAmount, currencySymbol, targetModal, serviceIds = [], clientName = '', currencyId = '') {
                 resetVencidosState();
                 const targetForm = document.getElementById(targetModal === 'pay' ? 'service-payment-form' : 'service-factura-form');
-                targetForm?.querySelectorAll('input[name="cxc_ids[]"]').forEach((input) => input.remove());
+                targetForm?.querySelectorAll('input[name="cxc_ids[]"][data-period-cxc="1"]').forEach((input) => input.remove());
 
                 currentVencidosState = {
                     cxcs: [],
@@ -3971,10 +5278,16 @@
                     targetModal: targetModal,
                     selectedIds: [],
                     esRetencion: false,
-                    saldoFavorDisponible: 0
+                    saldoFavorDisponible: 0,
+                    monedaId: currencyId || '',
+                    notasCredito: [],
+                    notaCreditoSeleccionadaId: '',
+                    notasCreditoCargadas: false,
+                    errorNotasCredito: false
                 };
 
                 applyDeductionLogic();
+                loadCreditNotes(clientId, currencyId, targetModal === 'pay' ? 'payment' : 'factura');
             }
 
             async function openPeriodosModal() {
@@ -4082,13 +5395,13 @@
                 const targetFormId = currentVencidosState.targetModal === 'pay' ? 'service-payment-form' : 'service-factura-form';
                 const form = document.getElementById(targetFormId);
                 if (form) {
-                    form.querySelectorAll('input[name="cxc_ids[]"]').forEach(el => el.remove());
-                    const allCxcIds = [currentVencidosState.baseCxcId, ...selectedIds].filter(Boolean);
-                    allCxcIds.forEach(id => {
+                    form.querySelectorAll('input[name="cxc_ids[]"][data-period-cxc="1"]').forEach(el => el.remove());
+                    [...new Set(selectedIds.filter(Boolean))].forEach(id => {
                         const input = document.createElement('input');
                         input.type = 'hidden';
                         input.name = 'cxc_ids[]';
                         input.value = id;
+                        input.dataset.periodCxc = '1';
                         form.appendChild(input);
                     });
                 }
@@ -4104,6 +5417,15 @@
             document.getElementById('btn-confirm-periodos')?.addEventListener('click', confirmPeriodosSelection);
             document.getElementById('payment-use-credit')?.addEventListener('change', applyDeductionLogic);
             document.getElementById('factura-use-credit')?.addEventListener('change', applyDeductionLogic);
+            ['payment', 'factura'].forEach((prefix) => {
+                document.getElementById(`${prefix}-select-credit-note`)?.addEventListener('click', () => openCreditNoteModal(prefix));
+            });
+            document.getElementById('credit-note-selector-close')?.addEventListener('click', closeCreditNoteModal);
+            document.getElementById('credit-note-selector-cancel')?.addEventListener('click', closeCreditNoteModal);
+            document.getElementById('credit-note-selector-confirm')?.addEventListener('click', confirmCreditNoteSelection);
+            document.getElementById('credit-note-selector-modal')?.addEventListener('click', (event) => {
+                if (event.target.id === 'credit-note-selector-modal') closeCreditNoteModal();
+            });
 
             function openFacturaModal(cxcId, clientName, amount, currentDocRef = '', currentFile = '', amountDisplay = '', monedaId = '', currencySymbol = '', serviceIds = [], tipoCobroId = '', clientId = '', periodEnd = '', cxcIds = []) {
                 const serviceFacturaModal = document.getElementById('service-factura-modal');
@@ -4162,7 +5484,6 @@
                     facturaAdvanceToggle.setAttribute('aria-expanded', 'false');
                 }
                 facturaAmountWasEdited = false;
-                facturaManualUnitAmount = null;
                 if (facturaAmountCurrency) facturaAmountCurrency.textContent = resolvedCurrencySymbol || 'S/';
                 if (facturaAdvanceMonths) {
                     facturaAdvanceMonths.value = '';
@@ -4174,16 +5495,18 @@
                 if (facturaServiceId) facturaServiceId.value = parsedServiceIds[0] || '';
                 if (facturaClient) facturaClient.value = clientName || '-';
                 if (facturaAmount) facturaAmount.value = Number(amount).toFixed(2);
-                document.querySelectorAll('input[name="factura_withholding_decision"]')
-                    .forEach((radio) => { radio.checked = false; });
+                const facturaWithholdingDecision = document.getElementById('factura-withholding-decision');
+                if (facturaWithholdingDecision) facturaWithholdingDecision.value = '';
                 if (facturaDocRef) facturaDocRef.value = (currentDocRef && currentDocRef !== '-') ? currentDocRef : '';
                 if (facturaFileInput) facturaFileInput.value = '';
+                document.querySelector('[data-clear-upload="factura-file"]')?.classList.add('hidden');
                 if (facturaFileName) facturaFileName.textContent = currentFile
                     ? 'Documento registrado. Selecciona uno nuevo para reemplazarlo.'
                     : '';
 
                 if (facturaPaymentInput) facturaPaymentInput.value = '';
                 if (facturaPaymentFileName) facturaPaymentFileName.textContent = '';
+                document.querySelector('[data-clear-upload="factura-comprobante"]')?.classList.add('hidden');
                 facturaPaymentUploadBox?.classList.remove('is-invalid');
 
                 const paymentTypeSelect = document.getElementById('factura-payment-type');
@@ -4227,7 +5550,7 @@
                 }
 
                 if (clientId) {
-                    checkAndRenderVencidosButton(clientId, cxcId, amount, resolvedCurrencySymbol, 'factura', serviceIds, clientName);
+                    checkAndRenderVencidosButton(clientId, cxcId, amount, resolvedCurrencySymbol, 'factura', serviceIds, clientName, monedaId || resolveSelectedCurrencyId());
                 } else {
                     resetVencidosState();
                 }
@@ -4274,7 +5597,14 @@
                 const totalAmount = parseFloat(serviceFacturaModal?.dataset.payableAmount || serviceFacturaModal?.dataset.rawAmount || 0);
                 const partialAmount = parseFloat(this.value || 0);
                 const symbol = serviceFacturaModal?.dataset.currencySymbol || 'S/';
-                updateBalanceAndCreditDisplay(totalAmount, partialAmount, 'factura-payment-balance', 'factura-payment-credit-summary', symbol);
+                updateBalanceAndCreditDisplay(
+                    totalAmount,
+                    partialAmount,
+                    'factura-payment-balance',
+                    'factura-payment-credit-summary',
+                    symbol,
+                    Number(facturaModal?.dataset.grossAmount || totalAmount)
+                );
             });
 
             function calcFacturaCurrencyConversion() {
@@ -4288,7 +5618,14 @@
                     const convertedTotal = (convertedAmount * exchangeRate).toFixed(2);
                     totalEl.value = convertedTotal;
                     if (paidAmountEl) paidAmountEl.value = convertedTotal;
-                    updateBalanceAndCreditDisplay(totalAmount, convertedTotal, 'factura-payment-balance', 'factura-payment-credit-summary', facturaModal?.dataset.currencySymbol || 'S/');
+                    updateBalanceAndCreditDisplay(
+                        totalAmount,
+                        convertedTotal,
+                        'factura-payment-balance',
+                        'factura-payment-credit-summary',
+                        facturaModal?.dataset.currencySymbol || 'S/',
+                        Number(facturaModal?.dataset.grossAmount || totalAmount)
+                    );
                 } else if (totalEl) {
                     totalEl.value = '';
                     if (paidAmountEl) paidAmountEl.value = '';
@@ -4306,6 +5643,7 @@
                 if (!allowedTypes.includes(file.type) || file.size > maxFileSize) {
                     facturaFileInput.value = '';
                     if (facturaFileName) facturaFileName.textContent = 'Selecciona JPG, PNG o PDF de máximo 5 MB.';
+                    document.querySelector('[data-clear-upload="factura-file"]')?.classList.add('hidden');
                     facturaUploadBox?.classList.add('is-invalid');
                     return;
                 }
@@ -4314,6 +5652,7 @@
                 transfer.items.add(file);
                 facturaFileInput.files = transfer.files;
                 if (facturaFileName) facturaFileName.textContent = `${file.name} (${(file.size / 1024).toFixed(0)} KB)`;
+                document.querySelector('[data-clear-upload="factura-file"]')?.classList.remove('hidden');
                 facturaUploadBox?.classList.remove('is-invalid');
             }
 
@@ -4325,6 +5664,7 @@
                 if (!allowedTypes.includes(file.type) || file.size > maxFileSize) {
                     facturaPaymentInput.value = '';
                     if (facturaPaymentFileName) facturaPaymentFileName.textContent = 'Selecciona JPG, PNG o PDF de máximo 5 MB.';
+                    document.querySelector('[data-clear-upload="factura-comprobante"]')?.classList.add('hidden');
                     facturaPaymentUploadBox?.classList.add('is-invalid');
                     return;
                 }
@@ -4333,6 +5673,7 @@
                 transfer.items.add(file);
                 facturaPaymentInput.files = transfer.files;
                 if (facturaPaymentFileName) facturaPaymentFileName.textContent = `${file.name} (${(file.size / 1024).toFixed(0)} KB)`;
+                document.querySelector('[data-clear-upload="factura-comprobante"]')?.classList.remove('hidden');
                 facturaPaymentUploadBox?.classList.remove('is-invalid');
             }
 
@@ -4396,10 +5737,13 @@
                     event.preventDefault();
                     const isExpanded = serviceFacturaModal.classList.contains('factura-mode-expanded');
                     const targetEl = document.activeElement;
+                    const isTargetInFactura = targetEl && targetEl.closest('#factura-upload-box');
                     const isTargetInExtra = targetEl && targetEl.closest('#factura-cobro-extra-section');
                     const hasFacturaFile = facturaFileInput && facturaFileInput.files && facturaFileInput.files.length > 0;
 
-                    if (isExpanded && (isTargetInExtra || hasFacturaFile)) {
+                    if (isTargetInFactura) {
+                        handleFacturaFile(fileObj);
+                    } else if (isExpanded && (isTargetInExtra || hasFacturaFile)) {
                         handleFacturaPaymentFile(fileObj);
                     } else {
                         handleFacturaFile(fileObj);
@@ -4409,16 +5753,7 @@
 
                 if (servicePaymentModal && servicePaymentModal.classList.contains('visible')) {
                     event.preventDefault();
-                    const paymentFileInput = document.getElementById('payment-comprobante');
-                    const paymentFileName = document.getElementById('payment-comprobante-name');
-                    const paymentUploadBox = document.getElementById('payment-dropzone');
-                    if (paymentFileInput) {
-                        const transfer = new DataTransfer();
-                        transfer.items.add(fileObj);
-                        paymentFileInput.files = transfer.files;
-                        if (paymentFileName) paymentFileName.textContent = `${fileObj.name} (${(fileObj.size / 1024).toFixed(0)} KB)`;
-                        paymentUploadBox?.classList.remove('is-invalid');
-                    }
+                    handlePaymentComprobanteFile(fileObj);
                 }
             });
 
@@ -4445,6 +5780,7 @@
 
                     if (!isFacturarYCancelar) {
                         serviceFacturaForm.querySelectorAll('[name="usar_saldo_favor"]').forEach((input) => input.disabled = true);
+                        serviceFacturaForm.querySelectorAll('[name="nota_credito_ids[]"]').forEach((input) => input.disabled = true);
                     }
 
                     if (isFacturarYCancelar) {
@@ -4453,27 +5789,95 @@
                             || document.getElementById('factura-invoice-amount')?.value
                             || 0
                         );
-                        if (invoiceAmount > 700 && !document.querySelector('input[name="factura_withholding_decision"]:checked')) {
-                            updateFacturaWithholdingDecisionUI(true);
-                            alert('Confirma si la detracción/retención ya fue pagada antes de guardar.');
+                        const facturaDecision = document.getElementById('factura-withholding-decision');
+                        if (invoiceAmount > 700 && !facturaDecision?.value) {
                             event.preventDefault();
-                            return;
+                            const totalMode = document.querySelector('input[name="factura_modo_pago"][value="total"]')?.checked;
+                            const partialAmountInput = document.getElementById('factura-partial-payment-amount');
+                            const partialAmount = Number(partialAmountInput?.value || 0);
+                            const hasConfiguredAmount = facturaModal?.dataset.payableAmount !== undefined
+                                && facturaModal.dataset.payableAmount !== '';
+                            const configuredAmount = Number(facturaModal?.dataset.payableAmount || 0);
+                            const cashEntered = totalMode && hasConfiguredAmount ? configuredAmount : partialAmount;
+                            const selectedNotesAmount = selectedCreditNotesAmount('factura');
+                            const bankCreditAmount = document.getElementById('factura-use-credit')?.checked
+                                ? currentVencidosState.saldoFavorDisponible
+                                : 0;
+                            const creditApplied = Math.min(
+                                calculateNetPayable(invoiceAmount, currentVencidosState.esRetencion),
+                                selectedNotesAmount + bankCreditAmount
+                            );
+                            const netAmount = Math.max(
+                                calculateNetPayable(invoiceAmount, currentVencidosState.esRetencion) - creditApplied,
+                                0
+                            );
+                            const grossDue = Math.max(invoiceAmount - creditApplied, 0);
+                            if (totalMode && partialAmountInput) {
+                                partialAmountInput.value = cashEntered.toFixed(2);
+                            }
+                            if (totalMode && cashEntered + 0.01 < netAmount) {
+                                alert(`El monto pagado debe ser al menos el neto calculado de ${formatMoney(netAmount, currentVencidosState.currencySymbol)}.`);
+                                return;
+                            }
+                            if (Math.abs(cashEntered - grossDue) <= 0.01) {
+                                facturaDecision.value = 'full_pending';
+                            } else if (totalMode || cashEntered + 0.01 >= netAmount) {
+                                showWithholdingWarning(
+                                    invoiceAmount,
+                                    currentVencidosState.esRetencion,
+                                    facturaDecision,
+                                    {
+                                        getEnteredAmount: () => cashEntered,
+                                        getNetAmount: () => netAmount,
+                                        getGrossAmount: () => grossDue,
+                                        submit: () => serviceFacturaForm.requestSubmit(),
+                                        onPaid: openFacturaWithholdingProof
+                                    }
+                                );
+                                return;
+                            }
                         }
 
-                        const paymentFile = document.getElementById('factura-comprobante');
-                        if (paymentFile && !paymentFile.files?.length) {
-                            paymentFile.setCustomValidity('Debes adjuntar el comprobante de pago.');
-                            paymentFile.reportValidity();
-                            event.preventDefault();
-                            return;
-                        }
-                        if (paymentFile) paymentFile.setCustomValidity('');
                     }
 
+                    event.preventDefault();
                     if (facturaSubmitBtn) {
                         facturaSubmitBtn.disabled = true;
                         facturaSubmitBtn.textContent = isFacturarYCancelar ? 'Registrando cobro...' : 'Guardando factura...';
                     }
+
+                    const formData = new FormData(serviceFacturaForm);
+                    fetch(serviceFacturaForm.action, {
+                        method: 'POST',
+                        body: formData,
+                        headers: {
+                            Accept: 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    })
+                        .then(async (response) => {
+                            let result;
+                            try {
+                                result = await response.json();
+                            } catch {
+                                throw new Error('El servidor devolvió una respuesta que no se pudo leer.');
+                            }
+                            if (!response.ok || !result.success) {
+                                const validationMessages = Object.values(result.errors || {})
+                                    .flat()
+                                    .filter(Boolean);
+                                throw new Error(validationMessages.join('\n') || result.message || 'No se pudo registrar la factura y el cobro.');
+                            }
+                            sessionStorage.setItem('cxc-pending-success-notice', result.message || 'Factura y cobro registrados correctamente.');
+                            window.location.reload();
+                        })
+                        .catch((error) => {
+                            if (facturaSubmitBtn) {
+                                facturaSubmitBtn.disabled = false;
+                                facturaSubmitBtn.textContent = isFacturarYCancelar ? 'Guardar y Cancelar' : 'Guardar Factura';
+                            }
+                            alert(error.message || 'No se pudo completar el envío. Revisa tu conexión e inténtalo nuevamente.');
+                        });
                 });
             }
 
@@ -4495,13 +5899,13 @@
                 if (facturaPaymentFile) facturaPaymentFile.value = '';
                 if (facturaFileName) facturaFileName.textContent = '';
                 if (facturaPaymentFileName) facturaPaymentFileName.textContent = '';
+                document.querySelectorAll('[data-clear-upload]').forEach((button) => button.classList.add('hidden'));
                 facturaUploadBox?.classList.remove('is-invalid', 'is-dragging');
                 facturaPaymentUploadBox?.classList.remove('is-invalid', 'is-dragging');
                 document.getElementById('factura-payment-currency-extra')?.classList.add('hidden');
                 document.getElementById('factura-partial-payment-field')?.classList.add('hidden');
                 facturaAdvanceFields?.classList.add('hidden');
                 facturaAmountWasEdited = false;
-                facturaManualUnitAmount = null;
                 if (facturaAdvanceMonths) facturaAdvanceMonths.value = '';
                 if (facturaAdvanceToggle) facturaAdvanceToggle.textContent = 'Pagar adelantado';
                 if (facturaModeToggle) applyFacturaModeState(false);
@@ -4519,12 +5923,7 @@
                     closeFacturaModal();
                 }
                 if (e.target.closest('[data-close-service-payment]')) {
-                    const servicePaymentModal = document.getElementById('service-payment-modal');
-                    if (servicePaymentModal) {
-                        servicePaymentModal.classList.remove('visible');
-                        servicePaymentModal.classList.add('hidden');
-                    }
-                    document.body.style.overflow = '';
+                    closeServicePaymentModal();
                 }
                 if (e.target.closest('[data-close-baja-option]')) {
                     const bajaOptionModal = document.getElementById('baja-option-modal');
@@ -4564,11 +5963,15 @@
                         const cxcIds = (this.dataset.cxcIds || '').split(',').filter(Boolean);
                         const cxcEstado = (this.dataset.cxcEstado || 'PENDIENTE').toUpperCase();
                         const docRef = this.dataset.docRef || '';
-                        const isCancelado = cxcEstado === '3' || cxcEstado === 'CANCELADO' || cxcEstado === 'CANCELADO DETRACCIÓN';
+                        const isWithholdingPending = ['CANCELADO DETRACCIÓN', 'PENDIENTE AUTODETRACCIÓN', 'PENDIENTE AUTORETENCIÓN', 'PENDIENTE A DETRACCIÓN', 'PENDIENTE A RETENCIÓN'].includes(cxcEstado);
+                        const withholdingType = cxcEstado.includes('RETENCIÓN') ? 'retención' : 'detracción';
+                        const isCancelado = cxcEstado === '3' || cxcEstado === 'CANCELADO';
                         const clientId = this.dataset.clientId || '';
 
                         const tipoCobroId = this.dataset.tipoCobroId || '';
-                        if (isCancelado) {
+                        if (isWithholdingPending) {
+                            openCustomPaymentModal(serviceIds, cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, 0, true, withholdingType);
+                        } else if (isCancelado) {
                             openCustomPaymentModal(serviceIds, cxcId, clientName, amount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', true, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0));
                         } else if (['1', '4', 'PENDIENTE', 'VENCIDO', 'PENDIENTE PAGO PARCIAL', 'PENDIENTE A CREDITO'].includes(cxcEstado) || !docRef) {
                             openFacturaModal(cxcId, clientName, amount, docRef, '', this.dataset.amountDisplay || '', this.dataset.monedaId || '', this.dataset.currencySymbol || '', serviceIds, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds);
@@ -4587,6 +5990,15 @@
                         if (!modal || !form || !reason) return;
 
                         form.action = this.dataset.revertUrl || '';
+                        form.querySelectorAll('[data-revert-cxc]').forEach(input => input.remove());
+                        (this.dataset.revertCxcIds || '').split(',').filter(Boolean).forEach(id => {
+                            const input = document.createElement('input');
+                            input.type = 'hidden';
+                            input.name = 'cxc_ids[]';
+                            input.value = id;
+                            input.dataset.revertCxc = '1';
+                            form.appendChild(input);
+                        });
                         reason.value = '';
                         modal.classList.remove('hidden');
                         modal.classList.add('visible');
@@ -4628,11 +6040,15 @@
                         const cxcIds = (this.dataset.cxcIds || '').split(',').filter(Boolean);
                         const cxcEstado = (this.dataset.cxcEstado || 'PENDIENTE').toUpperCase();
                         const docRef = this.dataset.docRef || '';
-                        const isCancelado = cxcEstado === '3' || cxcEstado === 'CANCELADO' || cxcEstado === 'CANCELADO DETRACCIÓN';
+                        const isWithholdingPending = ['CANCELADO DETRACCIÓN', 'PENDIENTE AUTODETRACCIÓN', 'PENDIENTE AUTORETENCIÓN', 'PENDIENTE A DETRACCIÓN', 'PENDIENTE A RETENCIÓN'].includes(cxcEstado);
+                        const withholdingType = cxcEstado.includes('RETENCIÓN') ? 'retención' : 'detracción';
+                        const isCancelado = cxcEstado === '3' || cxcEstado === 'CANCELADO';
                         const clientId = this.dataset.clientId || '';
 
                         const tipoCobroId = this.dataset.tipoCobroId || '';
-                        if (isCancelado) {
+                        if (isWithholdingPending) {
+                            openCustomPaymentModal(serviceIds, cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, 0, true, withholdingType);
+                        } else if (isCancelado) {
                             openCustomPaymentModal(serviceIds, cxcId, clientName, amount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', true, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0));
                         } else if (['1', '4', 'PENDIENTE', 'VENCIDO', 'PENDIENTE PAGO PARCIAL', 'PENDIENTE A CREDITO'].includes(cxcEstado) || !docRef) {
                             openFacturaModal(cxcId, clientName, amount, docRef, '', this.dataset.amountDisplay || '', this.dataset.monedaId || '', this.dataset.currencySymbol || '', serviceIds, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds);
@@ -4648,15 +6064,20 @@
                         const serviceId = this.dataset.serviceId;
                         const clientName = this.dataset.clientName || '-';
                         const amount = Number(this.dataset.amount ?? this.dataset.paymentAmount ?? 0);
+                        const paymentAmount = Number(this.dataset.paymentAmount ?? this.dataset.amount ?? 0);
                         const cxcId = this.dataset.cxcId || '';
                         const cxcIds = (this.dataset.cxcIds || '').split(',').filter(Boolean);
                         const cxcEstado = (this.dataset.cxcEstado || 'PENDIENTE').toUpperCase();
                         const docRef = this.dataset.docRef || '';
-                        const isCancelado = cxcEstado === '3' || cxcEstado === 'CANCELADO' || cxcEstado === 'CANCELADO DETRACCIÓN';
+                        const isWithholdingPending = ['CANCELADO DETRACCIÓN', 'PENDIENTE AUTODETRACCIÓN', 'PENDIENTE AUTORETENCIÓN', 'PENDIENTE A DETRACCIÓN', 'PENDIENTE A RETENCIÓN'].includes(cxcEstado);
+                        const withholdingType = cxcEstado.includes('RETENCIÓN') ? 'retención' : 'detracción';
+                        const isCancelado = cxcEstado === '3' || cxcEstado === 'CANCELADO';
                         const clientId = this.dataset.clientId || '';
 
                         const tipoCobroId = this.dataset.tipoCobroId || '';
-                        if (isCancelado) {
+                        if (isWithholdingPending) {
+                            openCustomPaymentModal(serviceId ? [serviceId] : [], cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, 0, true, withholdingType);
+                        } else if (isCancelado) {
                             openCustomPaymentModal(serviceId ? [serviceId] : [], cxcId, clientName, amount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', true, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0));
                         } else if (['1', '4', 'PENDIENTE', 'VENCIDO', 'PENDIENTE PAGO PARCIAL', 'PENDIENTE A CREDITO'].includes(cxcEstado) || !docRef) {
                             openFacturaModal(cxcId, clientName, amount, docRef, '', this.dataset.amountDisplay || '', this.dataset.monedaId || '', this.dataset.currencySymbol || '', serviceId ? [serviceId] : [], tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds);
@@ -4756,13 +6177,113 @@
                 }
             });
 
-            function openCustomPaymentModal(serviceIds, cxcId, clientName, amount, docRef = '', amountDisplay = '', monedaId = '', isViewOnly = false, tipoCobroId = '', clientId = '', periodEnd = '', cxcIds = [], advanceMonths = 0) {
+            function setWithholdingCompletionModalMode(isPending, amount = 0, symbol = 'S/', withholdingType = 'detracción', docRef = '') {
+                const modal = document.getElementById('service-payment-modal');
+                const grid = document.getElementById('payment-modal-fields-grid');
+                const dateFields = modal?.querySelector('.erp-modal-body > .mb-3.grid');
+                const proofField = document.getElementById('payment-proof-field');
+                const clientField = document.getElementById('payment-client-field');
+                const referenceField = document.getElementById('payment-reference-field');
+                const amountField = document.getElementById('payment-amount-field');
+                const descriptionField = document.getElementById('payment-description-field');
+                const paymentDateLabel = document.getElementById('payment-date-label');
+                const paymentOriginalLabel = document.getElementById('payment-original-label');
+                const proofLabel = document.getElementById('payment-proof-label');
+                const dropzoneTitle = document.getElementById('payment-dropzone-title');
+                const paymentOriginal = document.getElementById('payment-original');
+                const submitButton = document.getElementById('payment-submit-btn');
+                const modalTitle = document.getElementById('service-payment-title');
+                const deductionLabel = withholdingType === 'retención' ? 'retención' : 'detracción';
+                const deductionTitle = withholdingType === 'retención' ? 'Retención' : 'Detracción';
+
+                modal?.classList.toggle('is-withholding-completion', isPending);
+                Array.from(grid?.children || []).forEach((field) => {
+                    if (isPending && ![proofField, clientField, referenceField, amountField, descriptionField].includes(field)) {
+                        field.dataset.hiddenForWithholding = '1';
+                        field.classList.add('hidden');
+                    } else if (field.dataset.hiddenForWithholding === '1') {
+                        delete field.dataset.hiddenForWithholding;
+                        field.classList.remove('hidden');
+                    }
+                });
+                if (dateFields) {
+                    dateFields.classList.toggle('is-withholding-date-row', isPending);
+                }
+                if (paymentDateLabel) {
+                    paymentDateLabel.textContent = isPending ? `Fecha de pago de ${deductionLabel}` : 'Fecha de Pago';
+                }
+                if (paymentOriginalLabel) {
+                    paymentOriginalLabel.textContent = isPending
+                        ? `Monto ${deductionLabel}`
+                        : 'Monto a cancelar';
+                }
+                if (proofLabel) {
+                    proofLabel.textContent = isPending
+                        ? 'Comprobante del depósito(opcional)'
+                        : 'Comprobante de pago (opcional)';
+                }
+                if (dropzoneTitle) {
+                    dropzoneTitle.textContent = isPending
+                        ? 'Cargar comprobante del depósito(opcional)'
+                        : 'Cargar comprobante de pago(opcional)';
+                }
+                if (paymentOriginal) {
+                    paymentOriginal.readOnly = isPending;
+                    paymentOriginal.value = Number(amount || 0).toFixed(2);
+                }
+                if (modalTitle && isPending) {
+                    modalTitle.textContent = `Registrar comprobante de ${deductionTitle} pendiente`;
+                }
+                if (submitButton && isPending) {
+                    submitButton.textContent = 'Registrar depósito';
+                }
+
+                const paymentFields = servicePaymentForm?.querySelectorAll('input, select, textarea') || [];
+                paymentFields.forEach((field) => {
+                    if (field.type === 'hidden' || field.name === '_token' || field.id === 'payment-comprobante' || field.id === 'payment-date' || field.id === 'payment-original' || field.id === 'payment-description') return;
+                    if (isPending) {
+                        if (field.dataset.disabledForWithholding !== '1') {
+                            field.dataset.disabledBeforeWithholding = field.disabled ? '1' : '0';
+                        }
+                        field.dataset.disabledForWithholding = '1';
+                        field.disabled = true;
+                    } else if (field.dataset.disabledForWithholding === '1') {
+                        field.disabled = field.dataset.disabledBeforeWithholding === '1';
+                        delete field.dataset.disabledForWithholding;
+                        delete field.dataset.disabledBeforeWithholding;
+                    }
+                });
+            }
+
+            async function openCustomPaymentModal(serviceIds, cxcId, clientName, amount, docRef = '', amountDisplay = '', monedaId = '', isViewOnly = false, tipoCobroId = '', clientId = '', periodEnd = '', cxcIds = [], advanceMonths = 0, isPendingWithholding = false, withholdingType = 'detracción') {
                 const servicePaymentModal = document.getElementById('service-payment-modal');
                 if (!servicePaymentModal) return;
+                const requestToken = ++paymentDetailsRequestToken;
+                setPaymentViewMode(false);
+                servicePaymentModal.dataset.paymentCxcId = cxcId || '';
+                const pendingFlag = document.getElementById('payment-complete-withholding');
+                if (pendingFlag) pendingFlag.value = isPendingWithholding ? '1' : '0';
+                const withholdingDecision = document.getElementById('payment-withholding-decision');
+                if (withholdingDecision) withholdingDecision.value = '';
+                setWithholdingCompletionModalMode(isPendingWithholding, amount, resolveCurrencySymbol(amountDisplay, monedaId), withholdingType, docRef);
+                const paymentComprobante = document.getElementById('payment-comprobante');
+                if (paymentComprobante) paymentComprobante.required = isPendingWithholding;
                 const paymentAdvanceMonths = document.getElementById('payment-advance-months');
                 const paymentAdvanceSummary = document.getElementById('payment-advance-summary');
                 const hasAdvance = Number(advanceMonths) > 1;
                 if (paymentAdvanceMonths) paymentAdvanceMonths.value = hasAdvance ? String(advanceMonths) : '';
+                if (paymentAdvanceMonthsCount) {
+                    paymentAdvanceMonthsCount.value = '';
+                    paymentAdvanceMonthsCount.disabled = true;
+                    paymentAdvanceMonthsCount.required = false;
+                }
+                paymentAdvanceFields?.classList.add('hidden');
+                if (paymentAdvanceToggle) {
+                    paymentAdvanceToggle.textContent = 'Pagar adelantado';
+                    paymentAdvanceToggle.setAttribute('aria-expanded', 'false');
+                    paymentAdvanceToggle.disabled = isViewOnly || hasAdvance;
+                }
+                paymentAmountWasEdited = false;
                 if (paymentAdvanceSummary) {
                     paymentAdvanceSummary.textContent = hasAdvance
                         ? `Este monto incluye ${advanceMonths} mensualidades (periodo actual y meses adelantados).`
@@ -4778,9 +6299,10 @@
                 const creditCheckbox = document.getElementById('payment-use-credit');
                 if (creditCheckbox) creditCheckbox.checked = false;
                 const resolvedCurrencySymbol = resolveCurrencySymbol(amountDisplay || '', monedaId || '');
-                const normalizedAmountDisplay = `${resolvedCurrencySymbol || '$'} ${amount.toFixed(2)}`;
                 if (paymentClient) paymentClient.value = clientName;
-                if (paymentOriginal) paymentOriginal.value = normalizedAmountDisplay;
+                if (paymentOriginal) paymentOriginal.value = Number(amount || 0).toFixed(2);
+                if (paymentOriginalCurrency) paymentOriginalCurrency.textContent = resolvedCurrencySymbol || 'S/';
+                servicePaymentModal.dataset.paymentDisplayAmount = amountDisplay || formatMoney(amount, resolvedCurrencySymbol);
                 servicePaymentModal.dataset.expectedCashDue = String(amount || 0);
                 setPaymentType(tipoCobroId);
                 if (paymentBalance) paymentBalance.textContent = formatMoney(amount, resolvedCurrencySymbol);
@@ -4791,6 +6313,8 @@
 
                 const paymentCxcIdInput = document.getElementById('payment-cxc-id');
                 if (paymentCxcIdInput) paymentCxcIdInput.value = cxcId || '';
+                const paymentInvoiceTotal = document.getElementById('payment-invoice-total');
+                if (paymentInvoiceTotal) paymentInvoiceTotal.value = Number(amount || 0).toFixed(2);
                 const selectedCxcInputs = document.getElementById('payment-selected-cxc-inputs');
                 if (selectedCxcInputs) {
                     selectedCxcInputs.replaceChildren(...cxcIds.map(id => {
@@ -4823,8 +6347,8 @@
                 if (paymentDate) paymentDate.value = '{{ now()->format('Y-m-d') }}';
                 if (paymentPeriodEnd) {
                     paymentPeriodEnd.value = periodEnd || '';
-                    paymentPeriodEnd.readOnly = isViewOnly;
-                    paymentPeriodEnd.required = Boolean(periodEnd) && !isViewOnly;
+                    paymentPeriodEnd.readOnly = isViewOnly || isPendingWithholding;
+                    paymentPeriodEnd.required = Boolean(periodEnd) && !isViewOnly && !isPendingWithholding;
                 }
                 if (paymentCanCuotas) paymentCanCuotas.value = '';
                 paymentInstallments?.replaceChildren();
@@ -4849,6 +6373,10 @@
                 if (paymentComprobanteInput) paymentComprobanteInput.value = '';
                 if (paymentComprobanteName) paymentComprobanteName.textContent = '';
                 paymentDropzone?.classList.remove('is-invalid');
+                document.getElementById('payment-clear-comprobante')?.classList.add('hidden');
+                document.getElementById('payment-existing-proof')?.classList.add('hidden');
+                const removeProofInput = document.getElementById('payment-remove-comprobante');
+                if (removeProofInput) removeProofInput.value = '0';
 
                 if (selectedServiceInputs) {
                     selectedServiceInputs.replaceChildren(...serviceIds.map(id => {
@@ -4861,51 +6389,60 @@
                 }
 
                 const submitBtn = servicePaymentModal.querySelector('button[type="submit"]');
-                const modalTitle = servicePaymentModal.querySelector('h2, .modal-title, .font-medium');
+                const modalTitle = document.getElementById('service-payment-title');
 
-                if (!isViewOnly && clientId) {
-                    checkAndRenderVencidosButton(clientId, cxcId, amount, resolvedCurrencySymbol, 'pay', serviceIds, clientName);
+                if (!isViewOnly && !isPendingWithholding && clientId) {
+                    checkAndRenderVencidosButton(clientId, cxcId, amount, resolvedCurrencySymbol, 'pay', serviceIds, clientName, resolvedMonedaId);
                 } else {
                     resetVencidosState();
                 }
 
                 if (isViewOnly) {
-                    if (modalTitle) modalTitle.textContent = `Detalle del Cobro Realizado (${cxcEstado})`;
-                    if (submitBtn) submitBtn.style.display = 'none';
-
-                    if (cxcId) {
-                        fetch('/modulos/cuentas-por-cobrar/' + cxcId + '/detalle')
-                            .then(res => res.json())
-                            .then(res => {
-                                if (res.success && res.data) {
-                                    const d = res.data;
-                                    if (paymentClient) paymentClient.value = d.cliente_nombre || clientName;
-                                    if (paymentReference) paymentReference.value = d.docReferencia || docRef || '-';
-                                    const bankSelect = document.getElementById('payment-bank');
-                                    if (bankSelect && d.bancos_idbancos) bankSelect.value = d.bancos_idbancos;
-                                    const typeSelect = document.getElementById('payment-type');
-                                    if (typeSelect && d.tipoCobro_idtipoCobros) typeSelect.value = d.tipoCobro_idtipoCobros;
-                                    const methodSelect = document.getElementById('payment-method');
-                                    if (methodSelect && d.formaPago_idformaPago) methodSelect.value = d.formaPago_idformaPago;
-                                    const descTextarea = document.getElementById('payment-description');
-                                    if (descTextarea) descTextarea.value = d.detalle_descripcion || d.cxc_descripcion || '';
-
-                                    if (d.comprobante_archivo && paymentComprobanteName) {
-                                        paymentComprobanteName.innerHTML = `<a href="/storage/${d.comprobante_archivo}" target="_blank" class="inline-flex items-center gap-1.5 font-bold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-md px-3 py-1.5 text-xs transition duration-200 mt-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg> Ver Comprobante de Pago Adjunto</a>`;
-                                    }
-                                }
-                            })
-                            .catch(() => { });
-                    }
+                    if (modalTitle) modalTitle.textContent = 'Detalle del Cobro Realizado';
                 } else {
-                    if (modalTitle) modalTitle.textContent = 'Registrar cobro de servicios';
-                    if (submitBtn) submitBtn.style.display = '';
+                    if (modalTitle) modalTitle.textContent = isPendingWithholding
+                        ? `Registrar comprobante de ${withholdingType === 'retención' ? 'Retención' : 'Detracción'} pendiente`
+                        : 'Registrar cobro de servicios';
+                    if (submitBtn) {
+                        submitBtn.style.display = '';
+                        submitBtn.textContent = isPendingWithholding ? 'Registrar depósito' : 'Registrar cobro';
+                    }
                 }
 
+                if (isViewOnly) {
+                    servicePaymentModal.classList.remove('visible');
+                    servicePaymentModal.classList.add('hidden');
+                    servicePaymentModal.dataset.paymentUpdateUrl = paymentDetailsUpdateUrlTemplate.replace(
+                        '__id__',
+                        encodeURIComponent(cxcId)
+                    );
+                    setPaymentViewMode(true, false);
+                    try {
+                        const loaded = await loadPaymentDetails(cxcId, requestToken);
+                        if (!loaded || requestToken !== paymentDetailsRequestToken) return;
+                    } catch (error) {
+                        if (requestToken === paymentDetailsRequestToken) {
+                            alert(error.message || 'No se pudieron cargar los datos del pago.');
+                        }
+                        return;
+                    }
+                }
+                if (requestToken !== paymentDetailsRequestToken) return;
                 servicePaymentModal.classList.remove('hidden');
                 servicePaymentModal.classList.add('visible');
                 document.body.style.overflow = 'hidden';
             }
+
+            document.getElementById('payment-view-edit-btn')?.addEventListener('click', function () {
+                setPaymentViewMode(true, true);
+            });
+
+            document.getElementById('payment-view-cancel-edit-btn')?.addEventListener('click', function () {
+                setPaymentViewMode(true, false);
+                loadPaymentDetails(servicePaymentModal?.dataset.paymentCxcId || '').catch((error) => {
+                    alert(error.message || 'No se pudieron cargar los datos del pago.');
+                });
+            });
 
             const paymentComprobanteInput = document.getElementById('payment-comprobante');
             const paymentComprobanteName = document.getElementById('payment-comprobante-name');
@@ -4921,6 +6458,7 @@
                     if (paymentComprobanteName) {
                         paymentComprobanteName.textContent = 'Selecciona JPG, PNG o PDF de máximo 5 MB.';
                     }
+                    document.getElementById('payment-clear-comprobante')?.classList.add('hidden');
                     paymentDropzone?.classList.add('is-invalid');
                     return;
                 }
@@ -4928,12 +6466,39 @@
                 const transfer = new DataTransfer();
                 transfer.items.add(file);
                 paymentComprobanteInput.files = transfer.files;
+                const removeProofInput = document.getElementById('payment-remove-comprobante');
+                if (removeProofInput) removeProofInput.value = '0';
+                document.getElementById('payment-clear-comprobante')?.classList.remove('hidden');
 
                 if (paymentComprobanteName) {
                     paymentComprobanteName.textContent = `${file.name} (${(file.size / 1024).toFixed(0)} KB)`;
                 }
                 paymentDropzone?.classList.remove('is-invalid');
             }
+
+            document.querySelectorAll('[data-clear-upload]').forEach((button) => {
+                button.addEventListener('click', function () {
+                    const input = document.getElementById(this.dataset.clearUpload);
+                    const fileName = document.getElementById(this.dataset.clearName);
+                    if (input) input.value = '';
+                    if (fileName) fileName.textContent = '';
+                    this.classList.add('hidden');
+                    input?.closest('.erp-upload-box')?.classList.remove('is-invalid', 'is-dragging');
+                });
+            });
+
+            document.getElementById('payment-clear-comprobante')?.addEventListener('click', function () {
+                if (paymentComprobanteInput) paymentComprobanteInput.value = '';
+                if (paymentComprobanteName) paymentComprobanteName.textContent = '';
+                const removeProofInput = document.getElementById('payment-remove-comprobante');
+                if (removeProofInput) removeProofInput.value = '1';
+                const existingProof = document.getElementById('payment-existing-proof');
+                if (existingProof) {
+                    existingProof.classList.remove('hidden');
+                }
+                this.classList.add('hidden');
+                paymentDropzone?.classList.remove('is-invalid', 'is-dragging');
+            });
 
             if (paymentComprobanteInput) {
                 paymentComprobanteInput.addEventListener('change', function (e) {
@@ -4961,30 +6526,6 @@
                 });
             }
 
-            document.addEventListener('paste', function (e) {
-                const servicePaymentModal = document.getElementById('service-payment-modal');
-                if (!servicePaymentModal || !servicePaymentModal.classList.contains('visible')) return;
-                const pastedItem = Array.from((e.clipboardData && e.clipboardData.items) || [])
-                    .find(item => item.kind === 'file');
-                if (pastedItem) {
-                    e.preventDefault();
-                    handlePaymentComprobanteFile(pastedItem.getAsFile());
-                }
-            });
-
-
-            document.addEventListener('paste', function (e) {
-                const serviceFacturaModal = document.getElementById('service-factura-modal');
-                if (serviceFacturaModal && serviceFacturaModal.classList.contains('visible')) {
-                    const pastedItem = Array.from((e.clipboardData && e.clipboardData.items) || [])
-                        .find(item => item.kind === 'file');
-                    if (pastedItem) {
-                        e.preventDefault();
-                        handleFacturaFile(pastedItem.getAsFile());
-                    }
-                }
-            });
-
             function applyServicioSearch() {
                 const clientFilter = (document.getElementById('service-filter-client')?.value || '').toLowerCase().trim();
                 const selectedMonths = Array.from(serviceMonthInputs)
@@ -4993,6 +6534,7 @@
                 const yearFilter = document.getElementById('service-filter-year')?.value || 'all';
                 const documentFilter = (serviceDocumentInput?.value || '').toLowerCase().trim();
                 const dateFilter = serviceDateInput?.value || '';
+                const expirationDateFilter = serviceExpirationDateInput?.value || '';
                 const statusFilter = (document.getElementById('service-filter-status')?.value || '').toLowerCase().trim();
 
                 if (serviceSubtitle) {
@@ -5018,10 +6560,11 @@
                     let matchesMonth = selectedMonths.length === 0 || selectedMonths.includes(clientMonth);
                     let matchesYear = yearFilter === 'all' || clientYear === yearFilter;
                     let matchesDocument = documentFilter === '' || clientDocument.includes(documentFilter);
-                    let matchesDate = dateFilter === '' || row.dataset.endDate === dateFilter;
+                    let matchesDate = dateFilter === '' || row.dataset.registrationDate === dateFilter;
+                    let matchesExpirationDate = expirationDateFilter === '' || row.dataset.endDate === expirationDateFilter;
                     let matchesStatus = statusFilter === '' || clientStatus === statusFilter;
 
-                    const isVisible = matchesClient && matchesMonth && matchesYear && matchesDocument && matchesDate && matchesStatus;
+                    const isVisible = matchesClient && matchesMonth && matchesYear && matchesDocument && matchesDate && matchesExpirationDate && matchesStatus;
                     row.style.display = isVisible ? '' : 'none';
                     if (detailRow) {
                         if (!isVisible) {
@@ -5085,9 +6628,11 @@
                     { name: 'service_year', value: document.getElementById('service-filter-year')?.value || 'all' },
                     { name: 'service_document', value: serviceDocumentInput?.value },
                     { name: 'service_date', value: serviceDateInput?.value },
+                    { name: 'service_expiration_date', value: document.getElementById('service-filter-expiration-date')?.value },
                     { name: 'service_status', value: document.getElementById('service-filter-status')?.value },
                 ]);
             }
+            refreshServiceExportUrl();
 
             document.getElementById('service-filter-apply-btn')?.addEventListener('click', function () {
                 applyServicioSearch();
@@ -5100,6 +6645,8 @@
                 if (serviceSearchInput) serviceSearchInput.value = '';
                 if (serviceDocumentInput) serviceDocumentInput.value = '';
                 if (serviceDateInput) serviceDateInput.value = '';
+                const expirationDateInput = document.getElementById('service-filter-expiration-date');
+                if (expirationDateInput) expirationDateInput.value = '';
                 serviceMonthInputs.forEach((input) => { input.checked = input.value === currentMonth; });
                 const yearInput = document.getElementById('service-filter-year');
                 const statusInput = document.getElementById('service-filter-status');
@@ -5120,143 +6667,59 @@
             applyServicioSearch();
 
             function applyCotizacionFilters() {
-                const q = (searchInput ? searchInput.value : '').toLowerCase().trim();
-                const groupVal = (document.getElementById('quote-filter-group')?.value || '').toLowerCase().trim();
-                const clientVal = (document.getElementById('quote-filter-client')?.value || '').toLowerCase().trim();
-                const currencyVal = (document.getElementById('quote-filter-currency')?.value || '').toLowerCase().trim();
-                const serviceVal = (document.getElementById('quote-filter-service')?.value || '').toLowerCase().trim();
-                const statusVal = String(appliedQuoteStatus).toLowerCase().trim();
-                const dateVal = document.getElementById('quote-filter-date')?.value || '';
-
-                if (searchClearBtn) {
-                    searchClearBtn.style.display = q !== '' ? 'flex' : 'none';
-                }
-
-                let activeFilterCount = 0;
-                if (groupVal) activeFilterCount++;
-                if (clientVal) activeFilterCount++;
-                if (currencyVal) activeFilterCount++;
-                if (serviceVal) activeFilterCount++;
-                if (statusVal && statusVal !== '1') activeFilterCount++;
-                if (dateVal) activeFilterCount++;
-
-                if (filterBadge) {
-                    filterBadge.textContent = String(activeFilterCount);
-                    filterBadge.classList.toggle('hidden', activeFilterCount === 0);
-                    filterBadge.classList.toggle('flex', activeFilterCount > 0);
-                }
-
+                refreshQuoteAnnulButton();
+                const statusVal = document.getElementById('quote-filter-status')?.value || 'pending';
                 const subtitleStatus = document.getElementById('quote-subtitle-status');
                 if (subtitleStatus) {
-                    if (statusVal === '2') {
-                        subtitleStatus.textContent = 'Aprobado (Con pago)';
-                    } else if (statusVal === 'todos') {
+                    if (statusVal === 'approved') {
+                        subtitleStatus.textContent = 'Aprobado';
+                    } else if (statusVal === 'all') {
                         subtitleStatus.textContent = 'Todos los estados';
+                    } else if (statusVal === 'pending_credit') {
+                        subtitleStatus.textContent = 'Pendiente Credito';
+                    } else if (statusVal === 'pending_autodetraccion') {
+                        subtitleStatus.textContent = 'Pendiente Autodetracción';
+                    } else if (statusVal === 'pending_detraccion') {
+                        subtitleStatus.textContent = 'Pendiente Detracción';
+                    } else if (statusVal === 'pending_retencion') {
+                        subtitleStatus.textContent = 'Pendiente Retención';
                     } else {
-                        subtitleStatus.textContent = 'Aprobado(SP) - Pendiente';
+                        subtitleStatus.textContent = 'Pendiente';
                     }
                 }
-
-                let visibleRows = 0;
-                document.querySelectorAll('.erp-quotations-table tbody tr').forEach(row => {
-                    const text = row.textContent.toLowerCase();
-                    const matchesQuery = q === '' || text.includes(q);
-
-                    const groupCell = row.cells[7]?.textContent.toLowerCase().trim() || '';
-                    const matchesGroup = groupVal === '' || groupCell.includes(groupVal);
-
-                    const clientCell = row.cells[2]?.textContent.toLowerCase().trim() || '';
-                    const matchesClient = clientVal === '' || clientCell.includes(clientVal);
-
-                    const montoCell = row.cells[3]?.textContent.toLowerCase().trim() || '';
-                    let matchesCurrency = true;
-                    if (currencyVal === 'sol') matchesCurrency = montoCell.includes('s/') || montoCell.includes('sol');
-                    else if (currencyVal === 'dolar') matchesCurrency = montoCell.includes('$') || montoCell.includes('usd') || montoCell.includes('dolar');
-                    else if (currencyVal === 'euro') matchesCurrency = montoCell.includes('€') || montoCell.includes('eur');
-
-                    const serviceCell = row.cells[8]?.textContent.toLowerCase().trim() || '';
-                    const matchesService = serviceVal === '' || serviceCell === serviceVal;
-
-                    const rowStatus = (row.dataset.estado || '1').trim();
-                    let matchesStatus = true;
-                    if (statusVal === '1') {
-                        matchesStatus = (rowStatus === '1');
-                    } else if (statusVal === '2') {
-                        matchesStatus = (rowStatus === '2');
-                    } else if (statusVal === 'todos') {
-                        matchesStatus = true;
-                    }
-
-                    const fechaCell = row.cells[6]?.textContent.trim() || '';
-                    const dateParts = fechaCell.split('/');
-                    const rowDate = dateParts.length === 3
-                        ? dateParts[2] + '-' + dateParts[1] + '-' + dateParts[0]
-                        : '';
-                    const matchesDate = dateVal === '' || rowDate === dateVal;
-
-                    const isVisible = matchesQuery && matchesGroup && matchesClient && matchesCurrency && matchesService && matchesStatus && matchesDate;
-                    row.style.display = isVisible ? '' : 'none';
-                    if (isVisible) visibleRows++;
-                });
-
-                const noResults = document.getElementById('quote-no-results');
-                if (noResults) {
-                    noResults.style.display = visibleRows === 0 ? 'block' : 'none';
-                }
             }
 
-            if (searchInput) {
-                searchInput.addEventListener('input', function () {
-                    applyCotizacionFilters();
-                    clearTimeout(quoteSearchTimer);
-                    quoteSearchTimer = setTimeout(submitQuoteFilters, 200);
-                });
-            }
-
-            if (searchClearBtn) {
-                searchClearBtn.addEventListener('click', function () {
-                    if (searchInput) {
-                        searchInput.value = '';
-                    }
-                    applyCotizacionFilters();
-                    submitQuoteFilters();
-                });
-            }
-
-            const statusSelect = document.getElementById('quote-filter-status');
             const applyFilterBtn = document.getElementById('quote-filter-apply-btn');
             if (applyFilterBtn) {
                 applyFilterBtn.addEventListener('click', function () {
-                    appliedQuoteStatus = statusSelect?.value || '1';
                     applyCotizacionFilters();
                     submitQuoteFilters({ updateQuoteStats: true });
-                    const dropdownPanel = applyFilterBtn.closest('.erp-dropdown-panel');
-                    if (dropdownPanel) {
-                        dropdownPanel.classList.add('hidden');
-                    }
                 });
             }
+
+            document.getElementById('quote-filter-form')?.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    applyCotizacionFilters();
+                    submitQuoteFilters({ updateQuoteStats: true });
+                }
+            });
 
             const clearFilterBtn = document.getElementById('quote-filter-clear-btn');
             if (clearFilterBtn) {
                 clearFilterBtn.addEventListener('click', function () {
-                    if (document.getElementById('quote-filter-group')) document.getElementById('quote-filter-group').value = '';
                     if (document.getElementById('quote-filter-client')) document.getElementById('quote-filter-client').value = '';
-                    if (document.getElementById('quote-filter-currency')) document.getElementById('quote-filter-currency').value = '';
+                    if (document.getElementById('quote-filter-number')) document.getElementById('quote-filter-number').value = '';
+                    if (document.getElementById('quote-filter-payment-format')) document.getElementById('quote-filter-payment-format').value = '';
+                    if (document.getElementById('quote-filter-validity')) document.getElementById('quote-filter-validity').value = '';
                     if (document.getElementById('quote-filter-service')) document.getElementById('quote-filter-service').value = '';
-                    if (document.getElementById('quote-filter-status')) document.getElementById('quote-filter-status').value = '1';
+                    if (document.getElementById('quote-filter-status')) document.getElementById('quote-filter-status').value = 'pending';
                     if (document.getElementById('quote-filter-date')) document.getElementById('quote-filter-date').value = '';
-                    appliedQuoteStatus = '1';
                     applyCotizacionFilters();
                     submitQuoteFilters({ updateQuoteStats: true });
-                    const dropdownPanel = clearFilterBtn.closest('.erp-dropdown-panel');
-                    if (dropdownPanel) {
-                        dropdownPanel.classList.add('hidden');
-                    }
                 });
             }
 
-            // Aplicar filtrado inicial (por defecto muestra estado 1 / pendiente)
             applyCotizacionFilters();
 
             // Manejador limpio y directo de los desplegables (Exportar y Filtro)
@@ -5333,6 +6796,28 @@
             const quotePreviewFrame = document.getElementById('erp-cotizacion-preview-frame');
             const quotePreviewNumber = document.getElementById('erp-cotizacion-preview-number');
             const previewLoading = document.getElementById('preview-loading');
+            const quotationReceiptsModal = document.getElementById('quotation-receipts-modal');
+            const quotationReceiptsTitle = document.getElementById('quotation-receipts-title');
+            const paymentReceiptLink = document.getElementById('quotation-payment-receipt-link');
+            const paymentReceiptMissing = document.getElementById('quotation-payment-receipt-missing');
+            const withholdingReceiptSection = document.getElementById('quotation-withholding-receipt-section');
+            const withholdingReceiptLink = document.getElementById('quotation-withholding-receipt-link');
+            const withholdingReceiptMissing = document.getElementById('quotation-withholding-receipt-missing');
+            const receiptInvoiceNumber = document.getElementById('quotation-receipt-invoice-number');
+            const receiptPaymentDate = document.getElementById('quotation-receipt-payment-date');
+            const receiptPaymentAmount = document.getElementById('quotation-receipt-payment-amount');
+            const receiptPaymentComment = document.getElementById('quotation-receipt-payment-comment');
+            const receiptWithholdingLabel = document.getElementById('quotation-receipt-withholding-label');
+            const receiptWithholdingDate = document.getElementById('quotation-receipt-withholding-date');
+            const receiptWithholdingAmount = document.getElementById('quotation-receipt-withholding-amount');
+            const receiptWithholdingAmountLabel = document.getElementById('quotation-receipt-withholding-amount-label');
+            const receiptWithholdingTitle = document.getElementById('quotation-receipt-withholding-title');
+
+            const closeQuotationReceipts = function () {
+                quotationReceiptsModal?.classList.add('hidden');
+                quotationReceiptsModal?.classList.remove('visible');
+                document.body.style.overflow = '';
+            };
 
             const closeQuotePreview = function () {
                 if (!quotePreviewModal) {
@@ -5353,6 +6838,90 @@
             };
 
             document.addEventListener('click', function (event) {
+                const receiptsButton = event.target.closest('[data-open-quotation-receipts]');
+                if (receiptsButton && quotationReceiptsModal) {
+                    const paymentReceiptUrl = receiptsButton.dataset.paymentReceiptUrl || '';
+                    const withholdingReceiptUrl = receiptsButton.dataset.withholdingReceiptUrl || '';
+                    const withholdingApplies = receiptsButton.dataset.withholdingApplies === '1';
+                    const withholdingType = receiptsButton.dataset.withholdingType || 'detracción';
+                    const emptyValue = '—';
+
+                    if (quotationReceiptsTitle) {
+                        quotationReceiptsTitle.textContent = `Recibos de la cotización ${receiptsButton.dataset.quotationNumber || ''}`;
+                    }
+                    if (receiptInvoiceNumber) {
+                        receiptInvoiceNumber.value = receiptsButton.dataset.invoiceNumber || emptyValue;
+                    }
+                    if (receiptPaymentDate) {
+                        receiptPaymentDate.value = receiptsButton.dataset.paymentDate || emptyValue;
+                    }
+                    if (receiptPaymentAmount) {
+                        receiptPaymentAmount.value = receiptsButton.dataset.paymentAmount || emptyValue;
+                    }
+                    if (receiptPaymentComment) {
+                        receiptPaymentComment.value = receiptsButton.dataset.paymentComment || emptyValue;
+                    }
+                    if (receiptWithholdingLabel) {
+                        const withholdingName = withholdingType.charAt(0).toUpperCase() + withholdingType.slice(1);
+                        receiptWithholdingLabel.textContent = `Fecha de pago de ${withholdingName}`;
+                    }
+                    if (receiptWithholdingDate) {
+                        receiptWithholdingDate.value = receiptsButton.dataset.withholdingDate || emptyValue;
+                    }
+                    if (receiptWithholdingAmount) {
+                        receiptWithholdingAmount.value = receiptsButton.dataset.withholdingAmount || emptyValue;
+                    }
+                    if (receiptWithholdingAmountLabel) {
+                        const withholdingName = withholdingType.charAt(0).toUpperCase() + withholdingType.slice(1);
+                        receiptWithholdingAmountLabel.textContent = `Monto de ${withholdingName}`;
+                    }
+                    if (receiptWithholdingTitle) {
+                        const withholdingName = withholdingType.charAt(0).toUpperCase() + withholdingType.slice(1);
+                        receiptWithholdingTitle.textContent = `Detalle de ${withholdingName}:`;
+                    }
+                    if (paymentReceiptLink) {
+                        paymentReceiptLink.dataset.receiptUrl = paymentReceiptUrl;
+                        paymentReceiptLink.dataset.missingMessage = 'Sin recibo de pago';
+                    }
+                    if (paymentReceiptMissing) {
+                        paymentReceiptMissing.textContent = 'Sin recibo de pago';
+                        paymentReceiptMissing.classList.add('hidden');
+                    }
+                    if (withholdingReceiptSection) {
+                        withholdingReceiptSection.classList.toggle('hidden', !withholdingApplies);
+                    }
+                    if (withholdingReceiptLink) {
+                        withholdingReceiptLink.dataset.receiptUrl = withholdingReceiptUrl;
+                        withholdingReceiptLink.dataset.missingMessage = `Sin recibo de ${withholdingType}`;
+                        withholdingReceiptLink.textContent = `Ver recibo de ${withholdingType}`;
+                    }
+                    if (withholdingReceiptMissing) {
+                        withholdingReceiptMissing.textContent = `Sin recibo de ${withholdingType}`;
+                        withholdingReceiptMissing.classList.add('hidden');
+                    }
+                    quotationReceiptsModal.classList.remove('hidden');
+                    quotationReceiptsModal.classList.add('visible');
+                    document.body.style.overflow = 'hidden';
+                    return;
+                }
+                const receiptAction = event.target.closest('[data-open-quotation-receipt]');
+                if (receiptAction) {
+                    const receiptUrl = receiptAction.dataset.receiptUrl || '';
+                    const missingMessage = receiptAction.dataset.missingMessage || 'Sin recibo';
+                    const missingElement = document.getElementById(receiptAction.dataset.missingElement || '');
+                    if (receiptUrl) {
+                        window.open(receiptUrl, '_blank', 'noopener');
+                    } else if (missingElement) {
+                        missingElement.textContent = missingMessage;
+                        missingElement.classList.remove('hidden');
+                    }
+                    return;
+                }
+                if (event.target.closest('[data-close-quotation-receipts]')) {
+                    closeQuotationReceipts();
+                    return;
+                }
+
                 const previewButton = event.target.closest('[data-cotizacion-pdf-preview]');
                 if (previewButton && quotePreviewModal && quotePreviewFrame) {
                     event.preventDefault();
@@ -5401,18 +6970,522 @@
             const gestionSavingStatus = document.getElementById('erp-gestion-saving-status');
 
             const gestionForm = document.getElementById('erp-gestion-form');
+            const gestionPaymentFormat = document.getElementById('erp-gestion-payment-format');
+            const gestionCreditFields = document.getElementById('erp-gestion-credit-fields');
+            const gestionInstallmentsPanel = document.getElementById('erp-gestion-credit-installments');
+            const gestionInstallments = document.getElementById('erp-gestion-installments');
+            const gestionCurrencyMode = document.getElementById('erp-gestion-currency-mode');
+            const gestionCurrencyExtra = document.getElementById('erp-gestion-currency-extra');
+            const gestionCurrencyButton = document.getElementById('erp-gestion-currency-toggle');
+            const gestionOtherCurrency = document.getElementById('erp-gestion-currency');
+            const gestionExchangeRate = document.getElementById('erp-gestion-exchange-rate');
+            const gestionForeignAmount = document.getElementById('erp-gestion-foreign-amount');
+            const gestionConvertedAmount = document.getElementById('erp-gestion-converted-amount');
+            const gestionPaymentAmount = document.getElementById('erp-gestion-payment-amount');
+            const gestionPaymentAmountField = document.getElementById('erp-gestion-payment-amount-field');
+            const gestionPaymentAmountCurrency = document.getElementById('erp-gestion-payment-amount-currency');
+            const gestionCancelAmountField = document.getElementById('erp-gestion-cancel-amount-field');
+            const gestionAmountInput = document.getElementById('erp-gestion-amount');
+            const gestionAmountCurrency = document.getElementById('erp-gestion-amount-currency');
+            const gestionForeignAmountCurrency = document.getElementById('erp-gestion-foreign-amount-currency');
+            const gestionConvertedAmountCurrency = document.getElementById('erp-gestion-converted-amount-currency');
+            const gestionPayMode = document.getElementById('erp-gestion-pay-mode');
+            let gestionBalance = 0;
+            let gestionOriginalBalance = 0;
+            let gestionGrossBalance = 0;
+            let gestionDeductionAmount = 0;
+            let gestionOriginalCurrencyId = '';
+            let gestionIsCreditContinuation = false;
+            let gestionWithholdingEligible = false;
+            let gestionWithholdingRetention = false;
+            let gestionWithholdingType = 'detracción';
+            let gestionCompleteWithholding = false;
+            let gestionCreditTotal = null;
+            let gestionFirstInstallmentPaid = null;
+            let gestionCreditCurrencySymbol = '';
+            let gestionNextInstallmentNumber = null;
+            let gestionNextInstallmentAmount = null;
+            let gestionNextInstallmentDate = '';
 
-            const openGestionModal = function (number, approveUrl, clientName, amountDisplay, paymentFormat) {
+            const gestionIsCredit = function () {
+                return /credito|crédito/i.test(gestionPaymentFormat?.selectedOptions?.[0]?.textContent || '');
+            };
+
+            const gestionIsDollarCurrency = function (option) {
+                return Boolean(option) && (
+                    option.dataset.symbol?.trim() === '$'
+                    || /dolar|dollar|usd/i.test(option.textContent || '')
+                );
+            };
+
+            const normalizeGestionCurrencySymbol = function (symbol) {
+                const normalizedSymbol = String(symbol || '').trim();
+                return ['s', 's/', 's/.', 'sol', 'soles', 'pen'].includes(normalizedSymbol.toLowerCase())
+                    ? 'S/'
+                    : normalizedSymbol;
+            };
+
+            const gestionCurrencyOption = function (currencyId) {
+                return Array.from(gestionOtherCurrency?.options || [])
+                    .find((option) => option.value === String(currencyId || ''));
+            };
+
+            const syncGestionPaymentAmountCurrency = function () {
+                const originalCurrencySymbol = normalizeGestionCurrencySymbol(
+                    gestionCurrencyOption(gestionOriginalCurrencyId)?.dataset.symbol
+                );
+                const selectedCurrencySymbol = normalizeGestionCurrencySymbol(
+                    gestionOtherCurrency?.selectedOptions?.[0]?.dataset.symbol
+                );
+                if (gestionPaymentAmountCurrency) gestionPaymentAmountCurrency.textContent = originalCurrencySymbol;
+                if (gestionAmountCurrency) gestionAmountCurrency.textContent = originalCurrencySymbol;
+                if (gestionForeignAmountCurrency) gestionForeignAmountCurrency.textContent = selectedCurrencySymbol;
+                if (gestionConvertedAmountCurrency) {
+                    gestionConvertedAmountCurrency.textContent = gestionCurrencyMode?.value === 'other'
+                        ? selectedCurrencySymbol
+                        : '';
+                }
+            };
+
+            const gestionConvertAmount = function (amount, destinationCurrency, rate) {
+                if (!destinationCurrency || rate <= 0) return null;
+                const converted = gestionIsDollarCurrency(destinationCurrency)
+                    ? amount / rate
+                    : amount * rate;
+                return Number(converted.toFixed(2));
+            };
+
+            const updateGestionWithholding = function (grossAmount, currencySymbol = '') {
+                gestionGrossBalance = Number(grossAmount || 0);
+                gestionDeductionAmount = gestionWithholdingEligible
+                    && !gestionIsCreditContinuation
+                    && gestionGrossBalance > 700
+                    ? Math.round(gestionGrossBalance * (gestionWithholdingRetention ? 0.03 : 0.12))
+                    : 0;
+                gestionBalance = Number((gestionGrossBalance - gestionDeductionAmount).toFixed(2));
+
+                const summary = document.getElementById('erp-gestion-withholding-summary');
+                if (!summary) return;
+                summary.classList.toggle('hidden', gestionDeductionAmount <= 0 || gestionCompleteWithholding);
+                if (gestionDeductionAmount > 0) {
+                    const symbol = normalizeGestionCurrencySymbol(currencySymbol) || 'S/';
+                    const deductionLabel = gestionWithholdingRetention ? 'Retención (3%)' : 'Detracción (12%)';
+                    summary.textContent = `Total: ${symbol} ${gestionGrossBalance.toFixed(2)} | ${deductionLabel}: ${symbol} ${gestionDeductionAmount.toFixed(2)}`;
+                } else {
+                    summary.textContent = '';
+                }
+            };
+
+            const syncGestionCurrencyOptions = function () {
+                const debtCurrencyId = gestionOriginalCurrencyId;
+                let selectedCurrencyIsDebtCurrency = false;
+                Array.from(gestionOtherCurrency?.options || []).forEach((option) => {
+                    const isDebtCurrency = Boolean(option.value) && option.value === debtCurrencyId;
+                    option.disabled = isDebtCurrency;
+                    option.hidden = isDebtCurrency;
+                    selectedCurrencyIsDebtCurrency = selectedCurrencyIsDebtCurrency
+                        || (isDebtCurrency && option.selected);
+                });
+                if (selectedCurrencyIsDebtCurrency && gestionOtherCurrency) {
+                    gestionOtherCurrency.value = '';
+                }
+            };
+
+            const syncGestionConvertedAmount = function () {
+                const rate = Number(gestionExchangeRate?.value || 0);
+                const foreignAmount = Number(gestionForeignAmount?.value || 0);
+                const paymentCurrencyId = String(gestionOtherCurrency?.value || '');
+                const sourceCurrencyOption = Array.from(gestionOtherCurrency?.options || [])
+                    .find((option) => option.value === gestionOriginalCurrencyId);
+                const paymentCurrencyOption = gestionOtherCurrency?.selectedOptions?.[0];
+                const changesCurrency = Boolean(paymentCurrencyId) && paymentCurrencyId !== gestionOriginalCurrencyId;
+                const convertedBalance = changesCurrency
+                    ? gestionConvertAmount(gestionOriginalBalance, paymentCurrencyOption, rate)
+                    : null;
+                const grossBalance = convertedBalance ?? gestionOriginalBalance;
+                const currencySymbol = normalizeGestionCurrencySymbol(
+                    (convertedBalance === null ? sourceCurrencyOption : paymentCurrencyOption)?.dataset.symbol
+                );
+                updateGestionWithholding(grossBalance, currencySymbol);
+                if (gestionAmountInput) {
+                    gestionAmountInput.value = gestionCurrencyMode?.value === 'other'
+                        ? gestionOriginalBalance.toFixed(2)
+                        : (gestionWithholdingEligible ? gestionBalance : gestionOriginalBalance).toFixed(2);
+                    gestionAmountInput.removeAttribute('max');
+                    gestionAmountInput.readOnly = !gestionWithholdingEligible
+                        || gestionIsCreditContinuation
+                        || gestionCurrencyMode?.value === 'other';
+                    gestionAmountInput.name = gestionIsCreditContinuation || gestionCurrencyMode?.value === 'other'
+                        ? ''
+                        : 'montoPago';
+                }
+                if (gestionConvertedAmount) {
+                    gestionConvertedAmount.value = convertedBalance === null
+                        ? ''
+                        : convertedBalance.toFixed(2);
+                }
+                if (gestionForeignAmount) {
+                    if (convertedBalance !== null) {
+                        gestionForeignAmount.max = grossBalance.toFixed(2);
+                    } else {
+                        gestionForeignAmount.removeAttribute('max');
+                    }
+                }
+                syncGestionPaymentAmountCurrency();
+                if (gestionPaymentAmount && gestionCurrencyMode?.value === 'other') {
+                    gestionPaymentAmount.value = foreignAmount > 0 ? foreignAmount.toFixed(2) : '';
+                }
+                const exchangeRateLabel = document.querySelector('label[for="erp-gestion-exchange-rate"]');
+                if (exchangeRateLabel) {
+                    const isDollarSolPair = (
+                        gestionIsDollarCurrency(sourceCurrencyOption)
+                        && /sol|pen/i.test(paymentCurrencyOption?.textContent || '')
+                    ) || (
+                        /sol|pen/i.test(sourceCurrencyOption?.textContent || '')
+                        && gestionIsDollarCurrency(paymentCurrencyOption)
+                    );
+                    exchangeRateLabel.firstChild.textContent = isDollarSolPair
+                        ? 'Tipo de cambio (S/ por $)'
+                        : 'Tipo de cambio';
+                }
+                if (gestionPaymentAmount && gestionCurrencyMode?.value !== 'other') {
+                    gestionPaymentAmount.value = gestionIsCredit()
+                        ? (gestionInstallments?.querySelector('input[name="cuotas_montos[]"]')?.value || gestionBalance.toFixed(2))
+                        : gestionBalance.toFixed(2);
+                }
+                renderGestionInstallments();
+            };
+
+            const renderGestionInstallments = function () {
+                if (!gestionInstallments || !gestionCreditFields || !gestionInstallmentsPanel) return;
+                if (gestionCompleteWithholding) return;
+                const isCredit = gestionIsCredit();
+                const isContinuation = isCredit && gestionIsCreditContinuation;
+                gestionCreditFields.classList.toggle('hidden', !isCredit || isContinuation);
+                gestionCancelAmountField?.classList.toggle('hidden', isContinuation);
+                const isOtherCurrency = gestionCurrencyMode?.value === 'other';
+                gestionPaymentAmountField?.classList.toggle(
+                    'hidden',
+                    isOtherCurrency || !isContinuation
+                );
+                if (gestionAmountInput) {
+                    gestionAmountInput.readOnly = !gestionWithholdingEligible || isContinuation || isOtherCurrency;
+                    gestionAmountInput.name = isContinuation || isOtherCurrency ? '' : 'montoPago';
+                }
+                if (gestionPaymentAmount) {
+                    gestionPaymentAmount.name = isContinuation || (isOtherCurrency && isCredit)
+                        ? 'montoPago'
+                        : '';
+                }
+                syncGestionPaymentAmountCurrency();
+                const paidInstallmentSummary = document.getElementById('erp-gestion-paid-installment-summary');
+                if (paidInstallmentSummary) {
+                    const hasPaidFirstInstallment = isContinuation
+                        && gestionFirstInstallmentPaid !== null
+                        && gestionCreditTotal !== null;
+                    paidInstallmentSummary.classList.toggle('hidden', !hasPaidFirstInstallment);
+                    if (hasPaidFirstInstallment) {
+                        const currencyPrefix = gestionCreditCurrencySymbol
+                            ? `${gestionCreditCurrencySymbol} `
+                            : '';
+                        paidInstallmentSummary.textContent = `Cuota 1 pagada: ${currencyPrefix}${gestionFirstInstallmentPaid.toFixed(2)} · Total de la cotización: ${currencyPrefix}${gestionCreditTotal.toFixed(2)}`;
+                    }
+                }
+                const nextInstallmentSummary = document.getElementById('erp-gestion-next-installment-summary');
+                if (nextInstallmentSummary) {
+                    const hasNextInstallment = isContinuation
+                        && gestionNextInstallmentNumber
+                        && gestionNextInstallmentAmount !== null;
+                    nextInstallmentSummary.classList.toggle('hidden', !hasNextInstallment);
+                    if (hasNextInstallment) {
+                        const dueDate = gestionNextInstallmentDate.split(/[ T]/)[0] || 'sin fecha';
+                        const currencyPrefix = gestionCreditCurrencySymbol
+                            ? `${gestionCreditCurrencySymbol} `
+                            : '';
+                        nextInstallmentSummary.textContent = `Cuota ${gestionNextInstallmentNumber} pendiente · Monto: ${currencyPrefix}${gestionNextInstallmentAmount.toFixed(2)} · Fecha: ${dueDate}`;
+                    }
+                }
+                document.getElementById('erp-gestion-converted-total-field')?.classList.toggle(
+                    'hidden',
+                    !isOtherCurrency || gestionConvertedAmount?.value === ''
+                );
+                if (gestionPaymentAmount) {
+                    gestionPaymentAmount.required = isContinuation && !isOtherCurrency;
+                }
+                const paymentAmountLabel = document.getElementById('erp-gestion-payment-amount-label');
+                if (paymentAmountLabel) {
+                    paymentAmountLabel.textContent = isCredit ? 'Monto de cuota a pagar' : 'Monto a cancelar';
+                }
+                const countInput = document.getElementById('erp-gestion-installment-count');
+                const intervalInput = document.getElementById('erp-gestion-installment-interval');
+                if (countInput) countInput.required = isCredit && !isContinuation;
+                if (intervalInput) intervalInput.required = isCredit && !isContinuation;
+                if (!isCredit) {
+                    gestionInstallmentsPanel.classList.add('hidden');
+                    gestionInstallments.replaceChildren();
+                    if (gestionPayMode) gestionPayMode.value = 'total';
+                    if (gestionPaymentAmount) {
+                        gestionPaymentAmount.readOnly = !gestionWithholdingEligible;
+                        if (!isOtherCurrency) {
+                            gestionPaymentAmount.value = gestionPaymentAmount.value || gestionBalance.toFixed(2);
+                        }
+                    }
+                    return;
+                }
+                if (isContinuation) {
+                    gestionInstallmentsPanel.classList.add('hidden');
+                    gestionInstallments.replaceChildren();
+                    if (gestionPayMode) gestionPayMode.value = 'parcial';
+                    if (gestionPaymentAmount) {
+                        gestionPaymentAmount.readOnly = true;
+                        if (!isOtherCurrency) {
+                            gestionPaymentAmount.value = (gestionNextInstallmentAmount ?? gestionBalance).toFixed(2);
+                        }
+                    }
+                    return;
+                }
+
+                const count = Math.max(0, Math.min(Number(countInput?.value || 0), 60));
+                const intervalDays = Number(intervalInput?.value || 0);
+                const existingAmounts = Array.from(gestionInstallments.querySelectorAll('input[name="cuotas_montos[]"]'))
+                    .map((input) => Math.round(Number(input.value || 0) * 100));
+                const totalCents = Math.max(0, Math.round(gestionBalance * 100));
+                const preserveAmounts = existingAmounts.length === count
+                    && existingAmounts.reduce((sum, amount) => sum + amount, 0) === totalCents;
+                gestionInstallments.replaceChildren();
+                if (!count || !intervalDays) {
+                    gestionInstallmentsPanel.classList.add('hidden');
+                    if (gestionPaymentAmount && !isOtherCurrency) {
+                        gestionPaymentAmount.readOnly = true;
+                        gestionPaymentAmount.value = gestionBalance.toFixed(2);
+                    }
+                    return;
+                }
+                gestionInstallmentsPanel.classList.remove('hidden');
+                if (gestionPayMode) gestionPayMode.value = count > 1 ? 'parcial' : 'total';
+                const dateParts = (document.getElementById('erp-gestion-date')?.value || '').split('-').map(Number);
+                if (dateParts.length !== 3 || dateParts.some((part) => !part)) return;
+                const firstDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+                const defaultAmountCents = Math.floor(totalCents / count);
+                const remainingDefaultCents = totalCents % count;
+                for (let index = 1; index <= count; index++) {
+                    const dueDate = new Date(firstDate.getFullYear(), firstDate.getMonth(), firstDate.getDate() + intervalDays * (index - 1));
+                    const dateValue = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, '0')}-${String(dueDate.getDate()).padStart(2, '0')}`;
+                    const amountCents = preserveAmounts
+                        ? existingAmounts[index - 1]
+                        : defaultAmountCents + (index <= remainingDefaultCents ? 1 : 0);
+                    const row = document.createElement('div');
+                    row.className = 'grid grid-cols-2 gap-2 mb-1.5';
+                    row.innerHTML = `<label class="text-xs font-semibold text-slate-600">Cuota ${index} · Monto
+                        <input name="cuotas_montos[]" type="number" min="0.01" step="0.01" value="${(amountCents / 100).toFixed(2)}" required class="mt-1 w-full rounded-lg border border-slate-300 p-2 text-xs text-slate-800"></label>
+                        <label class="text-xs font-semibold text-slate-600">Fecha a pagar
+                        <input name="cuotas_fechas[]" type="date" value="${dateValue}" required class="mt-1 w-full rounded-lg border border-slate-300 p-2 text-xs text-slate-800"></label>`;
+                    gestionInstallments.appendChild(row);
+                }
+                const firstInstallment = gestionInstallments.querySelector('input[name="cuotas_montos[]"]');
+                if (firstInstallment && gestionPaymentAmount && !isOtherCurrency) {
+                    if (gestionAmountInput) {
+                        gestionAmountInput.value = count === 1 ? gestionBalance.toFixed(2) : firstInstallment.value;
+                        gestionAmountInput.readOnly = !gestionWithholdingEligible;
+                    }
+                }
+                if (firstInstallment && isOtherCurrency && Number(gestionForeignAmount?.value || 0) > 0) {
+                    firstInstallment.value = Number(gestionForeignAmount.value).toFixed(2);
+                    rebalanceGestionInstallments(firstInstallment, false);
+                }
+            };
+
+            const rebalanceGestionInstallments = function (changedInput, syncPaymentAmount = true) {
+                if (!gestionInstallments || !changedInput) return;
+                const amountInputs = Array.from(gestionInstallments.querySelectorAll('input[name="cuotas_montos[]"]'));
+                const totalCents = Math.max(0, Math.round(gestionBalance * 100));
+                if (amountInputs.length <= 1) {
+                    if (amountInputs[0]) amountInputs[0].value = (totalCents / 100).toFixed(2);
+                    return;
+                }
+
+                const minimumPerInstallment = 1;
+                const maximumEditedCents = Math.max(minimumPerInstallment, totalCents - (amountInputs.length - 1) * minimumPerInstallment);
+                const enteredAmount = Number(changedInput.value);
+                const editedCents = Number.isFinite(enteredAmount)
+                    ? Math.min(maximumEditedCents, Math.max(minimumPerInstallment, Math.round(enteredAmount * 100)))
+                    : minimumPerInstallment;
+                changedInput.value = (editedCents / 100).toFixed(2);
+
+                const remainingCents = totalCents - editedCents;
+                const otherInputs = amountInputs.filter((input) => input !== changedInput);
+                const baseCents = Math.floor(remainingCents / otherInputs.length);
+                const extraCents = remainingCents % otherInputs.length;
+                otherInputs.forEach((input, index) => {
+                    input.value = ((baseCents + (index < extraCents ? 1 : 0)) / 100).toFixed(2);
+                });
+
+                const firstInstallment = amountInputs[0];
+                if (firstInstallment && gestionAmountInput && syncPaymentAmount) {
+                    if (gestionCurrencyMode?.value === 'other') {
+                        gestionForeignAmount.value = firstInstallment.value;
+                    } else {
+                        gestionAmountInput.value = firstInstallment.value;
+                    }
+                }
+            };
+
+            gestionAmountInput?.addEventListener('input', function () {
+                if (gestionIsCredit() && !gestionIsCreditContinuation) {
+                    const firstInstallment = gestionInstallments?.querySelector('input[name="cuotas_montos[]"]');
+                    if (firstInstallment) {
+                        firstInstallment.value = gestionAmountInput.value;
+                        rebalanceGestionInstallments(firstInstallment, false);
+                        gestionAmountInput.value = firstInstallment.value;
+                    }
+                }
+            });
+
+            gestionPaymentFormat?.addEventListener('change', renderGestionInstallments);
+            document.getElementById('erp-gestion-installment-count')?.addEventListener('input', renderGestionInstallments);
+            document.getElementById('erp-gestion-installment-interval')?.addEventListener('change', renderGestionInstallments);
+            gestionInstallments?.addEventListener('change', function (event) {
+                if (event.target.matches('input[name="cuotas_montos[]"]')) {
+                    rebalanceGestionInstallments(event.target);
+                }
+            });
+            gestionCurrencyButton?.addEventListener('click', function () {
+                if (gestionIsCreditContinuation) return;
+                const useOtherCurrency = gestionCurrencyMode?.value !== 'other';
+                gestionCurrencyMode.value = useOtherCurrency ? 'other' : 'same';
+                gestionCurrencyExtra?.classList.toggle('hidden', !useOtherCurrency);
+                if (gestionCurrencyExtra) {
+                    gestionCurrencyExtra.style.display = useOtherCurrency ? 'block' : 'none';
+                }
+                gestionPaymentAmountField?.classList.add('hidden');
+                document.getElementById('erp-gestion-converted-total-field')?.classList.toggle('hidden', !useOtherCurrency);
+                gestionCurrencyButton.textContent = useOtherCurrency ? 'Misma moneda' : 'Otra moneda';
+                if (gestionOtherCurrency) gestionOtherCurrency.required = useOtherCurrency;
+                if (gestionExchangeRate) gestionExchangeRate.required = useOtherCurrency;
+                if (gestionForeignAmount) gestionForeignAmount.required = useOtherCurrency;
+                if (gestionPaymentAmount) {
+                    gestionPaymentAmount.required = false;
+                    gestionPaymentAmount.readOnly = true;
+                }
+                if (useOtherCurrency) {
+                    syncGestionCurrencyOptions();
+                    if (gestionOtherCurrency) gestionOtherCurrency.value = '';
+                    if (gestionExchangeRate) gestionExchangeRate.value = '';
+                    if (gestionForeignAmount) gestionForeignAmount.value = '';
+                    if (gestionPaymentAmount) gestionPaymentAmount.value = '';
+                } else if (gestionPaymentAmount) {
+                    if (gestionOtherCurrency) gestionOtherCurrency.value = '';
+                    if (gestionExchangeRate) gestionExchangeRate.value = '';
+                    if (gestionForeignAmount) gestionForeignAmount.value = '';
+                    gestionPaymentAmount.value = gestionIsCredit()
+                        ? (gestionInstallments?.querySelector('input[name="cuotas_montos[]"]')?.value || gestionBalance.toFixed(2))
+                        : gestionBalance.toFixed(2);
+                }
+                syncGestionConvertedAmount();
+            });
+            gestionExchangeRate?.addEventListener('input', syncGestionConvertedAmount);
+            gestionForeignAmount?.addEventListener('input', function () {
+                syncGestionConvertedAmount();
+            });
+            gestionOtherCurrency?.addEventListener('change', function () {
+                syncGestionCurrencyOptions();
+                syncGestionConvertedAmount();
+            });
+            document.getElementById('erp-gestion-date')?.addEventListener('change', renderGestionInstallments);
+
+            const setGestionWithholdingCompletionMode = function (enabled) {
+                gestionCompleteWithholding = enabled;
+                const hiddenField = document.getElementById('erp-gestion-complete-withholding');
+                if (hiddenField) hiddenField.value = enabled ? '1' : '0';
+                const hiddenIds = [
+                    'erp-gestion-format-field',
+                    'erp-gestion-bank-field',
+                    'erp-gestion-cancel-amount-field',
+                    'erp-gestion-payment-amount-field',
+                    'erp-gestion-currency-extra',
+                    'erp-gestion-converted-total-field',
+                    'erp-gestion-credit-fields',
+                    'erp-gestion-credit-installments',
+                    'erp-gestion-paid-installment-summary',
+                    'erp-gestion-next-installment-summary',
+                ];
+                hiddenIds.forEach((fieldId) => {
+                    document.getElementById(fieldId)?.classList.toggle('hidden', enabled);
+                });
+                document.getElementById('erp-gestion-withholding-summary')
+                    ?.classList.toggle('hidden', enabled || gestionDeductionAmount <= 0);
+                document.getElementById('erp-gestion-completion-amount-field')
+                    ?.classList.toggle('hidden', !enabled);
+                const referenceInput = document.getElementById('erp-gestion-reference');
+                const referenceLabel = document.getElementById('erp-gestion-reference-label');
+                if (referenceInput) {
+                    referenceInput.readOnly = enabled;
+                    referenceInput.style.backgroundColor = enabled ? '#f8fafc' : '#fff';
+                }
+                if (referenceLabel) {
+                    referenceLabel.textContent = enabled ? 'Factura' : 'Factura *';
+                }
+                gestionForm?.querySelectorAll('input,select,textarea').forEach((field) => {
+                    if (field === gestionFileInput
+                        || field.name === '_token'
+                        || field.id === 'erp-gestion-complete-withholding'
+                        || field.id === 'erp-gestion-withholding-decision'
+                        || field.id === 'erp-gestion-date'
+                        || field.id === 'erp-gestion-description') {
+                        field.disabled = false;
+                        return;
+                    }
+                    field.disabled = enabled;
+                });
+                if (gestionFileInput) gestionFileInput.required = false;
+                const paymentDateLabel = document.querySelector('label[for="erp-gestion-date"]');
+                if (paymentDateLabel) {
+                    paymentDateLabel.textContent = enabled
+                        ? `Fecha de pago de ${gestionWithholdingType}`
+                        : 'Fecha de pago';
+                }
+                const fileLabel = document.getElementById('erp-gestion-file-label');
+                if (fileLabel) {
+                    fileLabel.textContent = enabled
+                        ? 'Comprobante del depósito (opcional)'
+                        : 'Archivo de Pago (opcional)';
+                }
+                const descriptionInput = document.getElementById('erp-gestion-description');
+                if (descriptionInput) {
+                    descriptionInput.placeholder = enabled
+                        ? `Describe sobre el depósito de ${gestionWithholdingType}...`
+                        : 'Describe sobre el pago...';
+                }
+                if (gestionSaveButton) {
+                    gestionSaveButton.textContent = enabled ? 'Registrar depósito' : 'Guardar Pago';
+                }
+                if (gestionTitle) {
+                    gestionTitle.textContent = enabled
+                        ? `Completar ${gestionWithholdingType} de cotización`
+                        : 'Registrar pago de cotización';
+                }
+            };
+
+            const openGestionModal = function (number, approveUrl, clientName, amountDisplay, paymentFormat, paymentId, currencyId, balance, reference, cxcState, creditTotal, firstInstallmentPaid, currencySymbol, nextInstallmentNumber, nextInstallmentAmount, nextInstallmentDate, serviceType, completeWithholding) {
                 if (!gestionModal) {
                     return;
                 }
                 if (gestionSaveButton) {
-                    gestionSaveButton.disabled = true;
+                    gestionSaveButton.disabled = false;
                 }
                 if (gestionSavingStatus) gestionSavingStatus.classList.remove('is-visible');
                 if (gestionForm) {
                     gestionForm.action = approveUrl || '';
                 }
+                const withholdingDecisionInput = document.getElementById('erp-gestion-withholding-decision');
+                if (withholdingDecisionInput) withholdingDecisionInput.value = '';
+                gestionDeductionAmount = 0;
+                const withholdingSummary = document.getElementById('erp-gestion-withholding-summary');
+                if (withholdingSummary) {
+                    withholdingSummary.textContent = '';
+                    withholdingSummary.classList.add('hidden');
+                }
+                setGestionWithholdingCompletionMode(false);
 
                 const sectionTitle = document.getElementById('erp-gestion-section-title');
                 if (sectionTitle) {
@@ -5421,20 +7494,87 @@
 
                 const clientInput = document.getElementById('erp-gestion-client');
                 const amountInput = document.getElementById('erp-gestion-amount');
-                const paymentSelect = document.getElementById('erp-gestion-payment-format');
                 const dateInput = document.getElementById('erp-gestion-date');
                 const descInput = document.getElementById('erp-gestion-description');
 
                 if (clientInput) clientInput.value = clientName || '-';
-                if (amountInput) amountInput.value = amountDisplay || '-';
-                if (paymentSelect) {
-                    const normalizedPayment = String(paymentFormat || '')
-                        .toLowerCase()
-                        .normalize('NFD')
-                        .replace(/[\u0300-\u036f]/g, '');
-                    paymentSelect.value = normalizedPayment.includes('contado')
-                        ? 'contado'
-                        : (normalizedPayment.includes('credito') ? 'credito' : '');
+                gestionBalance = Number(balance || 0);
+                gestionOriginalBalance = gestionBalance;
+                gestionGrossBalance = gestionBalance;
+                if (amountInput) amountInput.value = gestionBalance.toFixed(2);
+                amountInput?.removeAttribute('max');
+                gestionOriginalCurrencyId = String(currencyId || '');
+                if (gestionConvertedAmount) gestionConvertedAmount.value = '';
+                gestionIsCreditContinuation = /pagocredito|pendiente a credito/i.test(cxcState);
+                gestionWithholdingType = /retención/i.test(String(cxcState || ''))
+                    ? 'retención'
+                    : 'detracción';
+                const normalizedServiceType = String(serviceType || '').trim().toUpperCase();
+                gestionWithholdingRetention = normalizedServiceType === 'EQUIPAMIENTO';
+                gestionWithholdingEligible = !gestionIsCreditContinuation
+                    && ['EQUIPAMIENTO', 'SERVICIOS TÉCNICOS', 'PLANES'].includes(normalizedServiceType);
+                const parsedCreditTotal = Number(creditTotal);
+                gestionCreditTotal = creditTotal !== '' && Number.isFinite(parsedCreditTotal) ? parsedCreditTotal : null;
+                const parsedFirstInstallmentPaid = Number(firstInstallmentPaid);
+                gestionFirstInstallmentPaid = firstInstallmentPaid !== '' && Number.isFinite(parsedFirstInstallmentPaid)
+                    ? parsedFirstInstallmentPaid
+                    : null;
+                gestionCreditCurrencySymbol = normalizeGestionCurrencySymbol(currencySymbol);
+                gestionNextInstallmentNumber = Number(nextInstallmentNumber) > 0 ? Number(nextInstallmentNumber) : null;
+                gestionNextInstallmentAmount = Number(nextInstallmentAmount) > 0 ? Number(nextInstallmentAmount) : null;
+                gestionNextInstallmentDate = nextInstallmentDate || '';
+                if (gestionPaymentFormat) gestionPaymentFormat.value = paymentId || '';
+                if (!gestionPaymentFormat?.value) {
+                    const normalizedPayment = String(paymentFormat || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                    const match = Array.from(gestionPaymentFormat?.options || []).find((option) => normalizedPayment.includes('credito')
+                        ? /credito/i.test(option.textContent)
+                        : /contado/i.test(option.textContent));
+                    if (match) gestionPaymentFormat.value = match.value;
+                }
+                document.getElementById('erp-gestion-currency-id').value = currencyId || '';
+                syncGestionCurrencyOptions();
+                gestionCurrencyButton?.classList.toggle('hidden', gestionIsCreditContinuation);
+                document.getElementById('erp-gestion-reference').value = reference || '';
+                document.getElementById('erp-gestion-file').value = '';
+                document.getElementById('erp-gestion-file-name').textContent = '';
+                const defaultBankOption = document.querySelector('#erp-gestion-bank option[data-default="true"]');
+                document.getElementById('erp-gestion-bank').value = defaultBankOption?.value || '';
+                document.getElementById('erp-gestion-installment-count').value = '';
+                gestionCurrencyMode.value = 'same';
+                gestionCurrencyExtra?.classList.add('hidden');
+                if (gestionCurrencyExtra) gestionCurrencyExtra.style.display = 'none';
+                gestionPaymentAmountField?.classList.add('hidden');
+                if (gestionOtherCurrency) gestionOtherCurrency.required = false;
+                if (gestionExchangeRate) gestionExchangeRate.required = false;
+                if (gestionForeignAmount) gestionForeignAmount.required = false;
+                if (gestionPaymentAmount) {
+                    gestionPaymentAmount.required = false;
+                    gestionPaymentAmount.readOnly = true;
+                    gestionPaymentAmount.name = '';
+                }
+                if (gestionCurrencyButton) gestionCurrencyButton.textContent = 'Otra moneda';
+                if (gestionOtherCurrency) gestionOtherCurrency.value = '';
+                if (gestionExchangeRate) gestionExchangeRate.value = '';
+                if (gestionForeignAmount) gestionForeignAmount.value = '';
+                const intervalInput = document.getElementById('erp-gestion-installment-interval');
+                if (intervalInput) intervalInput.value = '';
+                if (gestionPaymentAmount) {
+                    gestionPaymentAmount.value = gestionIsCreditContinuation
+                        ? (gestionNextInstallmentAmount ?? gestionBalance).toFixed(2)
+                        : gestionOriginalBalance.toFixed(2);
+                }
+                syncGestionPaymentAmountCurrency();
+                updateGestionWithholding(
+                    gestionOriginalBalance,
+                    gestionCurrencyOption(gestionOriginalCurrencyId)?.dataset.symbol || currencySymbol
+                );
+                if (gestionAmountInput) {
+                    gestionAmountInput.value = gestionWithholdingEligible
+                        ? gestionBalance.toFixed(2)
+                        : gestionOriginalBalance.toFixed(2);
+                }
+                if (gestionPaymentAmount && !gestionIsCreditContinuation) {
+                    gestionPaymentAmount.value = gestionBalance.toFixed(2);
                 }
 
                 const now = new Date();
@@ -5445,6 +7585,22 @@
                     dateInput.value = `${yyyy}-${mm}-${dd}`;
                 }
                 if (descInput) descInput.value = '';
+                const completionAmount = document.getElementById('erp-gestion-completion-amount');
+                if (completionAmount) completionAmount.value = Number(balance || 0).toFixed(2);
+                const completionAmountLabel = document.getElementById('erp-gestion-completion-amount-label');
+                if (completionAmountLabel) {
+                    completionAmountLabel.textContent = `Monto ${gestionWithholdingType}`;
+                }
+                const completionAmountCurrency = document.getElementById('erp-gestion-completion-amount-currency');
+                if (completionAmountCurrency) {
+                    completionAmountCurrency.textContent = gestionCreditCurrencySymbol
+                        ? `${gestionCreditCurrencySymbol} `
+                        : '';
+                }
+                setGestionWithholdingCompletionMode(Boolean(completeWithholding));
+                if (!completeWithholding) {
+                    renderGestionInstallments();
+                }
 
                 gestionModal.classList.add('visible');
                 document.body.style.overflow = 'hidden';
@@ -5459,7 +7615,7 @@
                     gestionFileInput.value = '';
                 }
                 if (gestionSaveButton) {
-                    gestionSaveButton.disabled = true;
+                    gestionSaveButton.disabled = false;
                 }
                 if (gestionFileName) {
                     gestionFileName.textContent = '';
@@ -5487,7 +7643,20 @@
                         gestionButton.dataset.cotizacionApproveUrl || '',
                         gestionButton.dataset.cotizacionClient || '',
                         gestionButton.dataset.cotizacionAmount || '',
-                        gestionButton.dataset.cotizacionPayment || ''
+                        gestionButton.dataset.cotizacionPayment || '',
+                        gestionButton.dataset.cotizacionPaymentId || '',
+                        gestionButton.dataset.cotizacionCurrencyId || '',
+                        gestionButton.dataset.cotizacionBalance || '',
+                        gestionButton.dataset.cotizacionReference || '',
+                        gestionButton.dataset.cotizacionCxcState || '',
+                        gestionButton.dataset.cotizacionCreditTotal || '',
+                        gestionButton.dataset.cotizacionFirstInstallmentPaid || '',
+                        gestionButton.dataset.cotizacionCurrencySymbol || '',
+                        gestionButton.dataset.cotizacionNextInstallment || '',
+                        gestionButton.dataset.cotizacionNextInstallmentAmount || '',
+                        gestionButton.dataset.cotizacionNextInstallmentDate || '',
+                        gestionButton.dataset.cotizacionService || '',
+                        gestionButton.dataset.cotizacionCompleteWithholding === '1'
                     );
                     return;
                 }
@@ -5508,7 +7677,7 @@
                 if (!allowedTypes.includes(file.type) || file.size > maxFileSize) {
                     gestionFileInput.value = '';
                     if (gestionSaveButton) {
-                        gestionSaveButton.disabled = true;
+                        gestionSaveButton.disabled = false;
                     }
                     gestionPreview.classList.remove('visible');
                     gestionPreview.src = '';
@@ -5571,6 +7740,7 @@
             }
 
             document.addEventListener('paste', function (event) {
+                if (quotationWithholdingProofModal?.classList.contains('visible')) return;
                 if (!gestionModal || !gestionModal.classList.contains('visible')) {
                     return;
                 }
@@ -5583,13 +7753,55 @@
             });
 
             document.addEventListener('keydown', function (event) {
-                if (event.key === 'Escape' && gestionModal && gestionModal.classList.contains('visible')) {
+                if (event.key !== 'Escape') return;
+                if (quotationWithholdingProofModal?.classList.contains('visible')) {
+                    returnToWithholdingWarning();
+                    return;
+                }
+                const warningModal = document.getElementById('withholding-warning-modal');
+                if (warningModal?.classList.contains('visible')) {
+                    warningModal.classList.add('hidden');
+                    warningModal.classList.remove('visible');
+                    withholdingWarningConfirm = null;
+                    quotationWithholdingSubmit = null;
+                    document.body.style.overflow = '';
+                    return;
+                }
+                if (gestionModal && gestionModal.classList.contains('visible')) {
                     closeGestionModal();
                 }
             });
 
             if (gestionForm) {
-                gestionForm.addEventListener('submit', function () {
+                gestionForm.addEventListener('submit', function (event) {
+                    const withholdingDecisionInput = document.getElementById('erp-gestion-withholding-decision');
+                    const isOtherCurrency = gestionCurrencyMode?.value === 'other';
+                    const submittedAmount = Number((isOtherCurrency ? gestionForeignAmount : gestionAmountInput)?.value || 0);
+                    const isNetWithholdingPayment = gestionWithholdingEligible
+                        && !gestionCompleteWithholding
+                        && gestionDeductionAmount > 0
+                        && withholdingDecisionInput?.value === ''
+                        && Math.abs(submittedAmount - gestionBalance) <= 0.01;
+
+                    if (isNetWithholdingPayment) {
+                        event.preventDefault();
+                        const paymentCurrencySymbol = isOtherCurrency
+                            ? normalizeGestionCurrencySymbol(gestionOtherCurrency?.selectedOptions?.[0]?.dataset.symbol)
+                            : normalizeGestionCurrencySymbol(gestionCurrencyOption(gestionOriginalCurrencyId)?.dataset.symbol);
+                        showWithholdingWarning(gestionGrossBalance, gestionWithholdingRetention, withholdingDecisionInput, {
+                            getEnteredAmount: () => submittedAmount,
+                            getNetAmount: () => gestionBalance,
+                            getGrossAmount: () => gestionGrossBalance,
+                            submit: () => {
+                                if (gestionSaveButton) gestionSaveButton.disabled = true;
+                                if (gestionSavingStatus) gestionSavingStatus.classList.add('is-visible');
+                                gestionForm.submit();
+                            },
+                            onPaid: openQuotationWithholdingProof,
+                        }, paymentCurrencySymbol, 'cotización');
+                        return;
+                    }
+
                     if (gestionSaveButton) {
                         gestionSaveButton.disabled = true;
                     }
@@ -5613,6 +7825,7 @@
                 <input type="hidden" name="servicioCliente_idservicioCliente" id="factura-service-id">
                 <input type="hidden" name="realizar_cobro" id="factura-realizar-cobro-input" value="0">
                 <input type="hidden" name="monto_factura" id="factura-invoice-amount">
+                <input type="hidden" name="factura_withholding_decision" id="factura-withholding-decision">
                 <div id="factura-selected-service-inputs"></div>
                 <div id="factura-selected-cxc-inputs"></div>
                 <div class="erp-modal-body p-6">
@@ -5636,8 +7849,8 @@
                             aria-checked="false" tabindex="0"
                             aria-label="Alternar entre solo facturar y facturar y cancelar">
                             <span class="erp-factura-mode-thumb"></span>
-                            <span class="erp-factura-mode-option is-active" data-mode="facturar">Factura</span>
-                            <span class="erp-factura-mode-option" data-mode="cancelar">Cancelar</span>
+                            <span class="erp-factura-mode-option is-active" data-mode="facturar" style="font-size: 0.6rem;">Factura</span>
+                            <span class="erp-factura-mode-option" data-mode="cancelar" style="font-size: 0.6rem;">Cancelar</span>
                         </div>
                         <input type="hidden" id="factura-mode-switch" value="0">
                     </div>
@@ -5652,32 +7865,38 @@
                                 </h4>
                             </div>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mb-1.5">
-                                <div>
+                                <div id="factura-client-field">
                                     <label class="block text-xs font-semibold text-slate-600 mb-1">Cliente</label>
                                     <input id="factura-client"
                                         class="w-full rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm font-medium text-slate-800 outline-none"
                                         readonly>
                                 </div>
-                                <div>
+                                <div id="factura-payment-options">
                                     <div
                                         style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 4px;">
                                         <label class="block text-xs font-semibold text-slate-600">Monto a cancelar</label>
-                                        <button type="button" id="btn-factura-periodos-vencidos"
-                                            class="px-2 py-0.5 text-xs font-bold text-white rounded transition-all hover:opacity-90 shadow-sm"
-                                            style="background-color: #b41B29;">
-                                            P. vencidos
-                                        </button>
+                                        <div class="flex items-center gap-1.5">
+                                            <button type="button" id="btn-factura-periodos-vencidos" class="hidden px-2 py-0.5 text-xs font-bold text-white rounded transition-all hover:opacity-90 shadow-sm"
+                                                style="background-color: #b41B29;">
+                                                P. vencidos
+                                            </button>
+                                            <button type="button" id="factura-select-credit-note"
+                                                class="hidden px-2 py-0.5 text-xs font-bold text-white rounded transition-all hover:opacity-90 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                                                style="background-color: #334155;">
+                                                N. crédito
+                                            </button>
+                                        </div>
                                     </div>
                                     <div class="flex min-w-0 items-stretch gap-2">
                                         <div
                                             class="flex min-w-0 flex-1 items-center rounded-lg border border-slate-300 bg-white px-2.5 focus-within:border-red-600 focus-within:ring-2 focus-within:ring-red-600/20">
                                             <span id="factura-amount-currency"
                                                 class="mr-1.5 shrink-0 text-sm font-bold text-slate-700">S/</span>
-                                            <input id="factura-amount" type="number" min="0.01" step="0.01"
+                                            <input id="factura-amount" type="number" min="0.01" step="0.01" readonly
                                                 class="w-full min-w-0 border-0 bg-transparent p-2 text-sm font-bold text-slate-900 outline-none focus:border-0 focus:ring-0">
                                         </div>
                                         <button type="button" id="btn-factura-advance-toggle"
-                                            class="shrink-0 rounded-md px-2.5 py-1 text-xs font-bold text-white transition-all hover:opacity-90 shadow-sm"
+                                            class="hidden shrink-0 rounded-md px-2.5 py-1 text-xs font-bold text-white transition-all hover:opacity-90 shadow-sm"
                                             style="background-color: #334155;" aria-expanded="false">
                                             Pagar adelantado
                                         </button>
@@ -5689,10 +7908,10 @@
                                                 max="120" step="1"
                                                 class="mt-1 w-full rounded-lg border border-slate-300 p-2 text-sm text-slate-900 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/20">
                                         </label>
-                                        <p class="mt-1 text-[10px] text-slate-500">El número incluye el periodo actual.
+                                        <p class="mt-1 text-[10px] text-slate-500">La cancelacion incluye el periodo actual.
                                             El total quedará asociado a la factura y se reconocerá al registrar el cobro.</p>
                                     </div>
-                                    <p id="factura-amount-summary" class="hidden mt-1 text-xs font-medium text-slate-600"
+                                    <p id="factura-amount-summary" class="hidden mt-1 text-xs font-medium text-danger"
                                         aria-live="polite"></p>
                                 </div>
                             </div>
@@ -5705,9 +7924,16 @@
                                     class="w-full rounded-lg border border-slate-300 p-2.5 text-sm font-medium text-slate-800 focus:border-red-600 focus:ring-2 focus:ring-red-600/20 outline-none transition-all">
                             </div>
                             <div class="mb-1.5">
-                                <label class="block text-xs font-bold text-slate-800 mb-1.5">
-                                    Archivo de Factura <span>*</span>
-                                </label>
+                                <div class="mb-1.5 flex items-center justify-between gap-2">
+                                    <label class="text-xs font-bold text-slate-800">
+                                        Archivo de Factura (opcional)
+                                    </label>
+                                    <button type="button" data-clear-upload="factura-file" data-clear-name="factura-file-name"
+                                        class="hidden px-2 py-0.5 text-xs font-bold text-white rounded transition-all hover:opacity-90 shadow-sm"
+                                        style="background-color: #b41B29;">
+                                        Quitar archivo
+                                    </button>
+                                </div>
                                 <label id="factura-upload-box" for="factura-file" class="erp-upload-box factura-upload-box">
                                     <svg class="erp-upload-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
                                         fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
@@ -5721,17 +7947,17 @@
                                         V)</span>
                                     <span class="erp-upload-help">Archivos permitidos: JPG, PNG o PDF (máx. 5 MB)</span>
                                     <span id="factura-file-name" class="erp-upload-file-name" aria-live="polite"></span>
-                                    <input id="factura-file" name="archivoFactura" type="file" required
+                                    <input id="factura-file" name="archivoFactura" type="file"
                                         accept="image/jpeg,image/png,application/pdf">
                                 </label>
                             </div>
                             <div>
                                 <label for="factura-description"
                                     class="block text-xs font-semibold text-slate-600 mb-1">Descripción / Observación (max.
-                                    50 caracteres)
-                                    <span class="text-red-500">*</span></label>
-                                <textarea id="factura-description" name="descripcionFactura" rows="2" maxlength="50"
-                                    required placeholder="Describe la factura o boleta..."
+                                    70 caracteres)
+                                </label>
+                                <textarea id="factura-description" name="descripcionFactura" rows="2" maxlength="70"
+                                    placeholder="Describe la factura o boleta..."
                                     class="w-full rounded-lg border border-slate-300 p-2.5 text-sm text-slate-800 focus:border-red-600 focus:ring-2 focus:ring-red-600/20 outline-none transition-all"></textarea>
                             </div>
                         </div>
@@ -5897,38 +8123,17 @@
                                 </label>
                                 <p id="factura-credit-application" class="mt-1 text-xs text-slate-500"></p>
                             </div>
-                            <div id="factura-withholding-decision-group"
-                                class="hidden rounded-lg border border-amber-200 bg-amber-50/70 p-3">
-                                <p class="mb-2 text-xs font-bold uppercase tracking-wide text-amber-800">
-                                    Confirma la detracción/retención
-                                </p>
-                                <p class="mb-2 text-xs text-slate-600">
-                                    Si el cliente pagó el bruto completo y la detracción ya está pagada, el excedente quedará como saldo a favor.
-                                    Si aún no la pagó pero entregó el bruto, elige la tercera opción.
-                                </p>
-                                <div class="flex flex-col gap-2">
-                                    <label class="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700">
-                                        <input type="radio" name="factura_withholding_decision" value="paid"
-                                            class="accent-[#b41B29]">
-                                        Sí, ya pagó la detracción/retención.
-                                    </label>
-                                    <label class="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700">
-                                        <input type="radio" name="factura_withholding_decision" value="pending"
-                                            class="accent-[#b41B29]">
-                                        No, aún falta ese monto.
-                                    </label>
-                                    <label class="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700">
-                                        <input type="radio" name="factura_withholding_decision" value="full_pending"
-                                            class="accent-[#b41B29]">
-                                        No, pero el cliente pagó el total y lo gestionará luego.
-                                    </label>
-                                </div>
-                            </div>
-
+                            <input id="factura-credit-note-id" type="hidden" name="nota_credito_ids[]" disabled>
                             <!-- COMPROBANTE DE PAGO (DROPZONE CON EL MISMO ESTILO Y COLOR DE MODAL 2) -->
                             <div class="mb-1.5">
-                                <label class="block text-xs font-bold text-slate-800 mb-1.5">Comprobante de pago <span
-                                        class="text-red-500">*</span></label>
+                                <div class="mb-1.5 flex items-center justify-between gap-2">
+                                    <label class="text-xs font-bold text-slate-800">Comprobante de pago (opcional)</label>
+                                    <button type="button" data-clear-upload="factura-comprobante"
+                                        data-clear-name="factura-payment-file-name"
+                                        class="hidden px-2 py-0.5 text-xs font-bold text-white rounded transition-all hover:opacity-90 shadow-sm" style="background-color: #b41B29;">
+                                        Quitar pago
+                                    </button>
+                                </div>
                                 <label id="factura-payment-upload-box" for="factura-comprobante"
                                     class="erp-upload-box factura-upload-box">
                                     <svg class="erp-upload-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
@@ -5938,7 +8143,7 @@
                                         <path d="M12 12v9"></path>
                                         <path d="M20.39 17.39A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 3 16.3"></path>
                                     </svg>
-                                    <span class="erp-upload-title">Cargar comprobante de pago</span>
+                                    <span id="payment-dropzone-title" class="erp-upload-title">Cargar comprobante de pago</span>
                                     <span class="erp-upload-help">Haz clic para buscar, arrastra o pega (Ctrl + V / Cmd +
                                         V)</span>
                                     <span class="erp-upload-help">Archivos permitidos: JPG, PNG o PDF (máx. 5 MB)</span>
@@ -5951,8 +8156,8 @@
                             <div>
                                 <label for="payment-description"
                                     class="block text-xs font-semibold text-slate-600 mb-1">Descripción / Observación (max.
-                                    50 caracteres)<span class="text-red-500">*</span></label>
-                                <textarea id="payment-description" name="descripcionPago" maxlength="50" rows="2" required
+                                    70 caracteres)</label>
+                                <textarea id="payment-description" name="descripcionPago" maxlength="70" rows="2"
                                     placeholder="Observaciones del pago..."
                                     class="w-full rounded-lg border border-slate-300 p-2 text-xs text-slate-800 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/20"></textarea>
                             </div>
@@ -5974,6 +8179,83 @@
         </div>
     </div>
 
+    <style>
+        #service-payment-modal.is-payment-view-mode #payment-modal-fields-grid > :not(#payment-client-field):not(#payment-method-field):not(#payment-bank-field):not(#payment-reference-field):not(#payment-amount-field):not(#payment-description-field):not(#payment-proof-field) {
+            display: none !important;
+        }
+        #service-payment-modal.is-payment-view-mode #payment-amount-field {
+            grid-column: 1 / -1;
+        }
+        #service-payment-modal.is-payment-view-mode #btn-periodos-vencidos,
+        #service-payment-modal.is-payment-view-mode #payment-select-credit-note,
+        #service-payment-modal.is-payment-view-mode #btn-payment-advance-toggle,
+        #service-payment-modal.is-payment-view-mode #payment-advance-summary,
+        #service-payment-modal.is-payment-view-mode #payment-amount-summary,
+        #service-payment-modal.is-payment-view-mode #payment-credit-choice {
+            display: none !important;
+        }
+        #service-payment-modal.is-payment-view-mode:not(.is-payment-editing) #payment-dropzone,
+        #service-payment-modal.is-payment-view-mode:not(.is-payment-editing) #payment-clear-comprobante {
+            display: none !important;
+        }
+        #service-payment-modal.is-withholding-completion .erp-modal-card {
+            max-width: 600px !important;
+        }
+        #service-payment-modal.is-withholding-completion .erp-modal-body {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem;
+        }
+        #service-payment-modal.is-withholding-completion .erp-modal-body > .mb-3.grid,
+        #service-payment-modal.is-withholding-completion #payment-modal-fields-grid {
+            display: contents !important;
+        }
+        #service-payment-modal.is-withholding-completion #payment-client-field {
+            grid-column: 1 / -1;
+            order: 0;
+        }
+        #service-payment-modal.is-withholding-completion label[for="payment-period-end"] {
+            order: 1;
+        }
+        #service-payment-modal.is-withholding-completion label[for="payment-date"] {
+            order: 2;
+        }
+        #service-payment-modal.is-withholding-completion #payment-reference-field {
+            order: 3;
+        }
+        #service-payment-modal.is-withholding-completion #payment-amount-field {
+            order: 4;
+        }
+        #service-payment-modal.is-withholding-completion #payment-description-field {
+            order: 5;
+        }
+        #service-payment-modal.is-withholding-completion #payment-proof-field {
+            order: 6;
+        }
+        #service-payment-modal.is-withholding-completion #service-payment-form > .erp-modal-body > .flex.items-center.justify-end {
+            grid-column: 1 / -1;
+            order: 7;
+        }
+        #service-payment-modal.is-withholding-completion #btn-periodos-vencidos,
+        #service-payment-modal.is-withholding-completion #payment-select-credit-note,
+        #service-payment-modal.is-withholding-completion #btn-payment-advance-toggle {
+            display: none !important;
+        }
+        #service-payment-modal.is-withholding-completion #payment-modal-fields-grid {
+            gap: 0.75rem;
+        }
+        #service-payment-modal.is-withholding-completion #payment-original-input-shell {
+            display: flex;
+        }
+        #service-payment-modal.is-withholding-completion #payment-dropzone {
+            min-height: 112px;
+            padding: 0.75rem;
+        }
+        #service-payment-modal.is-withholding-completion #payment-description {
+            height: 112px !important;
+        }
+    </style>
+
     <!-- MODAL 2: REGISTRAR COBRO DE SERVICIOS (ESTADO FACTURADO / VENCIDO CON DROPZONE IMAGEN 3) -->
     <div id="service-payment-modal" class="erp-modal-backdrop hidden" role="dialog" aria-modal="true"
         aria-labelledby="service-payment-title">
@@ -5987,12 +8269,16 @@
                 @csrf
                 <input type="hidden" name="idcuentasPorCobrar" id="payment-cxc-id">
                 <input type="hidden" name="moneda_idmoneda" id="payment-moneda-id">
+                <input type="hidden" name="monto_factura" id="payment-invoice-total">
                 <input type="hidden" name="adelanto_meses" id="payment-advance-months">
+                <input type="hidden" name="withholding_decision" id="payment-withholding-decision">
+                <input type="hidden" name="completar_detraccion_pendiente" id="payment-complete-withholding" value="0">
+                <input type="hidden" name="eliminar_comprobante" id="payment-remove-comprobante" value="0">
                 <div id="selected-service-inputs"></div>
                 <div id="payment-selected-cxc-inputs"></div>
                 <div class="erp-modal-body p-6">
                     <div class="mb-3 grid grid-cols-1 gap-2 border-b border-slate-100 pb-3 md:grid-cols-2">
-                        <label for="payment-date" class="block text-xs font-semibold text-slate-600">Fecha de Pago
+                        <label for="payment-date" class="block text-xs font-semibold text-slate-600"><span id="payment-date-label">Fecha de Pago</span>
                             <input id="payment-date" name="fechaPago" type="date" value="{{ now()->format('Y-m-d') }}"
                                 class="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-700 outline-none">
                         </label>
@@ -6002,8 +8288,8 @@
                                 class="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-700 outline-none">
                         </label>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        <div>
+                    <div id="payment-modal-fields-grid" class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <div id="payment-client-field">
                             <label for="payment-client"
                                 class="block text-xs font-semibold text-slate-600 mb-1">Cliente</label>
                             <input id="payment-client"
@@ -6011,7 +8297,7 @@
                                 readonly>
                         </div>
                         <input type="hidden" id="payment-type" name="tipoCobro_idtipoCobros">
-                        <div>
+                        <div id="payment-method-field">
                             <label for="payment-method" class="block text-xs font-semibold text-slate-700 mb-1">Forma de
                                 pago <span class="text-red-500">*</span></label>
                             <select id="payment-method" name="formaPago_idformaPago" required
@@ -6035,7 +8321,7 @@
                             class="hidden md:col-span-2 rounded-lg border border-red-100 bg-red-50/40 p-2.5">
                             <div id="payment-installments" class="space-y-2"></div>
                         </div>
-                        <div>
+                        <div id="payment-bank-field">
                             <label for="payment-bank" class="block text-xs font-semibold text-slate-700 mb-1">Entidad
                                 bancaria
                                 cuenta <span class="text-red-500">*</span></label>
@@ -6049,30 +8335,54 @@
                                 @endforeach
                             </select>
                         </div>
-                        <div>
+                        <div id="payment-reference-field">
                             <label for="payment-reference" class="block text-xs font-bold text-slate-700 mb-1">Documento de
                                 referencia (Factura / Boleta)</label>
                             <input id="payment-reference" name="docReferencia"
                                 class="w-full rounded-lg border border-slate-200 bg-slate-100 p-2 text-sm font-bold text-slate-800 outline-none"
                                 readonly>
                         </div>
-                        <div>
-                            <div
-                                style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 4px;">
-                                <label for="payment-original" class="block text-xs font-semibold text-slate-600">Monto a
-                                    cancelar</label>
+                        <div id="payment-amount-field">
+                            <div class="mb-1 flex items-center justify-between gap-2">
+                                <label for="payment-original" id="payment-original-label" class="block text-xs font-semibold text-slate-600">Monto a cancelar</label>
                                 <button type="button" id="btn-periodos-vencidos"
-                                    class="px-2 py-0.5 text-xs font-bold text-white rounded transition-all hover:opacity-90 shadow-sm"
+                                    class="sm:ml-auto rounded px-2 py-0.5 text-xs font-bold text-white transition-all hover:opacity-90 shadow-sm"
                                     style="background-color: #b41B29;">
                                     P. vencidos
                                 </button>
+                                <button type="button" id="payment-select-credit-note"
+                                    class="rounded px-2 py-0.5 text-xs font-bold text-white transition-all hover:opacity-90 shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                                    style="background-color: #334155;">
+                                    N. crédito
+                                </button>
                             </div>
-                            <input id="payment-original"
-                                class="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-bold text-slate-900 outline-none"
-                                readonly>
+                            <div id="payment-original-input-shell" class="flex items-center gap-2">
+                                <div
+                                    class="flex min-w-0 flex-1 items-center rounded-lg border border-slate-300 bg-white px-2.5 focus-within:border-red-600 focus-within:ring-2 focus-within:ring-red-600/20">
+                                    <span id="payment-original-currency"
+                                        class="mr-1.5 shrink-0 text-sm font-bold text-slate-700">S/</span>
+                                    <input id="payment-original" type="number" min="0.01" step="0.01" required
+                                        class="w-full min-w-0 border-0 bg-transparent p-2 text-sm font-bold text-slate-900 outline-none focus:border-0 focus:ring-0">
+                                </div>
+                                <button type="button" id="btn-payment-advance-toggle"
+                                    class="shrink-0 rounded-md px-2.5 py-1 text-xs font-bold text-white transition-all hover:opacity-90 shadow-sm"
+                                    style="background-color: #334155;" aria-expanded="false">
+                                    Pagar adelantado
+                                </button>
+                            </div>
+                            <div id="payment-original-display"
+                                class="hidden w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm font-bold text-slate-800">
+                            </div>
+                            <div id="payment-advance-fields" class="hidden mt-2">
+                                <label for="payment-advance-months-count"
+                                    class="text-xs font-semibold text-slate-600">Mensualidades cubiertas
+                                    <input id="payment-advance-months-count" type="number" min="1" max="120" step="1"
+                                        class="mt-1 w-full rounded-lg border border-slate-300 p-2 text-sm text-slate-900 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/20">
+                                </label>
+                            </div>
                             <p id="payment-advance-summary" class="hidden mt-1 text-xs font-semibold text-emerald-700"
                                 aria-live="polite"></p>
-                            <p id="payment-amount-summary" class="hidden mt-1 text-xs font-medium text-slate-600"
+                            <p id="payment-amount-summary" class="hidden mt-1 text-xs font-medium text-danger"
                                 aria-live="polite"></p>
                             <div id="payment-credit-choice"
                                 class="hidden mt-2 rounded-md border border-emerald-100 bg-emerald-50/60 p-2">
@@ -6084,36 +8394,9 @@
                                 </label>
                                 <p id="payment-credit-application" class="mt-1 text-xs text-slate-500"></p>
                             </div>
+                            <input id="payment-credit-note-id" type="hidden" name="nota_credito_ids[]" disabled>
                         </div>
-                        <div id="payment-withholding-decision-group"
-                            class="md:col-span-2 hidden rounded-lg border border-amber-200 bg-amber-50/70 p-3">
-                            <p class="mb-2 text-xs font-bold uppercase tracking-wide text-amber-800">Confirma la
-                                detracción/retención</p>
-                            <p class="mb-2 text-xs text-slate-600">
-                                Si el cliente pagó el bruto completo y la detracción ya está pagada, el excedente quedará como saldo a favor.
-                                Si aún no la pagó pero entregó el bruto, elige la tercera opción.
-                            </p>
-                            <div class="flex flex-col gap-2 md:flex-row md:items-center">
-                                <label
-                                    class="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700">
-                                    <input type="radio" name="withholding_decision" value="paid" class="accent-[#b41B29]">
-                                    Sí, ya pagó la detracción/retención.
-                                </label>
-                                <label
-                                    class="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700">
-                                    <input type="radio" name="withholding_decision" value="pending"
-                                        class="accent-[#b41B29]">
-                                    No, aún falta ese monto.
-                                </label>
-                                <label
-                                    class="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700">
-                                    <input type="radio" name="withholding_decision" value="full_pending"
-                                        class="accent-[#b41B29]">
-                                    No, pero el cliente pagó el total y lo gestionará luego.
-                                </label>
-                            </div>
-                        </div>
-                        <div>
+                        <div id="payment-currency-mode-field">
                             <label class="block text-xs font-semibold text-slate-700 mb-2">Tipo de moneda</label>
                             <div class="flex items-center gap-4 bg-white ">
                                 <label
@@ -6164,7 +8447,7 @@
                                     class="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs font-bold text-slate-900 outline-none">
                             </div>
                         </div>
-                        <div class="md:col-span-2">
+                        <div id="payment-mode-field" class="md:col-span-2">
                             <span class="block text-xs font-semibold text-slate-700 mb-1">Tipo de pago</span>
                             <div class="flex items-center gap-6">
                                 <label
@@ -6193,19 +8476,25 @@
                                 </p>
                             </div>
                         </div>
-                        <div>
+                        <div id="payment-description-field">
                             <label for="payment-description"
-                                class="block text-xs font-semibold text-slate-700 mb-1">Descripción / Observación (max. 50
-                                caracteres)<span class="text-red-500">*</span></label>
-                            <textarea id="payment-description" name="descripcion" maxlength="50" rows="2" required
+                                class="block text-xs font-semibold text-slate-700 mb-1">Descripción / Observación (max. 70
+                                caracteres)</label>
+                            <textarea id="payment-description" name="descripcion" maxlength="70" rows="2"
                                 placeholder="Observaciones opcionales del pago..."
                                 class="w-full rounded-lg border border-slate-300 p-2 text-xs text-slate-800 outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600/20"
                                 style="height: 120px;"></textarea>
                         </div>
 
-                        <!-- COMPROBANTE DE PAGO (DROPZONE CON ESTILO UNIFICADO A IMAGEN 2) -->
-                        <div>
-                            <label class="block text-xs font-bold text-slate-800 mb-1.5">Comprobante de pago</label>
+                        <!-- COMPROBANTE DE PAGO (DROPZONE CON ESTILO UNIFICADO) -->
+                        <div id="payment-proof-field">
+                            <div class="mb-1.5 flex items-center justify-between gap-2">
+                                <label id="payment-proof-label" class="text-xs font-bold text-slate-800">Comprobante de pago (opcional)</label>
+                                <button type="button" id="payment-clear-comprobante" data-clear-payment-comprobante
+                                    class="px-2 py-0.5 text-xs font-bold text-white rounded transition-all hover:opacity-90 shadow-sm" style="background-color: #b41B29;">
+                                    Quitar pago
+                                </button>
+                            </div>
                             <label id="payment-dropzone" for="payment-comprobante"
                                 class="erp-upload-box payment-upload-box">
                                 <svg class="erp-upload-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
@@ -6220,21 +8509,156 @@
                                     V)</span>
                                 <span class="erp-upload-help">Archivos permitidos: JPG, PNG o PDF (máx. 5 MB)</span>
                                 <span id="payment-comprobante-name" class="erp-upload-file-name" aria-live="polite"></span>
-                                <input id="payment-comprobante" name="comprobante" type="file" required
+                                <input id="payment-comprobante" name="comprobante" type="file"
                                     accept="image/jpeg,image/png,application/pdf">
                             </label>
+                            <div id="payment-existing-proof" class="hidden mt-2 text-xs"></div>
                         </div>
+                    </div>
+                    <div id="payment-withholding-receipt-view" class="hidden mt-3 border-t border-slate-100 pt-3">
+                        <h4 id="payment-withholding-receipt-title" class="mb-2 text-sm font-bold text-slate-800">
+                            Detalle de detracción:
+                        </h4>
+                        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            <label class="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                                <span id="payment-withholding-date-label">Fecha de pago de detracción</span>
+                                <input id="payment-withholding-date" type="text" readonly
+                                    class="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm font-normal text-slate-700">
+                            </label>
+                            <label class="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                                <span id="payment-withholding-amount-label">Monto de detracción</span>
+                                <input id="payment-withholding-amount" type="text" readonly
+                                    class="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm font-normal text-slate-700">
+                            </label>
+                            <label class="flex flex-col gap-1 text-xs font-semibold text-slate-600 sm:col-span-2">
+                                Comentario
+                                <input id="payment-withholding-comment" type="text" readonly
+                                    class="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm font-normal text-slate-700">
+                            </label>
+                        </div>
+                        <button id="payment-withholding-receipt-link" type="button"
+                            data-open-service-withholding-receipt
+                            class="mt-3 block w-full rounded-lg bg-primary px-4 py-3 text-center text-sm font-bold text-white hover:opacity-90">
+                            Ver recibo de detracción
+                        </button>
+                        <p id="payment-withholding-receipt-missing"
+                            class="hidden mt-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm font-semibold text-slate-500">
+                        </p>
                     </div>
                     <div class="flex items-center justify-end gap-3 mt-3 border-t border-slate-100">
                         <button type="button"
                             class="px-4 py-2 text-sm font-semibold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors"
                             data-close-service-payment>Cancelar</button>
-                        <button type="submit"
+                        <button type="button" id="payment-view-edit-btn"
+                            class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed bg-primary border-primary text-white dark:border-primary"
+                            style="background-color: #b41B29;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-lucide="edit-2" class="lucide lucide-edit-2 mr-2 h-4 w-4 stroke-[1.3]"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
+                            Editar</button>
+                        <button type="button" id="payment-view-cancel-edit-btn"
+                            class="hidden px-4 py-2 text-sm font-semibold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors">
+                            Descartar cambios
+                        </button>
+                        <button type="submit" id="payment-submit-btn"
                             class="px-5 py-2 text-sm font-bold text-white rounded-lg shadow-sm transition-all"
                             style="background-color: #b41B29;">Registrar cobro</button>
                     </div>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <div id="withholding-warning-modal" class="erp-modal-backdrop hidden"
+        style="background-color: rgba(15, 23, 42, 0.58);" role="alertdialog" aria-modal="true"
+        aria-labelledby="withholding-warning-title">
+        <div class="erp-modal-card">
+            <div class="erp-modal-header">
+                <h3 id="withholding-warning-title">Confirmación de detracción</h3>
+                <button type="button" data-close-withholding-warning class="erp-modal-close"
+                    aria-label="Cerrar">×</button>
+            </div>
+            <div class="erp-modal-body">
+                <p id="withholding-warning-message" class="text-base leading-6 text-slate-700"></p>
+                <p id="withholding-warning-payment" class="mt-3 text-sm leading-5 font-semibold text-slate-600"></p>
+                <div class="mt-5 flex flex-wrap justify-end gap-2">
+                    <button type="button" data-close-withholding-warning
+                        class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                        Cancelar
+                    </button>
+                    <button type="button" data-withholding-answer="no"
+                        class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                        No
+                    </button>
+                    <button type="button" data-withholding-answer="yes"
+                        class="rounded-lg bg-danger px-4 py-2 text-sm font-bold text-white hover:opacity-90">
+                        Sí, ya pagó
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="quotation-withholding-proof-modal" class="erp-modal-backdrop hidden"
+        style="background-color: rgba(15, 23, 42, 0.68);" role="dialog" aria-modal="true"
+        aria-labelledby="quotation-withholding-proof-title">
+        <div class="erp-modal-card" style="max-width: 560px; width: 100%;">
+            <div class="erp-modal-header">
+                <h3 id="quotation-withholding-proof-title">Cargar comprobante de detracción/retención</h3>
+                <button type="button" class="erp-modal-close" data-cancel-quotation-withholding
+                    aria-label="Volver a la confirmación">×</button>
+            </div>
+            <div class="erp-modal-body">
+                <p id="quotation-withholding-type" class="mb-3 text-sm font-semibold text-slate-700">Comprobante de detracción</p>
+                <div class="grid grid-cols-2 gap-3 sm:grid-cols-2">
+                    <label for="quotation-withholding-date" class="block text-xs font-semibold text-slate-600">
+                        <span id="quotation-withholding-date-label">Fecha de pago de detracción</span>
+                        <input id="quotation-withholding-date" name="fecha_detraccion" type="date"
+                            form="erp-gestion-form" value="{{ now()->format('Y-m-d') }}"
+                            class="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-700 outline-none">
+                    </label>
+                    <div class="block text-xs font-semibold text-slate-600">
+                        <span id="quotation-withholding-amount-label">Monto detracción</span>
+                        <div id="quotation-withholding-amount"
+                            class="mt-1 rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm font-bold text-slate-800">S/ 0.00</div>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <div class="mb-2 text-xs font-semibold text-slate-700">
+                        Comprobante del depósito (obligatorio)
+                    </div>
+                    <label id="quotation-withholding-proof-box" class="erp-upload-box" for="quotation-withholding-proof" style="border: 2px dashed #fca5a5; background-color: #fef2f2; border-radius: 0.625rem; padding: 1.25rem 1rem; text-align: center; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.1rem; transition: all 0.2s ease;">
+                        <svg class="erp-upload-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                            fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                            stroke-linejoin="round" aria-hidden="true">
+                            <path d="M16 16l-4-4-4 4"></path>
+                            <path d="M12 12v9"></path>
+                            <path d="M20.39 17.39A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 3 16.3"></path>
+                        </svg>
+                        <span class="erp-upload-title" data-quotation-withholding-upload-title>Cargar el archivo de detracción</span>
+                        <span class="erp-upload-help">Haz clic para buscar, arrastra o pega (Ctrl + V / Cmd + V)</span>
+                        <span class="erp-upload-help">Archivos permitidos: JPG, PNG o PDF (máx. 5 MB)</span>
+                        <span id="quotation-withholding-proof-name" class="erp-upload-file-name" aria-live="polite"></span>
+                        <input id="quotation-withholding-proof" name="comprobante_detraccion" type="file"
+                            form="erp-gestion-form" accept="image/jpeg,image/png,application/pdf">
+                    </label>
+                </div>
+                <label for="quotation-withholding-description" class="mt-4 block text-xs font-semibold text-slate-600">
+                    Descripción / Observación (opcional, máximo 70 caracteres)
+                    <textarea id="quotation-withholding-description" name="descripcion_detraccion"
+                        form="erp-gestion-form" maxlength="70" rows="3"
+                        placeholder="Describe sobre el depósito de detracción/retención..."
+                        class="mt-1 w-full rounded-lg border border-slate-200 p-2 text-sm text-slate-700 outline-none"></textarea>
+                </label>
+                <div class="mt-5 flex justify-end gap-2">
+                    <button type="button" data-cancel-quotation-withholding
+                        class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                        Cancelar
+                    </button>
+                    <button type="button" id="quotation-withholding-proof-save"
+                        class="rounded-lg bg-danger px-4 py-2 text-sm font-bold text-white hover:opacity-90">
+                        Guardar Pago
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -6275,6 +8699,112 @@
         </div>
     </div>
 
+    <div id="credit-note-selector-modal"
+        class="erp-modal-backdrop hidden items-center justify-center p-4 z-[10000]"
+        style="background-color: rgba(0, 0, 0, 0.6);" role="dialog" aria-modal="true"
+        aria-labelledby="credit-note-selector-title">
+        <div class="erp-modal w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
+            style="width: min(560px, calc(100vw - 32px)); max-width: 560px; margin: 0 auto;">
+            <div class="erp-modal-header flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-3.5">
+                <h3 id="credit-note-selector-title" class="text-base font-bold text-slate-800">Seleccionar nota de crédito</h3>
+                <button type="button" id="credit-note-selector-close"
+                    class="text-xl font-bold leading-none text-slate-400 hover:text-slate-600"
+                    aria-label="Cerrar">&times;</button>
+            </div>
+            <div class="erp-modal-body p-5">
+                <p class="mb-3 text-xs font-medium text-slate-600">
+                    Selecciona una nota disponible. Su saldo se descontará del total del cobro.
+                </p>
+                <div id="credit-note-selector-list" class="max-h-72 space-y-2 overflow-y-auto"></div>
+                <div class="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-3">
+                    <button type="button" id="credit-note-selector-cancel"
+                        class="rounded-lg border border-slate-300 px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">
+                        Cancelar
+                    </button>
+                    <button type="button" id="credit-note-selector-confirm"
+                        class="rounded-lg px-4 py-1.5 text-xs font-bold text-white hover:opacity-90"
+                        style="background-color: #b41B29;">
+                        Aplicar selección
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="quotation-receipts-modal" class="erp-modal-backdrop hidden" role="dialog" aria-modal="true"
+        aria-labelledby="quotation-receipts-title">
+        <div class="erp-modal-card" style="width: min(500px, calc(100vw - 32px));">
+            <div class="erp-modal-header">
+                <h3 id="quotation-receipts-title">Recibos de la cotización</h3>
+                <button type="button" class="erp-modal-close" data-close-quotation-receipts
+                    aria-label="Cerrar recibos">×</button>
+            </div>
+            <div class="erp-modal-body">
+                <div class="flex flex-col gap-3">
+                    <h3>Detalles del recibo:</h3>
+                    <div class="grid grid-cols-2 gap-3 sm:grid-cols-2">
+                        <label class="flex flex-col gap-1 text-sm font-semibold text-slate-700">
+                            Factura
+                            <input id="quotation-receipt-invoice-number" type="text" readonly
+                                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-700">
+                        </label>
+                        <label class="flex flex-col gap-1 text-sm font-semibold text-slate-700">
+                            Fecha de pago
+                            <input id="quotation-receipt-payment-date" type="text" readonly
+                                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-700">
+                        </label>
+                        <label class="flex flex-col gap-1 text-sm font-semibold text-slate-700">
+                            Monto cancelado
+                            <input id="quotation-receipt-payment-amount" type="text" readonly
+                                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-700">
+                        </label>
+                        <label class="flex flex-col gap-1 text-sm font-semibold text-slate-700 sm:col-span-3">
+                            Comentario
+                            <input id="quotation-receipt-payment-comment" type="text" readonly
+                                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-700">
+                        </label>
+                    </div>
+                    <button id="quotation-payment-receipt-link" type="button"
+                        data-open-quotation-receipt
+                        data-missing-element="quotation-payment-receipt-missing"
+                        data-missing-message="Sin recibo de pago"
+                        class="block w-full rounded-lg bg-primary px-4 py-3 text-center text-sm font-bold text-white hover:opacity-90"
+                        style="box-sizing: border-box; min-height: 48px;">
+                        Ver recibo de pago
+                    </button>
+                    <p id="quotation-payment-receipt-missing"
+                        class="hidden rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm font-semibold text-slate-500">
+                    </p>
+                    <div id="quotation-withholding-receipt-section" class="hidden">
+                        <h3 id="quotation-receipt-withholding-title" class="mb-3">Detalle de detracción:</h3>
+                        <div class="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-2">
+                            <label class="flex flex-col gap-1 text-sm font-semibold text-slate-700">
+                                <span id="quotation-receipt-withholding-label">Fecha de pago de detracción</span>
+                                <input id="quotation-receipt-withholding-date" type="text" readonly
+                                    class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-700">
+                            </label>
+                            <label class="flex flex-col gap-1 text-sm font-semibold text-slate-700">
+                                <span id="quotation-receipt-withholding-amount-label">Monto de detracción</span>
+                                <input id="quotation-receipt-withholding-amount" type="text" readonly
+                                    class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-700">
+                            </label>
+                        </div>
+                        <button id="quotation-withholding-receipt-link" type="button"
+                            data-open-quotation-receipt
+                            data-missing-element="quotation-withholding-receipt-missing"
+                            class="block w-full rounded-lg bg-primary px-4 py-3 text-center text-sm font-bold text-white hover:opacity-90"
+                            style="box-sizing: border-box; min-height: 48px;">
+                            Ver recibo de detracción
+                        </button>
+                        <p id="quotation-withholding-receipt-missing"
+                            class="hidden rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm font-semibold text-slate-500">
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="erp-cotizacion-preview-modal" class="erp-modal-backdrop" role="dialog" aria-modal="true"
         aria-labelledby="erp-cotizacion-preview-title">
         <div class="flex h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl"
@@ -6309,63 +8839,170 @@
 
     <div id="erp-gestion-modal" class="erp-modal-backdrop" role="dialog" aria-modal="true"
         aria-labelledby="erp-gestion-title">
-        <div class="erp-modal-card" style="max-width: 480px; width: 100%;">
+        <div class="erp-modal-card" style="max-width: 600px; width: 100%;">
             <div class="erp-modal-header" style="border-bottom: 1px solid #e2e8f0; padding: 1rem 1.25rem;">
                 <h3 id="erp-gestion-title" style="font-size: 1.125rem; font-weight: 700; color: #0f172a; margin: 0;">
-                    Registrar el archivo de Pago</h3>
+                    Registrar pago de cotización</h3>
                 <button type="button" class="erp-modal-close" data-erp-close-gestion aria-label="Cerrar gestión"
                     style="font-size: 1.25rem; color: #64748b; background: none; border: none; cursor: pointer;">✕</button>
             </div>
             <form id="erp-gestion-form" method="POST" action="" enctype="multipart/form-data">
                 @csrf
+                <input type="hidden" id="erp-gestion-currency-id" name="moneda_idmoneda">
+                <input type="hidden" id="erp-gestion-currency-mode" name="payment_currency_mode" value="same">
+                <input type="hidden" id="erp-gestion-pay-mode" name="modo_pago" value="total">
+                <input type="hidden" id="erp-gestion-complete-withholding" name="completar_deduccion_pendiente" value="0">
+                <input type="hidden" id="erp-gestion-withholding-decision" name="withholding_decision" value="">
                 <div class="erp-modal-body" style="padding: 1.25rem; display: flex; flex-direction: column; gap: 5px;">
                     <div>
                         <span id="erp-gestion-section-title"
                             style="font-size: 0.75rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.5rem;">DATOS
                             DE COTIZACIÓN</span>
 
-                        <div style="margin-bottom: 0.30rem;">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2" style="margin-bottom: 0.30rem;">
                             <label
-                                style="font-size: 0.8125rem; font-weight: 600; color: #334155; display: block; margin-bottom: 0.25rem;">Cliente</label>
-                            <input type="text" id="erp-gestion-client" readonly
-                                style="width: 100%; padding: 0.625rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; background-color: #f8fafc; font-size: 0.875rem; font-weight: 600; color: #1e293b;"
-                                value="-">
-                        </div>
-
-                        <div>
-                            <label
-                                style="font-size: 0.8125rem; font-weight: 600; color: #334155; display: block; margin-bottom: 0.25rem;">Monto
-                                a cancelar</label>
-                            <input type="text" id="erp-gestion-amount" readonly
-                                style="width: 100%; padding: 0.625rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; background-color: #f8fafc; font-size: 0.875rem; font-weight: 700; color: #0f172a;"
-                                value="-">
+                                style="font-size: 0.8125rem; font-weight: 600; color: #334155;">Cliente
+                                <input type="text" id="erp-gestion-client" readonly
+                                    style="display: block; width: 100%; margin-top: 0.25rem; padding: 0.625rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; background-color: #f8fafc; font-size: 0.875rem; font-weight: 600; color: #1e293b;"
+                                    value="-">
+                            </label>
+                            <label id="erp-gestion-reference-field"
+                                style="font-size: 0.8125rem; font-weight: 600; color: #334155;"><span id="erp-gestion-reference-label">Factura *</span>
+                                <input type="text" id="erp-gestion-reference" name="docReferencia" minlength="2" maxlength="15" required
+                                    style="display: block; width: 100%; margin-top: 0.25rem; padding: 0.625rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; background-color: #fff; font-size: 0.875rem; color: #1e293b;">
+                            </label>
                         </div>
                     </div>
 
-                    <div>
-                        <div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-1.5">
+                        <div id="erp-gestion-format-field">
                             <label for="erp-gestion-payment-format"
-                                style="font-size: 0.8125rem; font-weight: 600; color: #334155; display: block; margin-bottom: 0.25rem;">Formato de pago</label>
-                            <select id="erp-gestion-payment-format" disabled
-                                style="width: 100%; padding: 0.625rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; background-color: #f8fafc; font-size: 0.875rem; font-weight: 600; color: #1e293b;">
-                                <option value="">No especificado</option>
-                                <option value="contado">Contado</option>
-                                <option value="credito">Crédito</option>
+                                class="block text-xs font-semibold text-slate-700 mb-1">Formato de pago</label>
+                            <select id="erp-gestion-payment-format" name="formaPago_idformaPago" required
+                                class="w-full rounded-lg border border-slate-300 p-2 text-sm text-slate-800">
+                                <option value="">Selecciona</option>
+                                @foreach($formaPagoOptions as $option)
+                                    <option value="{{ $option['value'] }}" data-credit-days="{{ $option['credit_days'] ?? 0 }}">
+                                        {{ $option['label'] }}
+                                    </option>
+                                @endforeach
                             </select>
                         </div>
-                        <div style="margin-top: 0.30rem;">
+                        <div id="erp-gestion-bank-field">
+                            <label for="erp-gestion-bank" class="block text-xs font-semibold text-slate-700 mb-1">Entidad bancaria cuenta</label>
+                            <select id="erp-gestion-bank" name="entidadBancaria_identidadBancaria" required
+                                class="w-full rounded-lg border border-slate-300 p-2 text-sm text-slate-800">
+                                <option value="">Selecciona</option>
+                                @foreach($entidadBancariaOptions as $option)
+                                    <option value="{{ $option['value'] }}" data-default="{{ $option['is_bcp'] ? 'true' : 'false' }}"
+                                        @selected((string) $option['value'] === (string) $defaultBankId)>
+                                        {{ $option['label'] }}
+                                    </option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div id="erp-gestion-date-field">
                             <label for="erp-gestion-date"
-                                style="font-size: 0.8125rem; font-weight: 600; color: #334155; display: block; margin-bottom: 0.25rem;">Fecha
-                                de pago<span style="color: #ef4444;">*</span></label>
+                                class="block text-xs font-semibold text-slate-700 mb-1">Fecha de pago</label>
                             <input type="date" id="erp-gestion-date" name="fecha_pago" required value="{{ date('Y-m-d') }}"
-                                style="width: 100%; padding: 0.5rem 0.625rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; font-size: 0.8125rem; color: #1e293b; outline: none;">
+                                class="w-full rounded-lg border border-slate-300 p-2 text-sm text-slate-800">
+                        </div>
+                        <div id="erp-gestion-cancel-amount-field">
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Monto a cancelar</label>
+                            <div class="flex gap-2">
+                                <div class="flex min-w-0 flex-1 items-center overflow-hidden rounded-lg border border-slate-300 bg-white">
+                                    <span id="erp-gestion-amount-currency" class="px-2 text-sm font-semibold text-slate-600" aria-hidden="true"></span>
+                                    <input type="number" id="erp-gestion-amount" name="montoPago" min="0.01" step="0.01" value="0"
+                                        class="min-w-0 w-full border-0 p-2 text-sm font-bold text-slate-900 focus:ring-0">
+                                </div>
+                                <button type="button" id="erp-gestion-currency-toggle"
+                                    class="shrink-0 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-700" >Otra moneda</button>
+                            </div>
+                        </div>
+                        <div id="erp-gestion-payment-amount-field" class="hidden">
+                            <label id="erp-gestion-payment-amount-label" for="erp-gestion-payment-amount" class="block text-xs font-semibold text-slate-700 mb-1">Monto a cancelar</label>
+                            <div class="flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white">
+                                <span id="erp-gestion-payment-amount-currency" class="px-2 text-sm font-semibold text-slate-600" aria-hidden="true"></span>
+                                <input id="erp-gestion-payment-amount" type="number" min="0" step="0.01"
+                                    class="min-w-0 w-full border-0 p-2 text-sm font-bold text-slate-800 focus:ring-0">
+                            </div>
+                        </div>
+                        <p id="erp-gestion-withholding-summary" class="hidden rounded-lg text-xs text-danger" aria-live="polite"></p>
+                        <div id="erp-gestion-completion-amount-field" class="hidden">
+                            <label id="erp-gestion-completion-amount-label"
+                                for="erp-gestion-completion-amount"
+                                class="block text-xs font-semibold text-slate-700 mb-1">Monto detracción</label>
+                            <div class="flex items-center overflow-hidden rounded-lg border border-slate-300 bg-slate-50">
+                                <span id="erp-gestion-completion-amount-currency"
+                                    class="px-2 text-sm font-semibold text-slate-600" aria-hidden="true"></span>
+                                <input id="erp-gestion-completion-amount" type="text" readonly
+                                    class="min-w-0 w-full border-0 bg-transparent p-2 text-sm font-bold text-slate-900 focus:ring-0"
+                                    value="0.00">
+                            </div>
                         </div>
                     </div>
 
-                    <div>
-                        <label
-                            style="font-size: 0.8125rem; font-weight: 600; color: #334155; display: block; margin-bottom: 0.375rem;">Archivo
-                            de Pago<span style="color: #ef4444;">*</span></label>
+                    <div id="erp-gestion-currency-extra" class="hidden rounded-lg bg-slate-200 p-2 mb-1.5">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                            <label for="erp-gestion-currency" class="block text-xs font-semibold text-slate-700">Tipo de moneda
+                                <select id="erp-gestion-currency" name="currency_selector" class="mt-1 w-full rounded-lg border border-slate-300 p-2 text-sm">
+                                    <option value="">Selecciona</option>
+                                    @foreach($monedasOptions as $option)
+                                        <option value="{{ $option['value'] }}" data-symbol="{{ $option['simbolo'] }}">{{ $option['label'] }}</option>
+                                    @endforeach
+                                </select>
+                            </label>
+                            <label for="erp-gestion-exchange-rate" class="block text-xs font-semibold text-slate-700">Tipo de cambio
+                                <input id="erp-gestion-exchange-rate" name="tipo_cambio" type="number" step="0.0001" min="0.0001"
+                                    class="mt-1 w-full rounded-lg border border-slate-300 p-2 text-sm">
+                            </label>
+                            <label for="erp-gestion-foreign-amount" class="block text-xs font-semibold text-slate-700">Monto cancelado
+                                <span class="mt-1 flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white">
+                                    <span id="erp-gestion-foreign-amount-currency" class="px-2 text-sm font-semibold text-slate-600" aria-hidden="true"></span>
+                                    <input id="erp-gestion-foreign-amount" name="monto_cancelado" type="number" step="0.01" min="0.01"
+                                        class="min-w-0 w-full border-0 p-2 text-sm focus:ring-0">
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+                    <div id="erp-gestion-converted-total-field" class="hidden mb-1.5">
+                        <label for="erp-gestion-converted-amount" class="block text-xs font-semibold text-slate-700 mb-1">
+                            Total de la cotización en la moneda seleccionada
+                        </label>
+                        <div class="flex items-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                            <span id="erp-gestion-converted-amount-currency" class="px-2 text-sm font-semibold text-slate-600" aria-hidden="true"></span>
+                            <input id="erp-gestion-converted-amount" type="text" readonly
+                                class="min-w-0 w-full border-0 bg-transparent p-2 text-sm font-bold text-slate-900 focus:ring-0">
+                        </div>
+                    </div>
+                    <div id="erp-gestion-credit-fields" class="hidden grid grid-cols-2 sm:grid-cols-2 gap-2">
+                        <label for="erp-gestion-installment-count" class="block text-xs font-semibold text-slate-700">Cantidad de cuotas
+                            <input id="erp-gestion-installment-count" name="canCuotas" type="number" min="1" max="60" step="1" value=""
+                                class="mt-1 w-full rounded-lg border border-slate-300 p-2 text-sm text-slate-800">
+                        </label>
+                        <label for="erp-gestion-installment-interval" class="block text-xs font-semibold text-slate-700">Intervalo de días
+                            <select id="erp-gestion-installment-interval"
+                                class="mt-1 w-full rounded-lg border border-slate-300 p-2 text-sm text-slate-800">
+                                <option value="">Selecciona</option>
+                                <option value="1">Cada 1 día</option>
+                                <option value="7">Cada 7 días</option>
+                                <option value="15">Cada 15 días</option>
+                                <option value="30">Cada 30 días</option>
+                                <option value="45">Cada 45 días</option>
+                                <option value="60">Cada 60 días</option>
+                                <option value="90">Cada 90 días</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div id="erp-gestion-credit-installments" class="hidden rounded-lg border border-slate-200 p-2">
+                        <div id="erp-gestion-installments" class="space-y-2"></div>
+                    </div>
+                    <p id="erp-gestion-paid-installment-summary" class="hidden rounded-lg bg-emerald-50 p-2 text-xs font-semibold text-white"></p>
+                    <p id="erp-gestion-next-installment-summary" class="hidden rounded-lg p-2 text-xs font-semibold" style="background: #fef3c7; color: #92400e;"></p>
+
+                    <div id="erp-gestion-file-field">
+                        <label id="erp-gestion-file-label"
+                            style="font-size: 0.8125rem; font-weight: 600; color: #334155; display: block; margin-bottom: 0.375rem;">Archivo de Pago (opcional)</label>
                         <label class="erp-upload-box" id="erp-gestion-upload-box" for="erp-gestion-file" tabindex="0"
                             style="border: 2px dashed #fca5a5; background-color: #fef2f2; border-radius: 0.625rem; padding: 1.25rem 1rem; text-align: center; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.375rem; transition: all 0.2s ease;">
                             <svg class="erp-upload-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
@@ -6384,20 +9021,19 @@
                                 JPG, PNG o PDF (máx. 5 MB)</span>
                             <span id="erp-gestion-file-name" class="erp-upload-file-name" aria-live="polite"
                                 style="font-size: 0.8125rem; font-weight: 600; color: #b41b29;"></span>
-                            <input id="erp-gestion-file" name="archivoPago" type="file" required
+                            <input id="erp-gestion-file" name="archivoPago" type="file"
                                 accept="image/jpeg,image/png,application/pdf" style="display: none;">
                             <img id="erp-gestion-preview" class="erp-upload-preview" alt="Previsualización del comprobante"
                                 style="max-height: 100px; display: none; margin-top: 0.5rem; border-radius: 0.375rem;" />
                         </label>
                     </div>
 
-                    <div>
+                    <div id="erp-gestion-description-field">
                         <label for="erp-gestion-description"
-                            style="font-size: 0.8125rem; font-weight: 600; color: #334155; display: block; margin-bottom: 0.25rem;">Descripción
-                            / Observación (max. 50 caracteres)<span style="color: #ef4444;">*</span></label>
-                        <textarea id="erp-gestion-description" name="descripcion" maxlength="50" rows="2" required
+                            style="font-size: 0.8125rem; font-weight: 600; color: #334155; display: block; margin-bottom: 0.25rem;">Descripción / Observación (opcional, máximo 70 caracteres)</label>
+                        <textarea id="erp-gestion-description" name="descripcion" maxlength="70" rows="2"
                             placeholder="Describe sobre el pago..."
-                            style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; font-size: 0.8125rem; color: #1e293b; outline: none; resize: none; min-height: 60px;"></textarea>
+                            style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; font-size: 0.90rem; color: #1e293b; outline: none; resize: none; min-height: 60px;"></textarea>
                     </div>
 
                 </div>

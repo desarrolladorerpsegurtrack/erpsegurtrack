@@ -133,6 +133,106 @@ class EnsureErpActionMiddlewareTest extends TestCase
         });
     }
 
+    public function test_cxc_payment_requires_approve_permission(): void
+    {
+        $response = $this->runMiddleware(
+            routeName: 'modules.cuentasporcobrar.quotations.approve',
+            method: 'POST',
+            authData: [
+                'roles' => ['operador'],
+                'permissions' => ['cuentasporcobrar' => ['ver', 'aprobar']],
+            ],
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+
+        $this->assertForbidden(function (): void {
+            $this->runMiddleware(
+                routeName: 'modules.cuentasporcobrar.quotations.approve',
+                method: 'POST',
+                authData: [
+                    'roles' => ['operador'],
+                    'permissions' => ['cuentasporcobrar' => ['ver']],
+                ],
+            );
+        });
+    }
+
+    public function test_cxc_service_payments_require_create_not_approve_permission(): void
+    {
+        $response = $this->runMiddleware(
+            routeName: 'modules.cuentasporcobrar.cobrar-servicios',
+            method: 'POST',
+            authData: [
+                'roles' => ['operador'],
+                'permissions' => ['cuentasporcobrar' => ['ver', 'crear']],
+            ],
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+
+        $this->assertForbidden(function (): void {
+            $this->runMiddleware(
+                routeName: 'modules.cuentasporcobrar.cobrar-servicios',
+                method: 'POST',
+                authData: [
+                    'roles' => ['operador'],
+                    'permissions' => ['cuentasporcobrar' => ['ver', 'aprobar']],
+                ],
+            );
+        });
+    }
+
+    public function test_cxc_export_post_requires_export_permission(): void
+    {
+        $response = $this->runMiddleware(
+            routeName: 'modules.cuentasporcobrar.quotations.export.post',
+            method: 'POST',
+            authData: [
+                'roles' => ['operador'],
+                'permissions' => ['cuentasporcobrar' => ['ver', 'exportar']],
+            ],
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+
+        $this->assertForbidden(function (): void {
+            $this->runMiddleware(
+                routeName: 'modules.cuentasporcobrar.quotations.export.post',
+                method: 'POST',
+                authData: [
+                    'roles' => ['operador'],
+                    'permissions' => ['cuentasporcobrar' => ['ver']],
+                ],
+            );
+        });
+    }
+
+    public function test_service_deactivation_requires_dar_de_baja_permission(): void
+    {
+        $response = $this->runMiddleware(
+            routeName: 'modules.cuentasporcobrar.dar-de-baja-servicios',
+            method: 'POST',
+            authData: [
+                'roles' => ['operador'],
+                'permissions' => ['cuentasporcobrar' => ['ver', 'dar_de_baja']],
+            ],
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+
+        $this->assertForbidden(function (): void {
+            $this->runMiddleware(
+                routeName: 'modules.cuentasporcobrar.dar-de-baja-servicios',
+                method: 'POST',
+                authData: [
+                    'roles' => ['operador'],
+                    'permissions' => ['cuentasporcobrar' => ['ver']],
+                ],
+            );
+        });
+    }
+
     private function runMiddleware(
         string $routeName,
         string $method,

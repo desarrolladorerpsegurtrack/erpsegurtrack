@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\ServicePeriod;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -209,6 +210,132 @@ class CotizacionService
         }
 
         return $query;
+    }
+
+    /**
+     * @param array<int, string> $quoteIds
+     * @return array{success: bool, message: string, quote_ids: array<int, string>, ticket_ids: array<int, int>}
+     */
+    public function anularCotizaciones(array $quoteIds): array
+    {
+        $quoteIds = collect($quoteIds)
+            ->map(fn($quoteId): string => trim((string) $quoteId))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($quoteIds === []) {
+            return [
+                'success' => false,
+                'message' => 'Selecciona al menos una cotización para anular.',
+                'quote_ids' => [],
+                'ticket_ids' => [],
+            ];
+        }
+
+        return DB::transaction(function () use ($quoteIds): array {
+            $quotes = DB::table('cotizacion')
+                ->whereIn('nroCotizacion', $quoteIds)
+                ->orderBy('nroCotizacion')
+                ->lockForUpdate()
+                ->get(['nroCotizacion', 'batch_id', 'estado']);
+
+            if ($quotes->count() !== count($quoteIds)) {
+                return [
+                    'success' => false,
+                    'message' => 'Una o más cotizaciones seleccionadas ya no existen.',
+                    'quote_ids' => [],
+                    'ticket_ids' => [],
+                ];
+            }
+
+            if ($quotes->contains(fn($quote): bool => !in_array(
+                (string) ($quote->estado ?? ''),
+                [self::STATE_GENERADO, self::STATE_APROBADO_SP],
+                true
+            ))) {
+                return [
+                    'success' => false,
+                    'message' => 'Solo se pueden anular cotizaciones en estado Generado o Aprobado(SP).',
+                    'quote_ids' => [],
+                    'ticket_ids' => [],
+                ];
+            }
+
+            $paidQuoteMarkers = $quotes
+                ->pluck('nroCotizacion')
+                ->map(static fn(string $quoteId): string => 'COTIZACION:' . $quoteId)
+                ->all();
+            if (DB::table('cuentasporcobrar')
+                ->whereIn('descripcion', $paidQuoteMarkers)
+                ->where('estado', '<>', 'NUEVO')
+                ->exists()) {
+                return [
+                    'success' => false,
+                    'message' => 'No se puede anular una cotización que ya tiene un pago o una detracción/retención pendiente.',
+                    'quote_ids' => [],
+                    'ticket_ids' => [],
+                ];
+            }
+
+            DB::table('cotizacion')
+                ->whereIn('nroCotizacion', $quoteIds)
+                ->update(['estado' => self::STATE_ANULADO]);
+
+            $references = $quotes
+                ->map(fn($quote): string => trim((string) ($quote->batch_id ?? '')) ?: (string) $quote->nroCotizacion)
+                ->unique()
+                ->values();
+            $ticketIds = [];
+            $quotationOperationId = DB::table('tipooperacion')
+                ->where('nomenclatura', 'CT')
+                ->orWhere('detalle', 'like', '%Cotizaci%')
+                ->value('idtipoOperacion');
+
+            if ($quotationOperationId) {
+                foreach ($references as $reference) {
+                    $hasActiveQuote = DB::table('cotizacion')
+                        ->where('estado', '<>', self::STATE_ANULADO)
+                        ->where(function ($query) use ($reference): void {
+                            $query->where('nroCotizacion', $reference)
+                                ->orWhere('batch_id', $reference);
+                        })
+                        ->exists();
+
+                    if ($hasActiveQuote) {
+                        continue;
+                    }
+
+                    $tickets = DB::table('ticket')
+                        ->where('pedidoReferencia', $reference)
+                        ->where('tipoOperacion_idtipoOperacion', $quotationOperationId)
+                        ->where('estado', '<>', 'Resuelto')
+                        ->lockForUpdate()
+                        ->get(['idticket']);
+
+                    if ($tickets->isEmpty()) {
+                        continue;
+                    }
+
+                    DB::table('ticket')
+                        ->whereIn('idticket', $tickets->pluck('idticket'))
+                        ->update([
+                            'estado' => 'Resuelto',
+                            'fechaHoraCierre' => now()->format('Y-m-d H:i:s'),
+                        ]);
+
+                    $ticketIds = array_merge($ticketIds, $tickets->pluck('idticket')->map(fn($id): int => (int) $id)->all());
+                }
+            }
+
+            return [
+                'success' => true,
+                'message' => '',
+                'quote_ids' => $quoteIds,
+                'ticket_ids' => array_values(array_unique($ticketIds)),
+            ];
+        });
     }
 
     private function wherePersonalMatches(Builder $query, string $search): void
@@ -547,31 +674,7 @@ class CotizacionService
 
     private function formatPeriodoLabel(mixed $value): string
     {
-        if ($value === null || $value === '') {
-            return '';
-        }
-
-        $periodo = trim((string) $value);
-        if ($periodo === '' || $periodo === 'No') {
-            return '';
-        }
-
-        if (is_numeric($periodo)) {
-            $mapping = [
-                30 => 'Mensual',
-                90 => '3 Meses',
-                180 => '6 Meses',
-                365 => '12 Meses',
-                730 => '24 Meses',
-                1095 => '36 Meses',
-                1460 => '48 Meses',
-            ];
-
-            $days = (int) $periodo;
-            return $mapping[$days] ?? $periodo;
-        }
-
-        return $periodo;
+        return ServicePeriod::label($value);
     }
 
     private function loadAlmacenes(): Collection

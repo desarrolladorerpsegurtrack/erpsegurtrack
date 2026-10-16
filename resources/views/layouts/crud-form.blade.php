@@ -2276,8 +2276,7 @@
 
                                 @if((($field['quickCreateCredential'] ?? false) === true && !($canSeeCredencialesField ?? true)) ||
                                     (($field['quickCreateDispositivo'] ?? false) === true && !($canSeeDispositivoField ?? true)) ||
-                                    (($field['name'] ?? '') === 'dispositivoSeleccionado' && !($canSeeDispositivoField ?? true)) ||
-                                    (($field['name'] ?? '') === 'numeroTelefonico_numeroTelefonico' && ($isIntegrador ?? false)))
+                                    (($field['name'] ?? '') === 'dispositivoSeleccionado' && !($canSeeDispositivoField ?? true)))
                                     @continue
                                 @endif
 
@@ -3075,8 +3074,13 @@
                                                                                         @php
                                                                                             $tablePermissionActions = collect($permissionActions)
                                                                                                 ->except('ver_flujo');
-                                                                                            if ($moduleEntry['moduleKey'] !== 'ventas') {
+                                                                                            if (!in_array($moduleEntry['moduleKey'], ['ventas', 'cuentasporcobrar'], true)) {
                                                                                                 $tablePermissionActions = $tablePermissionActions->except(['aprobar', 'anular']);
+                                                                                            } elseif ($moduleEntry['moduleKey'] === 'cuentasporcobrar') {
+                                                                                                $tablePermissionActions = $tablePermissionActions->except('anular');
+                                                                                            }
+                                                                                            if ($moduleEntry['moduleKey'] === 'cuentasporcobrar') {
+                                                                                                $tablePermissionActions = $tablePermissionActions->except('eliminar');
                                                                                             }
                                                                                             if ($moduleEntry['moduleKey'] !== 'cuentasporcobrar') {
                                                                                                 $tablePermissionActions = $tablePermissionActions->except('dar_de_baja');
@@ -3148,8 +3152,13 @@
                                                                                     // Para el resto removemos la columna "Ver flujo" cuando no aplica
                                                                                     $tablePermissionActions = $tablePermissionActions->except('ver_flujo');
                                                                                 }
-                                                                                if ($moduleEntry['moduleKey'] !== 'ventas') {
+                                                                                if (!in_array($moduleEntry['moduleKey'], ['ventas', 'cuentasporcobrar'], true)) {
                                                                                     $tablePermissionActions = $tablePermissionActions->except(['aprobar', 'anular']);
+                                                                                } elseif ($moduleEntry['moduleKey'] === 'cuentasporcobrar') {
+                                                                                    $tablePermissionActions = $tablePermissionActions->except('anular');
+                                                                                }
+                                                                                if ($moduleEntry['moduleKey'] === 'cuentasporcobrar') {
+                                                                                    $tablePermissionActions = $tablePermissionActions->except('eliminar');
                                                                                 }
                                                                                 if ($moduleEntry['moduleKey'] !== 'cuentasporcobrar') {
                                                                                     $tablePermissionActions = $tablePermissionActions->except('dar_de_baja');
@@ -8524,4 +8533,3 @@
         label.block > .flex { align-items: flex-start; }
     </style>
 @endpush
-

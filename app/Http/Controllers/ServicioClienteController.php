@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Export\ExportableList;
 use App\Http\Controllers\Permission\HandlesResourceLock;
 use App\Support\ResourceLock;
+use App\Support\ServicePeriod;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -492,9 +493,8 @@ class ServicioClienteController extends Controller
             'max:30',
         ];
 
-        if (!$isIntegrador) {
+        if (!$isIntegrador || $request->filled('numeroTelefonico_numeroTelefonico')) {
             $numeroRules = array_merge($numeroRules, [
-                'required',
                 'exists:numerotelefonico,numeroTelefonico',
                 Rule::exists('numerotelefonico', 'numeroTelefonico')->where(fn($query) => $query->where('estado', '2')),
                 Rule::exists('numerotelefonico', 'numeroTelefonico')->where(function ($query) {
@@ -518,6 +518,9 @@ class ServicioClienteController extends Controller
                     });
                 }),
             ]);
+        }
+        if (!$isIntegrador) {
+            array_unshift($numeroRules, 'required');
         }
 
         $rules = [
@@ -609,7 +612,12 @@ class ServicioClienteController extends Controller
         $validated = $request->validate($rules, $messages, $attributes);
 
         $periodoServicio = $this->getPeriodoServicio($validated['almacen_idalmacen'] ?? null);
-        if ($periodoServicio !== null && $validated['fechaInicio'] !== null && $validated['fechaInicio'] !== '') {
+        if (
+            $periodoServicio !== null
+            && !empty($validated['fecheVencimiento'])
+            && $validated['fechaInicio'] !== null
+            && $validated['fechaInicio'] !== ''
+        ) {
             $validated['fecheVencimiento'] = $this->calculateFecheVencimiento((string) $validated['fechaInicio'], $periodoServicio);
         }
 
@@ -963,10 +971,6 @@ class ServicioClienteController extends Controller
             ],
         ];
 
-        if ($isIntegrador) {
-            $fields = array_values(array_filter($fields, fn(array $field): bool => $field['name'] !== 'numeroTelefonico_numeroTelefonico'));
-        }
-
         if ($record->estado === 'inactivo') {
             $comentarioBaja = DB::table('historial_servicio')
                 ->where('servicioCliente_idservicioCliente', $id)
@@ -1083,7 +1087,7 @@ class ServicioClienteController extends Controller
         $requiresPhone = !$isIntegrador && $request->input('estado', $existingRecord->estado) === 'activo';
         $currentServiceWasActive = $existingRecord->estado === 'activo';
 
-        if (!$isIntegrador) {
+        if (!$isIntegrador || $request->filled('numeroTelefonico_numeroTelefonico')) {
             $numeroRules = array_merge($numeroRules, [
                 'exists:numerotelefonico,numeroTelefonico',
                 Rule::exists('numerotelefonico', 'numeroTelefonico')->where(fn($query) => $query->whereIn('estado', ['2', '3'])),
@@ -1158,9 +1162,9 @@ class ServicioClienteController extends Controller
                     }
                 }
             ]);
-            if ($requiresPhone) {
-                array_unshift($numeroRules, 'required');
-            }
+        }
+        if ($requiresPhone) {
+            array_unshift($numeroRules, 'required');
         }
 
         $rules = [
@@ -1682,8 +1686,24 @@ class ServicioClienteController extends Controller
                 );
             }
 
+            logger()->error('Servicio cliente update failed', [
+                'service_id' => $id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+            ]);
+
             return redirect()->back()->withInput()->with('error', 'No se pudo actualizar el servicio cliente. Intente de nuevo.');
         } catch (\Exception $exception) {
+            logger()->error('Servicio cliente update failed', [
+                'service_id' => $id,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+            ]);
+
             return redirect()->back()->withInput()->with('error', 'No se pudo actualizar el servicio cliente. Intente de nuevo.');
         }
 
@@ -1895,42 +1915,21 @@ class ServicioClienteController extends Controller
     private function applyServicioFilter($query, string $value)
     {
         $term = '%' . $value . '%';
-        $normalized = mb_strtolower(trim($value), 'UTF-8');
-        $periodoMap = [
-            'mensual' => 30,
-            '1 mes' => 30,
-            '3 meses' => 90,
-            '6 meses' => 180,
-            '12 meses' => 365,
-            '24 meses' => 730,
-            '36 meses' => 1095,
-            '48 meses' => 1460,
-        ];
+        $periodoMonths = ServicePeriod::months($value);
 
-        return $query->where(function ($builder) use ($term, $normalized, $periodoMap) {
+        return $query->where(function ($builder) use ($term, $periodoMonths) {
             $builder->where('a.detalle', 'like', $term)
                 ->orWhere('a.periodo', 'like', $term);
 
-            if (isset($periodoMap[$normalized])) {
-                $builder->orWhere('a.periodo', $periodoMap[$normalized]);
+            if ($periodoMonths !== null) {
+                $builder->orWhere('a.periodo', $periodoMonths);
             }
         });
     }
 
     private function periodoSearchValue(string $value): ?int
     {
-        $periodoMap = [
-            'mensual' => 30,
-            '1 mes' => 30,
-            '3 meses' => 90,
-            '6 meses' => 180,
-            '12 meses' => 365,
-            '24 meses' => 730,
-            '36 meses' => 1095,
-            '48 meses' => 1460,
-        ];
-
-        return $periodoMap[mb_strtolower(trim($value), 'UTF-8')] ?? null;
+        return ServicePeriod::months($value);
     }
 
     private function normalizeDateRequestForValidation(Request $request, string $field): void
@@ -2027,27 +2026,7 @@ class ServicioClienteController extends Controller
         }
 
         $periodo = DB::table('almacen')->where('idalmacen', $almacenId)->value('periodo');
-        if ($periodo === null || trim((string) $periodo) === '' || strcasecmp((string) $periodo, 'No') === 0) {
-            return null;
-        }
-
-        if (is_numeric($periodo)) {
-            return (int) $periodo;
-        }
-
-        $normalized = mb_strtolower(trim((string) $periodo), 'UTF-8');
-        $map = [
-            'mensual' => 30,
-            '1 mes' => 30,
-            '3 meses' => 90,
-            '6 meses' => 180,
-            '12 meses' => 365,
-            '24 meses' => 730,
-            '36 meses' => 1095,
-            '48 meses' => 1460,
-        ];
-
-        return $map[$normalized] ?? null;
+        return ServicePeriod::months($periodo);
     }
 
     private function calculateFecheVencimiento(string $fechaInicio, mixed $periodo): ?string
@@ -2066,12 +2045,12 @@ class ServicioClienteController extends Controller
             return null;
         }
 
-        $days = (int) $periodoValue;
-        if ($days <= 0) {
+        $months = ServicePeriod::months($periodoValue);
+        if ($months === null) {
             return null;
         }
 
-        return Carbon::parse($fecha)->addDays($days)->format('Y-m-d');
+        return ServicePeriod::addToDate($fecha, $months)->format('Y-m-d');
     }
 
     private function baseQuery()
@@ -2444,24 +2423,7 @@ class ServicioClienteController extends Controller
 
     private function formatPeriodo(mixed $value): string
     {
-        if ($value === null || trim((string) $value) === '' || trim((string) $value) === 'No') {
-            return '';
-        }
-
-        if (!is_numeric($value)) {
-            return trim((string) $value);
-        }
-
-        return match ((int) $value) {
-            30 => 'Mensual',
-            90 => '3 Meses',
-            180 => '6 Meses',
-            365 => '12 Meses',
-            730 => '24 Meses',
-            1095 => '36 Meses',
-            1460 => '48 Meses',
-            default => trim((string) $value),
-        };
+        return ServicePeriod::label($value);
     }
 
     private function estadoOptions()

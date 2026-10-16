@@ -1,31 +1,7 @@
-@php use Illuminate\Support\Carbon; @endphp
+@php use App\Support\ServicePeriod;
+use Illuminate\Support\Carbon; @endphp
 @php
-    $periodoPdfMap = [
-        30 => 'Mensual',
-        90 => '3 Meses',
-        180 => '6 Meses',
-        365 => '12 Meses',
-        730 => '24 Meses',
-        1095 => '36 Meses',
-        1460 => '48 Meses',
-    ];
-    $formatPeriodoPdf = function ($value) use ($periodoPdfMap) {
-        if ($value === null || $value === '') {
-            return '';
-        }
-
-        $periodo = trim((string) $value);
-        if ($periodo === '' || mb_strtolower($periodo, 'UTF-8') === 'no') {
-            return '';
-        }
-
-        if (is_numeric($periodo)) {
-            $days = (int) $periodo;
-            return $periodoPdfMap[$days] ?? $periodo;
-        }
-
-        return $periodo;
-    };
+    $formatPeriodoPdf = fn($value) => ServicePeriod::label($value);
 @endphp
 <!doctype html>
 <html lang="es">
@@ -37,14 +13,21 @@
         $fileTitleClient = trim((string) ($firstQuote->cliente_label ?? 'Cotización'));
         $fileTitleIdentifier = trim((string) ($batchId ?? $firstQuote->batch_id ?? ($firstQuote->nroCotizacion ?? '')));
         $fileTitleClient = preg_replace('/\s+/', ' ', $fileTitleClient);
-        $fileTitleIdentifier = $fileTitleIdentifier !== '' ? '_'.$fileTitleIdentifier : '';
+        $fileTitleIdentifier = $fileTitleIdentifier !== '' ? '_' . $fileTitleIdentifier : '';
     @endphp
-    <title>{{ $fileTitleClient.$fileTitleIdentifier }}</title>
+    <title>{{ $fileTitleClient . $fileTitleIdentifier }}</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
-        
+
         @page {
-            margin: 50px 30px 25px 30px;
+            margin-top: 50pt;
+            margin-bottom: 140pt;
+            margin-left: 30pt;
+            margin-right: 30pt;
+        }
+
+        @page :first {
+            margin-top: 35pt;
         }
 
         body {
@@ -57,11 +40,18 @@
             position: relative;
         }
 
+        .header-fixed {
+            position: static;
+            left: 0;
+            right: 0;
+            width: 100%;
+        }
+
         /* ===== HEADER ===== */
         .header-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 10px;
+            margin-bottom: 5px;
         }
 
         .header-table td {
@@ -128,18 +118,18 @@
 
         /* ===== DATOS DEL CLIENTE (Estilo PDF Original) ===== */
         .section-title {
-            font-size: 14px;
+            font-size: 14px;    
             font-weight: 700;
             color: #000000;
             letter-spacing: 0.5px;
-            margin-bottom: 5px;
-            margin-top: 10px;
+            margin-bottom: 7px;
+            margin-top: 3px;
         }
 
         .customer-data-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 10px;
+            margin-bottom: 2px;
             text-transform: uppercase;
             table-layout: fixed;
             margin-top: -8px;
@@ -209,7 +199,7 @@
         }
 
         .items-section {
-            margin-bottom: 12px;
+            margin-bottom: 6px;
             page-break-inside: avoid;
         }
 
@@ -333,6 +323,7 @@
             width: 17%;
             text-align: center;
         }
+
         .col-igv {
             width: 10%;
             text-align: center;
@@ -374,9 +365,9 @@
 
         .footer-fixed {
             position: fixed;
-            bottom: 0;
-            left: 10px;
-            right: 10px;
+            bottom: -120pt;
+            left: 10pt;
+            right: 10pt;
             width: auto;
         }
 
@@ -422,107 +413,109 @@
             border-top: 1px solid #000000;
             border-bottom: 1px solid #000000;
             height: 1px;
-            margin-top: 5px;
-            margin-bottom: 10px;
+            margin-top: 2px;
+            margin-bottom: 5px;
             width: 100%;
         }
     </style>
 </head>
 
 <body>
+    @php
+        // Tomamos la primera cotización para encabezado y datos del cliente
+        $firstQData = $quotesData[0];
+        $quote = $firstQData['quote'];
+    @endphp
+    <div class="header-fixed">
+            {{-- ===== ENCABEZADO ===== --}}
+            <table class="header-table">
+                <tr>
+                    <td class="brand-section" style="width: 55%;">
+                        <img src="{{ public_path('images/logo-main.png') }}" alt="Logo">
+                        <div class="company-details">
+                            EMPRESA: SEGURTRAK S.A.C.<br>
+                            RUC: 20603959061<br>
+                            CORREO: ventas@segurtrack.com<br>
+                            DIRECCIÓN: MZ A LOTE 41 URB. EL ASESOR II<br>
+                            SANTA ANITA - LIMA - LIMA
+                        </div>
+                    </td>
+                    <td class="document-details" style="width: 45%;">
+                        <div class="document-title">COTIZACIÓN</div>
+                        <div class="document-date">
+                            {{ $quote->fechaHoraEmision ? Carbon::parse($quote->fechaHoraEmision)->locale('es')->isoFormat('D [de] MMMM YYYY') : '-' }}
+                        </div>
+                        <div class="cotizacion-numero">N° COTIZACIÓN</div>
+                        <div class="document-number">{{ $batchId ?? $quote->batch_id ?? '-' }}</div>
+                        <div class="vendedor-dni">VENDEDOR:
+                            {{  ($quote->personal_nombre ?? '') . ' ' . trim((string) ($quote->personal_apellido ?? '')) }}
+                        </div>
+                    </td>
+                </tr>
+            </table>
+
+            {{-- ===== DATOS DEL CLIENTE ===== --}}
+            @php
+                $documentType = strtoupper(trim((string) ($quote->tipoDocumentoIDCliente ?? '')));
+                $documentValue = $quote->cliente_idcliente ?? '-';
+                $rucValue = in_array($documentType, ['RUC', '6'], true) ? $documentValue : '-';
+                $dniValue = in_array($documentType, ['DNI', '1'], true) ? $documentValue : '-';
+            @endphp
+
+            <div class="section-title">DATOS DEL CLIENTE:</div>
+            <table class="customer-data-table">
+                <tr>
+                    <td class="col-half-left">
+                        <table class="inner-data-table">
+                            <tr>
+                                <td class="lbl-field-left">EMPRESA:</td>
+                                <td class="val-field">{{ $quote->cliente_label ?? '-' }}</td>
+                            </tr>
+                            @if(in_array($documentType, ['RUC', '6'], true))
+                                <tr>
+                                    <td class="lbl-field-left">RUC:</td>
+                                    <td class="val-field">{{ $rucValue }}</td>
+                                </tr>
+                            @else
+                                <tr>
+                                    <td class="lbl-field-left">DNI:</td>
+                                    <td class="val-field">{{ $dniValue }}</td>
+                                </tr>
+                            @endif
+                            <tr>
+                                <td class="lbl-field-left">DIRECCION:</td>
+                                <td class="val-field">{{ $quote->direccion ?? '-' }}</td>
+                            </tr>
+                            <tr>
+                                <td class="lbl-field-left">VIGENCIA:</td>
+                                <td class="val-field">{{ $quote->vigencia_detalle ?? '-' }}</td>
+                            </tr>
+                        </table>
+                    </td>
+
+                    <td class="col-half-right">
+                        <table class="inner-data-table">
+                            <tr>
+                                <td class="lbl-field-right">CORREO:</td>
+                                <td class="val-field">{{ $quote->correo ?? '-' }}</td>
+                            </tr>
+                            <tr>
+                                <td class="lbl-field-right">NOMBRE:</td>
+                                <td class="val-field">{{ $quote->nombreApellido ?? '-' }}</td>
+                            </tr>
+                            <tr>
+                                <td class="lbl-field-right">Nº CONTACTO:</td>
+                                <td class="val-field">{{ $quote->telefono ?? '-' }}</td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+
+            <div class="divider-line"></div>
+    </div>
+
     <div class="page">
-        @php
-            // Tomamos la primera cotización para encabezado y datos del cliente
-            $firstQData = $quotesData[0];
-            $quote = $firstQData['quote'];
-        @endphp
-        {{-- ===== ENCABEZADO ===== --}}
-        <table class="header-table">
-            <tr>
-                <td class="brand-section" style="width: 55%;">
-                    <img src="{{ public_path('images/logo-main.png') }}" alt="Logo">
-                    <div class="company-details">
-                        EMPRESA: SEGURTRAK S.A.C.<br>
-                        RUC: 20603959061<br>
-                        CORREO: ventas@segurtrack.com<br>
-                        DIRECCIÓN: MZ A LOTE 41 URB. EL ASESOR II<br>
-                        SANTA ANITA - LIMA - LIMA
-                    </div>
-                </td>
-                <td class="document-details" style="width: 45%;">
-                    <div class="document-title">COTIZACIÓN</div>
-                    <div class="document-date">
-                        {{ $quote->fechaHoraEmision ? Carbon::parse($quote->fechaHoraEmision)->locale('es')->isoFormat('D [de] MMMM YYYY') : '-' }}
-                    </div>
-                    <div class="cotizacion-numero">N° COTIZACIÓN</div>
-                    <div class="document-number">{{ $batchId ?? $quote->batch_id ?? '-' }}</div>
-                    <div class="vendedor-dni">VENDEDOR:
-                        {{  ($quote->personal_nombre ?? '') . ' ' . trim((string) ($quote->personal_apellido ?? '')) }}
-                    </div>
-                </td>
-            </tr>
-        </table>
-
-        {{-- ===== DATOS DEL CLIENTE ===== --}}
-        @php
-            $documentType = strtoupper(trim((string) ($quote->tipoDocumentoIDCliente ?? '')));
-            $documentValue = $quote->cliente_idcliente ?? '-';
-            $rucValue = in_array($documentType, ['RUC', '6'], true) ? $documentValue : '-';
-            $dniValue = in_array($documentType, ['DNI', '1'], true) ? $documentValue : '-';
-        @endphp
-
-        <div class="section-title">DATOS DEL CLIENTE:</div>
-        <table class="customer-data-table">
-            <tr>
-                <td class="col-half-left">
-                    <table class="inner-data-table">
-                        <tr>
-                            <td class="lbl-field-left">EMPRESA:</td>
-                            <td class="val-field">{{ $quote->cliente_label ?? '-' }}</td>
-                        </tr>
-                        @if(in_array($documentType, ['RUC', '6'], true))
-                            <tr>
-                                <td class="lbl-field-left">RUC:</td>
-                                <td class="val-field">{{ $rucValue }}</td>
-                            </tr>
-                        @else
-                            <tr>
-                                <td class="lbl-field-left">DNI:</td>
-                                <td class="val-field">{{ $dniValue }}</td>
-                            </tr>
-                        @endif
-                        <tr>
-                            <td class="lbl-field-left">DIRECCION:</td>
-                            <td class="val-field">{{ $quote->direccion ?? '-' }}</td>
-                        </tr>
-                        <tr>
-                            <td class="lbl-field-left">VIGENCIA:</td>
-                            <td class="val-field">{{ $quote->vigencia_detalle ?? '-' }}</td>
-                        </tr>
-                    </table>
-                </td>
-
-                <td class="col-half-right">
-                    <table class="inner-data-table">
-                        <tr>
-                            <td class="lbl-field-right">CORREO:</td>
-                            <td class="val-field">{{ $quote->correo ?? '-' }}</td>
-                        </tr>
-                        <tr>
-                            <td class="lbl-field-right">NOMBRE:</td>
-                            <td class="val-field">{{ $quote->nombreApellido ?? '-' }}</td>
-                        </tr>
-                        <tr>
-                            <td class="lbl-field-right">Nº CONTACTO:</td>
-                            <td class="val-field">{{ $quote->telefono ?? '-' }}</td>
-                        </tr>
-                    </table>
-                </td>
-            </tr>
-        </table>
-
-        <div class="divider-line"></div>
-
         {{-- ===== TABLAS DE ÍTEMS ===== --}}
         @foreach($quotesData as $qData)
             @php
@@ -540,58 +533,63 @@
                 $isLargeItemsSection = $groupItems->count() > 8;
             @endphp
             <div class="items-section {{ $isLargeItemsSection ? 'items-section--large' : '' }}">
-                    <table
-                        class="items-table {{ ($section_title ?? '') === 'PLANES' ? 'items-table--dark' : 'items-table--light' }}">
-                        <thead>
-                            <tr class="section-head {{ ($section_title ?? '') === 'PLANES' ? '' : 'section-head--light' }}">
-                            <th colspan="{{ $showDiscountColumn ? 6 : 5 }}">{{ ($section_title ?? 'EQUIPAMIENTO') }} &nbsp;&nbsp;{{ $quoteItem->nroCotizacion ?? '' }}</th></tr>
-                            <tr class="col-head">
-                                <th class="col-cant">Cant.</th>
-                                <th class="col-prod">Descripción</th>
-                                <th class="col-punit ">P. Unitario</th>
-                                @if($showDiscountColumn)
-                                    <th class="col-descuento ">Desct %</th>
-                                @endif
-                                <th class="col-igv">IGV</th>
-                                <th class="col-total ">Total</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach($groupItems as $index => $item)
-                                <tr>
-                                    <td class="text-center" style="font-size: 6pt; ">{{ number_format($item->cantidad) }}</td>
-                                    <td class="text-left" style="vertical-align: middle; font-size: 6pt; ">
-                                        @php
-                                            $periodo = $formatPeriodoPdf($item->periodo ?? '');
-                                        @endphp
-                                        {{ $item->producto ?? '-' }}@if($periodo !== '') <span
-                                        style="color: red; font-weight: bold; font-size: 6pt;">- {{ mb_strtoupper($periodo) }}</span>@endif
-                                    </td>
-                                    <td class="text-center" style="font-size: 7pt; ">{{ $item->precio_label }}</td>
-                                    @if($showDiscountColumn)
-                                        <td class="text-center" style="font-size: 7pt; ">{{ $item->descuento_label }}</td>
-                                    @endif
-                                    <td class="text-center nowrap" style="font-size: 7pt; ">{{ $item->igv_label ?? '-' }}</td>
-                                    <td class="text-center" style="font-size: 7pt; ">{{ $item->total_label }}
-                                </tr>
-                            @endforeach
-                            @if(trim((string) ($quoteItem->comentario ?? '')) !== '')
-                                <tr>
-                                    <td colspan="{{ $showDiscountColumn ? 6 : 5 }}" style="border-left: 1px solid #c0c0c0; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #c0c0c0; padding: 3px 10px 4px; color: #6b7280; font-size: 8px; font-style: italic; text-align: left; word-wrap: break-word; overflow-wrap: break-word;">
-                                        Comentario: {{ $quoteItem->comentario }}
-                                    </td>
-                                </tr>
+                <table
+                    class="items-table {{ ($section_title ?? '') === 'PLANES' ? 'items-table--dark' : 'items-table--light' }}">
+                    <thead>
+                        <tr class="section-head {{ ($section_title ?? '') === 'PLANES' ? '' : 'section-head--light' }}">
+                            <th colspan="{{ $showDiscountColumn ? 6 : 5 }}">{{ ($section_title ?? 'EQUIPAMIENTO') }}
+                                &nbsp;&nbsp;{{ $quoteItem->nroCotizacion ?? '' }}</th>
+                        </tr>
+                        <tr class="col-head">
+                            <th class="col-cant">Cant.</th>
+                            <th class="col-prod">Descripción</th>
+                            <th class="col-punit ">P. Unitario</th>
+                            @if($showDiscountColumn)
+                                <th class="col-descuento ">Desct %</th>
                             @endif
-                        </tbody>
-                        <tfoot>
+                            <th class="col-igv">IGV</th>
+                            <th class="col-total ">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($groupItems as $index => $item)
                             <tr>
-                                <td rowspan="1" colspan="{{ $showDiscountColumn ? 4 : 3 }}" style="border: none; background: transparent;"></td>
-                                <th class="text-center">Total</th>
-                                <td class="text-center total-amount">{{ $total_general_label }}</td>
+                                <td class="text-center" style="font-size: 6pt; ">{{ number_format($item->cantidad) }}</td>
+                                <td class="text-left" style="vertical-align: middle; font-size: 6pt; ">
+                                    @php
+                                        $periodo = $formatPeriodoPdf($item->periodo ?? '');
+                                    @endphp
+                                    {{ $item->producto ?? '-' }}@if($periodo !== '') <span
+                                        style="color: red; font-weight: bold; font-size: 6pt;">-
+                                    {{ mb_strtoupper($periodo) }}</span>@endif
+                                </td>
+                                <td class="text-center" style="font-size: 7pt; ">{{ $item->precio_label }}</td>
+                                @if($showDiscountColumn)
+                                    <td class="text-center" style="font-size: 7pt; ">{{ $item->descuento_label }}</td>
+                                @endif
+                                <td class="text-center nowrap" style="font-size: 7pt; ">{{ $item->igv_label ?? '-' }}</td>
+                                <td class="text-center" style="font-size: 7pt; ">{{ $item->total_label }}
                             </tr>
-                        </tfoot>
-                    </table>
-                </div>
+                        @endforeach
+                        @if(trim((string) ($quoteItem->comentario ?? '')) !== '')
+                            <tr>
+                                <td colspan="{{ $showDiscountColumn ? 6 : 5 }}"
+                                    style="border-left: 1px solid #c0c0c0; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #c0c0c0; padding: 3px 10px 4px; color: #6b7280; font-size: 8px; font-style: italic; text-align: left; word-wrap: break-word; overflow-wrap: break-word;">
+                                    Comentario: {{ $quoteItem->comentario }}
+                                </td>
+                            </tr>
+                        @endif
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td rowspan="1" colspan="{{ $showDiscountColumn ? 4 : 3 }}"
+                                style="border: none; background: transparent;"></td>
+                            <th class="text-center">Total</th>
+                            <td class="text-center total-amount">{{ $total_general_label }}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
         @endforeach
     </div>
     {{-- ===== PIE DE PÁGINA ===== --}}

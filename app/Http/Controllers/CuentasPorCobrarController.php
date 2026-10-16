@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Export\ExportableList;
 use App\Http\Controllers\Permission\HandlesResourceLock;
 use App\Support\ResourceLock;
+use App\Support\ServicePeriod;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -12,10 +13,19 @@ use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\View\View;
 use App\Services\CxcService;
+use App\Services\CotizacionService;
 use App\Services\CuentasPorCobrarService;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class CuentasPorCobrarController extends Controller
 {
@@ -28,20 +38,32 @@ class CuentasPorCobrarController extends Controller
     public function __construct(
         protected CxcService $cxcService,
         protected CuentasPorCobrarService $cuentasPorCobrarService,
-    )
-    {   
+        protected CotizacionService $cotizacionService,
+    ) {
     }
 
     public function index(Request $request): View
     {
+        $entidadBancariaOptions = $this->entidadBancariaOptions();
+        $defaultBank = $entidadBancariaOptions->first(
+            fn(array $option): bool => $option['is_bcp']
+        );
         $activeTab = $request->query('tab') === 'servicios' ? 'servicios' : 'cotizaciones';
-        $quoteSearch = trim((string) $request->query('quote_q', ''));
-        $quoteGroup = trim((string) $request->query('quote_group', ''));
         $quoteClient = trim((string) $request->query('quote_client', ''));
-        $quoteCurrency = trim((string) $request->query('quote_currency', ''));
+        $quoteNumber = trim((string) $request->query('quote_number', ''));
+        $quotePaymentFormat = trim((string) $request->query('quote_payment_format', ''));
+        $quoteValidity = trim((string) $request->query('quote_validity', ''));
         $quoteService = trim((string) $request->query('quote_service', ''));
         $quoteDate = trim((string) $request->query('quote_date', ''));
-        $quoteStatus = trim((string) $request->query('quote_status', '1'));
+        $quoteStatus = trim((string) $request->query('quote_status', 'pending'));
+        $quoteValidityOptions = DB::table('vigenciaoferta')
+            ->select('idvigenciaOferta', 'detalle')
+            ->orderBy('detalle')
+            ->get()
+            ->map(fn($row): array => [
+                'value' => (string) $row->idvigenciaOferta,
+                'label' => trim((string) $row->detalle),
+            ]);
 
         $perPage = $this->resolvePerPage($request);
         $cotizacionesPendientes = new LengthAwarePaginator(
@@ -58,118 +80,302 @@ class CuentasPorCobrarController extends Controller
         ];
 
         if ($activeTab === 'cotizaciones') {
-        $cotizacionesQuery = DB::table('cotizacion as c')
-            ->leftJoin('cliente as cli', 'cli.idcliente', '=', 'c.cliente_idcliente')
-            ->leftJoin('vigenciaoferta as v', 'v.idvigenciaOferta', '=', 'c.vigenciaOferta_idvigenciaOferta')
-            ->leftJoin('formapago as fp', 'fp.idformaPago', '=', 'c.formaPago_idformaPago')
-            ->leftJoinSub($this->quotationServiceTypeQuery(), 'cotizacion_tipo', 'cotizacion_tipo.cotizacion_nroCotizacion', '=', 'c.nroCotizacion')
-            ->leftJoin('moneda as m', function ($join) {
-                $join->on('m.idmoneda', '=', 'c.moneda_idmoneda')->where('m.idmoneda', '!=', 4);
-            })
-            ->select([
-                'c.nroCotizacion',
-                'c.batch_id',
-                'c.cliente_idcliente',
-                DB::raw('COALESCE(cli.razonSocial, cli.nombreComercial, cli.idcliente) as cliente_nombre'),
-                'cli.flag_integrador as flag_integrador',
-                'c.total',
-                'c.estado',
-                'c.fechaHoraEmision',
-                'c.archivoPago',
-                'v.detalle as vigencia_detalle',
-                'fp.detalle as forma_pago_detalle',
-                'fp.tiempo as forma_pago_tiempo',
-                'm.detalle as moneda_detalle',
-                DB::raw("COALESCE(cotizacion_tipo.servicio, 'EQUIPAMIENTO') as servicio"),
-            ]);
+            $this->syncApprovedSpReceivables();
+            $cotizacionesQuery = DB::table('cotizacion as c')
+                ->leftJoin('cliente as cli', 'cli.idcliente', '=', 'c.cliente_idcliente')
+                ->leftJoin('vigenciaoferta as v', 'v.idvigenciaOferta', '=', 'c.vigenciaOferta_idvigenciaOferta')
+                ->leftJoin('formapago as fp', 'fp.idformaPago', '=', 'c.formaPago_idformaPago')
+                ->leftJoinSub($this->quotationServiceTypeQuery(), 'cotizacion_tipo', 'cotizacion_tipo.cotizacion_nroCotizacion', '=', 'c.nroCotizacion')
+                ->leftJoin('moneda as m', function ($join) {
+                    $join->on('m.idmoneda', '=', 'c.moneda_idmoneda')->where('m.idmoneda', '!=', 4);
+                })
+                ->select([
+                    'c.nroCotizacion',
+                    'c.batch_id',
+                    'c.cliente_idcliente',
+                    'c.moneda_idmoneda',
+                    'c.formaPago_idformaPago',
+                    DB::raw('COALESCE(cli.razonSocial, cli.nombreComercial, cli.idcliente) as cliente_nombre'),
+                    'cli.flag_integrador as flag_integrador',
+                    'c.total',
+                    'c.estado',
+                    'c.fechaHoraEmision',
+                    'c.archivoPago',
+                    DB::raw("COALESCE(cli.detraccion, '0') as cliente_detraccion"),
+                    'v.detalle as vigencia_detalle',
+                    'fp.detalle as forma_pago_detalle',
+                    'fp.tiempo as forma_pago_tiempo',
+                    'm.detalle as moneda_detalle',
+                    DB::raw("COALESCE(cotizacion_tipo.servicio, 'EQUIPAMIENTO') as servicio"),
+                ]);
 
-        $quoteStatsQuery = clone $cotizacionesQuery;
-        $this->applyQuotationFilters($quoteStatsQuery, $request);
-        $this->applyQuotationFilters($cotizacionesQuery, $request, '1');
+            $quoteStatsQuery = clone $cotizacionesQuery;
+            $this->applyQuotationFilters($quoteStatsQuery, $request);
+            $this->applyQuotationFilters($cotizacionesQuery, $request, '1');
 
-        $quoteStatsRow = (clone $quoteStatsQuery)
-            ->select([])
-            ->selectRaw('COUNT(*) as total, SUM(CASE WHEN c.estado = ? THEN 1 ELSE 0 END) as pendientes, SUM(CASE WHEN c.estado = ? THEN 1 ELSE 0 END) as con_pago', ['1', '2'])
-            ->first();
-        $groupCountsQuery = clone $cotizacionesQuery;
-
-        $cotizacionesPendientes = $cotizacionesQuery
-            ->orderByDesc('c.fechaHoraEmision')
-            ->paginate($this->resolvePerPage($request), ['*'], 'quotes_page')
-            ->withQueryString();
-
-        $pageBatchIds = $cotizacionesPendientes->getCollection()
-            ->pluck('batch_id')
-            ->map(fn ($batchId): string => trim((string) $batchId))
-            ->filter()
-            ->unique()
-            ->values();
-        $groupCounts = $pageBatchIds->isEmpty()
-            ? []
-            : $groupCountsQuery
-                ->whereNotNull('c.batch_id')
-                ->where('c.batch_id', '<>', '')
-                ->whereIn(DB::raw('TRIM(c.batch_id)'), $pageBatchIds)
+            $quoteStatsRow = (clone $quoteStatsQuery)
                 ->select([])
-                ->selectRaw('TRIM(c.batch_id) as batch_id, COUNT(*) as total')
-                ->groupByRaw('TRIM(c.batch_id)')
-                ->pluck('total', 'batch_id')
+                ->selectRaw('COUNT(*) as total, SUM(CASE WHEN c.estado = ? THEN 1 ELSE 0 END) as pendientes, SUM(CASE WHEN c.estado = ? THEN 1 ELSE 0 END) as con_pago', ['1', '2'])
+                ->first();
+            $groupCountsQuery = clone $cotizacionesQuery;
+
+            $cotizacionesPendientes = $cotizacionesQuery
+                ->orderByDesc('c.fechaHoraEmision')
+                ->paginate($this->resolvePerPage($request), ['*'], 'quotes_page')
+                ->withQueryString();
+
+            $pageBatchIds = $cotizacionesPendientes->getCollection()
+                ->pluck('batch_id')
+                ->map(fn($batchId): string => trim((string) $batchId))
+                ->filter()
+                ->unique()
+                ->values();
+            $groupCounts = $pageBatchIds->isEmpty()
+                ? []
+                : $groupCountsQuery
+                    ->whereNotNull('c.batch_id')
+                    ->where('c.batch_id', '<>', '')
+                    ->whereIn(DB::raw('TRIM(c.batch_id)'), $pageBatchIds)
+                    ->select([])
+                    ->selectRaw('TRIM(c.batch_id) as batch_id, COUNT(*) as total')
+                    ->groupByRaw('TRIM(c.batch_id)')
+                    ->pluck('total', 'batch_id')
+                    ->all();
+
+            $cotizacionesPendientes->transform(function ($row) use ($groupCounts): mixed {
+                $row->monto_display = $this->formatCurrencyValue(
+                    (float) ($row->total ?? 0),
+                    $this->currencySymbol($row->moneda_detalle ?? null)
+                );
+                $batchIdClean = trim((string) ($row->batch_id ?? ''));
+                $isGroup = $batchIdClean !== '';
+                $row->es_grupo = $isGroup;
+                $row->grupo_count = $isGroup ? ($groupCounts[$batchIdClean] ?? 1) : 1;
+                $row->grupo_display = $batchIdClean !== '' ? $batchIdClean : 'Sin grupo';
+                $row->fecha_emision_display = $row->fechaHoraEmision
+                    ? Carbon::parse($row->fechaHoraEmision)->format('d/m/Y')
+                    : '-';
+                $row->vigencia_display = trim((string) ($row->vigencia_detalle ?? '')) !== '' ? trim((string) $row->vigencia_detalle) : '-';
+
+                $formaPagoDetalle = trim((string) ($row->forma_pago_detalle ?? ''));
+                $formaPagoTiempo = (int) ($row->forma_pago_tiempo ?? 0);
+                if ($formaPagoTiempo > 0 && !str_contains(mb_strtolower($formaPagoDetalle, 'UTF-8'), 'contado')) {
+                    $formaPagoDetalle .= ' (' . $formaPagoTiempo . ' días)';
+                }
+                $row->forma_pago_display = $formaPagoDetalle !== '' ? $formaPagoDetalle : '-';
+                $row->tiene_archivo = !empty($row->archivoPago);
+                $row->archivo_pago_url = $row->tiene_archivo ? asset('storage/' . $row->archivoPago) : null;
+                $row->is_integrador = in_array(
+                    strtolower(str_replace('í', 'i', trim((string) ($row->flag_integrador ?? '')))),
+                    ['si', '1', 'true', 'on', 'yes', 'y'],
+                    true
+                );
+
+                return $row;
+            });
+
+            $quoteStats = [
+                ['label' => 'Total de Cotizaciones', 'value' => (int) ($quoteStatsRow->total ?? 0)],
+                ['label' => 'Cotizaciones pendientes', 'value' => (int) ($quoteStatsRow->pendientes ?? 0)],
+                ['label' => 'Cotizaciones con pago', 'value' => (int) ($quoteStatsRow->con_pago ?? 0)],
+            ];
+
+            $quoteIds = $cotizacionesPendientes->getCollection()
+                ->pluck('nroCotizacion')
+                ->map(fn($quoteId): string => (string) $quoteId)
                 ->all();
-
-        $cotizacionesPendientes->transform(function ($row) use ($groupCounts): mixed {
-            $row->monto_display = $this->formatCurrencyValue(
-                (float) ($row->total ?? 0),
-                $this->currencySymbol($row->moneda_detalle ?? null)
-            );
-            $batchIdClean = trim((string) ($row->batch_id ?? ''));
-            $isGroup = $batchIdClean !== '';
-            $row->es_grupo = $isGroup;
-            $row->grupo_count = $isGroup ? ($groupCounts[$batchIdClean] ?? 1) : 1;
-            $row->grupo_display = $batchIdClean !== '' ? $batchIdClean : 'Sin grupo';
-            $row->fecha_emision_display = $row->fechaHoraEmision
-                ? Carbon::parse($row->fechaHoraEmision)->format('d/m/Y')
-                : '-';
-            $row->vigencia_display = trim((string) ($row->vigencia_detalle ?? '')) !== '' ? trim((string) $row->vigencia_detalle) : '-';
-
-            $formaPagoDetalle = trim((string) ($row->forma_pago_detalle ?? ''));
-            $formaPagoTiempo = (int) ($row->forma_pago_tiempo ?? 0);
-            if ($formaPagoTiempo > 0 && !str_contains(mb_strtolower($formaPagoDetalle, 'UTF-8'), 'contado')) {
-                $formaPagoDetalle .= ' (' . $formaPagoTiempo . ' días)';
+            $quoteCxcRows = $quoteIds === []
+                ? collect()
+                : DB::table('cuentasporcobrar')
+                    ->where(function ($query) use ($quoteIds): void {
+                        $query->whereIn('descripcion', array_map(
+                            static fn(string $quoteId): string => 'COTIZACION:' . $quoteId,
+                            $quoteIds
+                        ));
+                        foreach ($quoteIds as $quoteId) {
+                            $query->orWhere('descripcion', 'like', '%' . $quoteId);
+                        }
+                    })
+                    ->orderByDesc('idcuentasPorCobrar')
+                    ->leftJoin('moneda as cxc_moneda', 'cxc_moneda.idmoneda', '=', 'cuentasporcobrar.moneda_idmoneda')
+                    ->get([
+                        'cuentasporcobrar.idcuentasPorCobrar',
+                        'cuentasporcobrar.descripcion',
+                        'cuentasporcobrar.montoActual',
+                        'cuentasporcobrar.montoOriginal as cxc_monto_total',
+                        'cuentasporcobrar.moneda_idmoneda as cxc_moneda_id',
+                        'cuentasporcobrar.estado',
+                        'cuentasporcobrar.docReferencia',
+                        'cxc_moneda.simbolo as cxc_moneda_simbolo',
+                    ]);
+            $quoteCxcById = [];
+            foreach ($quoteCxcRows as $cxc) {
+                $quoteId = str_starts_with((string) $cxc->descripcion, 'COTIZACION:')
+                    ? substr((string) $cxc->descripcion, strlen('COTIZACION:'))
+                    : trim((string) substr((string) $cxc->descripcion, strrpos((string) $cxc->descripcion, ' ') ?: 0));
+                if (in_array($quoteId, $quoteIds, true) && !isset($quoteCxcById[$quoteId])) {
+                    $quoteCxcById[$quoteId] = $cxc;
+                }
             }
-            $row->forma_pago_display = $formaPagoDetalle !== '' ? $formaPagoDetalle : '-';
-            $row->tiene_archivo = !empty($row->archivoPago);
-            $row->archivo_pago_url = $row->tiene_archivo ? asset('storage/' . $row->archivoPago) : null;
-            $row->is_integrador = in_array(
-                strtolower(str_replace('í', 'i', trim((string) ($row->flag_integrador ?? '')))),
-                ['si', '1', 'true', 'on', 'yes', 'y'],
-                true
-            );
+            $cotizacionesPendientes->transform(function ($row) use ($quoteCxcById): mixed {
+                $cxc = $quoteCxcById[(string) $row->nroCotizacion] ?? null;
+                $row->cxc_id = $cxc->idcuentasPorCobrar ?? null;
+                $row->cxc_estado = $cxc->estado ?? null;
+                $row->cxc_monto_pendiente = $cxc ? (float) $cxc->montoActual : null;
+                $row->cxc_monto_total = $cxc ? (float) $cxc->cxc_monto_total : null;
+                $row->cxc_moneda_id = $cxc->cxc_moneda_id ?? $row->moneda_idmoneda;
+                $row->cxc_moneda_simbolo = $cxc->cxc_moneda_simbolo ?? '';
+                $row->cxc_doc_referencia = $cxc->docReferencia ?? '';
+                $quotationService = mb_strtoupper(trim((string) ($row->servicio ?? 'EQUIPAMIENTO')), 'UTF-8');
+                $row->withholding_applies = (float) ($cxc->cxc_monto_total ?? $row->total ?? 0) > 700
+                    && in_array($quotationService, ['EQUIPAMIENTO', 'SERVICIOS TÉCNICOS', 'PLANES'], true);
+                $row->withholding_type = $quotationService === 'EQUIPAMIENTO' ? 'retención' : 'detracción';
+                if ($cxc) {
+                    $row->monto_display = $this->formatCurrencyValue(
+                        (float) $cxc->cxc_monto_total,
+                        $this->currencySymbol($cxc->cxc_moneda_simbolo ?: ($row->moneda_detalle ?? null))
+                    );
+                }
 
-            return $row;
-        });
+                return $row;
+            });
 
-        $quoteStats = [
-            ['label' => 'Total de Cotizaciones', 'value' => (int) ($quoteStatsRow->total ?? 0)],
-            ['label' => 'Cotizaciones pendientes', 'value' => (int) ($quoteStatsRow->pendientes ?? 0)],
-            ['label' => 'Cotizaciones con pago', 'value' => (int) ($quoteStatsRow->con_pago ?? 0)],
-        ];
+            $quoteCxcIds = $cotizacionesPendientes->getCollection()
+                ->pluck('cxc_id')
+                ->filter()
+                ->map(fn($cxcId): int => (int) $cxcId)
+                ->all();
+            $quotePaymentMovements = $quoteCxcIds === []
+                ? collect()
+                : DB::table('detallecxc as dc')
+                    ->join('bancos as b', 'b.idbancos', '=', 'dc.bancos_idbancos')
+                    ->whereIn('dc.cuentasPorCobrar_idcuentasPorCobrar', $quoteCxcIds)
+                    ->where('dc.estado', '1')
+                    ->whereIn('b.tipoMov', ['I', 'T'])
+                    ->orderByDesc('dc.iddetalleCXC')
+                    ->get([
+                        'dc.cuentasPorCobrar_idcuentasPorCobrar as cxc_id',
+                        'dc.descripcion',
+                        'dc.fechaPago',
+                        'b.idbancos',
+                        'b.informacion',
+                        'b.tipoMov',
+                        'b.monto',
+                    ])
+                    ->unique('idbancos')
+                    ->values();
+            $movementIds = $quotePaymentMovements->pluck('idbancos')->map(fn($id): int => (int) $id)->all();
+            $movementEvidence = $movementIds === []
+                ? collect()
+                : DB::table('evidenciapago')
+                    ->whereIn('bancos_idbancos', $movementIds)
+                    ->orderByDesc('idevidenciaPago')
+                    ->get(['bancos_idbancos', 'archivo'])
+                    ->unique('bancos_idbancos')
+                    ->keyBy('bancos_idbancos');
+            $quotePaymentMovementsByCxc = $quotePaymentMovements->groupBy('cxc_id');
+            $cotizacionesPendientes->transform(function ($row) use ($quotePaymentMovementsByCxc, $movementEvidence): mixed {
+                $movements = $quotePaymentMovementsByCxc->get((int) ($row->cxc_id ?? 0), collect());
+                $paymentMovements = $movements->where('tipoMov', 'I');
+                $withholdingMovements = $movements->where('tipoMov', 'T')
+                    ->filter(fn($movement): bool => in_array((string) $movement->descripcion, ['Detracción aplicada', 'Retención aplicada'], true));
+                $paymentMovement = $paymentMovements->first();
+                $withholdingMovement = $withholdingMovements->first();
+                $paymentComment = trim((string) ($paymentMovement->informacion ?? ''));
+                if (
+                    $paymentMovement
+                    && str_starts_with(trim((string) $paymentMovement->descripcion), 'Pago ')
+                    && preg_match('/\((.*)\)$/u', $paymentComment, $commentMatch) === 1
+                ) {
+                    $paymentComment = trim($commentMatch[1]);
+                } elseif (preg_match('/^Pago de CXC #\d+$/u', $paymentComment) === 1) {
+                    $paymentComment = '';
+                }
+                $paymentEvidence = $paymentMovement
+                    ? $movementEvidence->get((int) $paymentMovement->idbancos)
+                    : null;
+                $withholdingEvidence = $withholdingMovement
+                    ? $movementEvidence->get((int) $withholdingMovement->idbancos)
+                    : null;
+                $row->payment_receipt_url = !empty($row->archivoPago)
+                    ? asset('storage/' . $row->archivoPago)
+                    : (!empty($paymentEvidence->archivo) ? asset('storage/' . $paymentEvidence->archivo) : null);
+                $row->withholding_proof_url = !empty($withholdingEvidence->archivo)
+                    ? asset('storage/' . $withholdingEvidence->archivo)
+                    : null;
+                $row->withholding_proof_type = $row->withholding_type;
+                $row->quote_payment_date = $paymentMovement?->fechaPago
+                    ? Carbon::parse($paymentMovement->fechaPago)->format('d/m/Y')
+                    : '';
+                $row->quote_payment_comment = $paymentComment;
+                $row->quote_payment_amount = $paymentMovements->sum(fn($movement): float => (float) $movement->monto);
+                $row->quote_withholding_date = $withholdingMovement?->fechaPago
+                    ? Carbon::parse($withholdingMovement->fechaPago)->format('d/m/Y')
+                    : '';
+                $row->quote_withholding_amount = $withholdingMovements->sum(fn($movement): float => (float) $movement->monto);
+                $currencySymbol = $this->currencySymbol($row->cxc_moneda_simbolo ?: ($row->moneda_detalle ?? null));
+                $row->quote_payment_amount_display = $paymentMovements->isNotEmpty()
+                    ? $this->formatCurrencyValue((float) $row->quote_payment_amount, $currencySymbol)
+                    : '';
+                $row->quote_withholding_amount_display = $withholdingMovements->isNotEmpty()
+                    ? $this->formatCurrencyValue((float) $row->quote_withholding_amount, $currencySymbol)
+                    : '';
+
+                return $row;
+            });
+            $firstPaidQuoteInstallments = !empty($quoteCxcIds)
+                ? DB::table('detallecxc as dc')
+                    ->leftJoin('bancos as b', 'b.idbancos', '=', 'dc.bancos_idbancos')
+                    ->whereIn('dc.cuentasPorCobrar_idcuentasPorCobrar', $quoteCxcIds)
+                    ->where('dc.estado', '1')
+                    ->where('dc.nCuota', 1)
+                    ->get([
+                        'dc.cuentasPorCobrar_idcuentasPorCobrar as cxc_id',
+                        'b.monto as monto_pagado',
+                    ])
+                    ->unique('cxc_id')
+                    ->keyBy('cxc_id')
+                : collect();
+            $cotizacionesPendientes->transform(function ($row) use ($firstPaidQuoteInstallments): mixed {
+                $firstPaidInstallment = $firstPaidQuoteInstallments->get((int) ($row->cxc_id ?? 0));
+                $row->cxc_primera_cuota_pagada = isset($firstPaidInstallment->monto_pagado)
+                    ? (float) $firstPaidInstallment->monto_pagado
+                    : null;
+
+                return $row;
+            });
+            $nextQuoteInstallments = !empty($quoteCxcIds)
+                ? DB::table('detallecxc')
+                    ->whereIn('cuentasPorCobrar_idcuentasPorCobrar', $quoteCxcIds)
+                    ->where('estado', '0')
+                    ->whereNotNull('nCuota')
+                    ->orderBy('nCuota')
+                    ->get([
+                        'cuentasPorCobrar_idcuentasPorCobrar as cxc_id',
+                        'nCuota as numero',
+                        'descripcion',
+                        'fechaPagoProgramada as fecha_pago',
+                    ])
+                    ->unique('cxc_id')
+                    ->keyBy('cxc_id')
+                : collect();
+            $cotizacionesPendientes->transform(function ($row) use ($nextQuoteInstallments): mixed {
+                $installment = $nextQuoteInstallments->get((int) ($row->cxc_id ?? 0));
+                $row->cxc_proxima_cuota_numero = $installment->numero ?? null;
+                $row->cxc_proxima_cuota_monto = null;
+                if (
+                    isset($installment->descripcion)
+                    && preg_match('/Monto:\s*([0-9]+(?:\.[0-9]{1,2})?)/', (string) $installment->descripcion, $match) === 1
+                ) {
+                    $row->cxc_proxima_cuota_monto = (float) $match[1];
+                }
+                $row->cxc_proxima_cuota_fecha = $installment->fecha_pago ?? null;
+
+                return $row;
+            });
         }
 
-        $serviceFilters = [
-            'service_client' => trim((string) $request->query('service_client', '')),
-            'service_month' => trim((string) $request->query('service_month', strtolower(Carbon::now()->locale('es')->monthName))),
-            'service_year' => trim((string) $request->query('service_year', (string) now()->year)),
-            'service_document' => trim((string) $request->query('service_document', '')),
-            'service_date' => trim((string) $request->query('service_date', '')),
-            'service_status' => trim((string) $request->query('service_status', '')),
-        ];
-        $serviceFilters['service_months'] = array_values(array_filter(
-            array_map(static fn (string $month): string => mb_strtolower(trim($month), 'UTF-8'), explode(',', $serviceFilters['service_month'])),
-            static fn (string $month): bool => $month !== '' && $month !== 'all'
-        ));
-        if ($serviceFilters['service_year'] === 'all') {
-            $serviceFilters['service_year'] = '';
-        }
+        $serviceFilters = $this->serviceFiltersFromRequest($request);
 
         $servicePerPage = $this->resolvePerPage($request);
         $serviceCurrentPage = LengthAwarePaginator::resolveCurrentPage('services_page');
@@ -188,74 +394,29 @@ class CuentasPorCobrarController extends Controller
         ];
 
         if ($activeTab === 'servicios') {
-        $serviceIndexData = $this->cuentasPorCobrarService->prepareServicesIndex();
-        $serviciosPorVencer = $serviceIndexData['serviciosPorVencer'];
-        $serviciosPorVencerGrouped = $serviceIndexData['serviciosPorVencerGrouped'];
+            $serviceIndexData = $this->cuentasPorCobrarService->prepareServicesIndex($serviceFilters);
+            $serviciosPorVencer = $serviceIndexData['serviciosPorVencer'];
+            $serviciosPorVencerGrouped = $serviceIndexData['serviciosPorVencerGrouped'];
 
-        usort($serviciosPorVencerGrouped, function ($a, $b) {
-            $rank = ['facturado' => 0, 'pendiente' => 1, 'vencido' => 2, 'cancelado' => 3];
-            $rankA = $rank[strtolower((string) ($a['estado_pago'] ?? ''))] ?? 9;
-            $rankB = $rank[strtolower((string) ($b['estado_pago'] ?? ''))] ?? 9;
-            if ($rankA !== $rankB) {
-                return $rankA <=> $rankB;
-            }
+            $serviceStats = [
+                ['label' => 'Total de grupos', 'value' => count($serviciosPorVencerGrouped)],
+                ['label' => 'Servicios activos', 'value' => collect($serviciosPorVencerGrouped)->where('estado_servicio', 'activo')->count()],
+                ['label' => 'Servicios vencidos', 'value' => collect($serviciosPorVencerGrouped)->where('estado_servicio', 'vencido')->count()],
+            ];
 
-            return strcmp(
-                strtolower((string) ($a['cliente_nombre'] ?? '')),
-                strtolower((string) ($b['cliente_nombre'] ?? ''))
+            $serviciosPorVencerGrouped = $this->filterServiceGroups($serviciosPorVencerGrouped, $serviceFilters);
+
+            $serviciosPorVencerGrouped = new LengthAwarePaginator(
+                array_slice($serviciosPorVencerGrouped, ($serviceCurrentPage - 1) * $servicePerPage, $servicePerPage),
+                count($serviciosPorVencerGrouped),
+                $servicePerPage,
+                $serviceCurrentPage,
+                [
+                    'path' => $request->url(),
+                    'query' => $request->query(),
+                    'pageName' => 'services_page',
+                ]
             );
-        });
-
-        $serviceStats = [
-            ['label' => 'Total de grupos', 'value' => count($serviciosPorVencerGrouped)],
-            ['label' => 'Servicios activos', 'value' => collect($serviciosPorVencerGrouped)->where('estado_servicio', 'activo')->count()],
-            ['label' => 'Servicios vencidos', 'value' => collect($serviciosPorVencerGrouped)->where('estado_servicio', 'vencido')->count()],
-        ];
-
-        $serviciosPorVencerGrouped = array_values(array_filter($serviciosPorVencerGrouped, function (array $group) use ($serviceFilters): bool {
-            $clientId = mb_strtolower((string) ($group['cliente_id'] ?? ''), 'UTF-8');
-            $clientName = mb_strtolower((string) ($group['cliente_nombre'] ?? ''), 'UTF-8');
-            $month = mb_strtolower((string) ($group['mes'] ?? ''), 'UTF-8');
-            $clientFilter = mb_strtolower($serviceFilters['service_client'], 'UTF-8');
-            $document = mb_strtolower((string) ($group['documento'] ?? ''), 'UTF-8');
-            $documentFilter = mb_strtolower($serviceFilters['service_document'], 'UTF-8');
-            $status = mb_strtolower((string) ($group['estado_pago'] ?? ''), 'UTF-8');
-
-            if ($clientFilter !== '' && !str_contains($clientId, $clientFilter) && !str_contains($clientName, $clientFilter)) {
-                return false;
-            }
-            if ($serviceFilters['service_months'] !== [] && !in_array($month, $serviceFilters['service_months'], true)) {
-                return false;
-            }
-            if ($serviceFilters['service_year'] !== '' && (string) ($group['anio'] ?? '') !== $serviceFilters['service_year']) {
-                return false;
-            }
-            if ($documentFilter !== '' && !str_contains($document, $documentFilter)) {
-                return false;
-            }
-            if ($serviceFilters['service_date'] !== '' && ($group['fecha_fin_iso'] ?? '') !== $serviceFilters['service_date']) {
-                return false;
-            }
-            if ($serviceFilters['service_status'] === 'vencido') {
-                if ($status !== 'vencido') return false;
-            } elseif ($serviceFilters['service_status'] !== '' && $status !== $serviceFilters['service_status']) {
-                return false;
-            }
-
-            return true;
-        }));
-
-        $serviciosPorVencerGrouped = new LengthAwarePaginator(
-            array_slice($serviciosPorVencerGrouped, ($serviceCurrentPage - 1) * $servicePerPage, $servicePerPage),
-            count($serviciosPorVencerGrouped),
-            $servicePerPage,
-            $serviceCurrentPage,
-            [
-                'path' => $request->url(),
-                'query' => $request->query(),
-                'pageName' => 'services_page',
-            ]
-        );
         }
 
         return view('cuentasporcobrar.cuentasporcobrar', [
@@ -276,13 +437,15 @@ class CuentasPorCobrarController extends Controller
             'stats' => [],
             'filters' => [],
             'formaPagoOptions' => $this->formaPagoOptions(),
-            'entidadBancariaOptions' => $this->entidadBancariaOptions(),
+            'entidadBancariaOptions' => $entidadBancariaOptions,
+            'defaultBankId' => $defaultBank['value'] ?? '',
             'monedasOptions' => $this->monedasOptions(),
+            'quoteValidityOptions' => $quoteValidityOptions,
             'quoteFilters' => [
-                'quote_q' => $quoteSearch,
-                'quote_group' => $quoteGroup,
                 'quote_client' => $quoteClient,
-                'quote_currency' => $quoteCurrency,
+                'quote_number' => $quoteNumber,
+                'quote_payment_format' => $quotePaymentFormat,
+                'quote_validity' => $quoteValidity,
                 'quote_service' => $quoteService,
                 'quote_date' => $quoteDate,
                 'quote_status' => $quoteStatus,
@@ -303,11 +466,125 @@ class CuentasPorCobrarController extends Controller
         ]);
     }
 
+    private function syncApprovedSpReceivables(): void
+    {
+        DB::table('cotizacion')
+            ->where('estado', '1')
+            ->orderBy('nroCotizacion')
+            ->select(['nroCotizacion'])
+            ->chunk(250, function ($quotes): void {
+                $quoteIds = $quotes->pluck('nroCotizacion')
+                    ->map(fn($quoteId): string => (string) $quoteId)
+                    ->all();
+                $markers = array_map(static fn(string $quoteId): string => 'COTIZACION:' . $quoteId, $quoteIds);
+                $existingMarkers = DB::table('cuentasporcobrar')
+                    ->whereIn('descripcion', $markers)
+                    ->pluck('descripcion')
+                    ->flip();
+
+                foreach ($quoteIds as $quoteId) {
+                    if (!$existingMarkers->has('COTIZACION:' . $quoteId)) {
+                        $this->cxcService->ensureQuotationReceivable($quoteId);
+                    }
+                }
+            });
+    }
+
     protected function serviceGroupPriority(array $group): int
     {
         $status = strtolower((string) ($group['estado_servicio'] ?? 'activo'));
 
         return $status === 'activo' ? 0 : 1;
+    }
+
+    private function serviceFiltersFromRequest(Request $request): array
+    {
+        $filters = [
+            'service_client' => trim((string) $request->query('service_client', '')),
+            'service_month' => trim((string) $request->query('service_month', strtolower(Carbon::now()->locale('es')->monthName))),
+            'service_year' => trim((string) $request->query('service_year', (string) now()->year)),
+            'service_document' => trim((string) $request->query('service_document', '')),
+            'service_date' => trim((string) $request->query('service_date', '')),
+            'service_expiration_date' => trim((string) $request->query('service_expiration_date', '')),
+            'service_status' => trim((string) $request->query('service_status', '')),
+        ];
+        $filters['service_months'] = array_values(array_filter(
+            array_map(static fn(string $month): string => mb_strtolower(trim($month), 'UTF-8'), explode(',', $filters['service_month'])),
+            static fn(string $month): bool => $month !== '' && $month !== 'all'
+        ));
+        if ($filters['service_year'] === 'all') {
+            $filters['service_year'] = '';
+        }
+
+        return $filters;
+    }
+
+    private function filterServiceGroups(array $groups, array $filters): array
+    {
+        usort($groups, function (array $a, array $b): int {
+            $rank = [
+                'facturado' => 0,
+                'pendiente pago parcial' => 1,
+                'pendiente a credito' => 2,
+                'pagocredito' => 3,
+                'pendiente autodetracción' => 4,
+                'pendiente autoretención' => 5,
+                'pendiente a detracción' => 6,
+                'pendiente a retención' => 7,
+                'pendiente' => 8,
+                'vencido' => 9,
+                'cancelado' => 10,
+            ];
+            $rankA = $rank[strtolower((string) ($a['estado_pago'] ?? ''))] ?? 9;
+            $rankB = $rank[strtolower((string) ($b['estado_pago'] ?? ''))] ?? 9;
+            if ($rankA !== $rankB) {
+                return $rankA <=> $rankB;
+            }
+
+            return strcmp(
+                strtolower((string) ($a['cliente_nombre'] ?? '')),
+                strtolower((string) ($b['cliente_nombre'] ?? ''))
+            );
+        });
+
+        $clientFilter = mb_strtolower($filters['service_client'], 'UTF-8');
+        $documentFilter = mb_strtolower($filters['service_document'], 'UTF-8');
+
+        return array_values(array_filter($groups, function (array $group) use ($filters, $clientFilter, $documentFilter): bool {
+            $clientId = mb_strtolower((string) ($group['cliente_id'] ?? ''), 'UTF-8');
+            $clientName = mb_strtolower((string) ($group['cliente_nombre'] ?? ''), 'UTF-8');
+            $month = mb_strtolower((string) ($group['mes'] ?? ''), 'UTF-8');
+            $document = mb_strtolower((string) ($group['documento'] ?? ''), 'UTF-8');
+            $status = mb_strtolower((string) ($group['estado_pago'] ?? ''), 'UTF-8');
+
+            if ($clientFilter !== '' && !str_contains($clientId, $clientFilter) && !str_contains($clientName, $clientFilter)) {
+                return false;
+            }
+            if ($filters['service_months'] !== [] && !in_array($month, $filters['service_months'], true)) {
+                return false;
+            }
+            if ($filters['service_year'] !== '' && (string) ($group['anio'] ?? '') !== $filters['service_year']) {
+                return false;
+            }
+            if ($documentFilter !== '' && !str_contains($document, $documentFilter)) {
+                return false;
+            }
+            if ($filters['service_date'] !== '' && ($group['fecha_registro_iso'] ?? '') !== $filters['service_date']) {
+                return false;
+            }
+            if ($filters['service_expiration_date'] !== '' && ($group['fecha_fin_iso'] ?? '') !== $filters['service_expiration_date']) {
+                return false;
+            }
+            if ($filters['service_status'] === 'vencido') {
+                if ($status !== 'vencido') {
+                    return false;
+                }
+            } elseif ($filters['service_status'] !== '' && $status !== $filters['service_status']) {
+                return false;
+            }
+
+            return true;
+        }));
     }
 
     public function exportQuotations(Request $request, string $format)
@@ -325,55 +602,578 @@ class CuentasPorCobrarController extends Controller
             ->leftJoin('moneda as m', 'm.idmoneda', '=', 'c.moneda_idmoneda')
             ->select([
                 'c.nroCotizacion',
+                'c.cliente_idcliente',
                 'c.batch_id',
+                'cli.razonSocial',
+                'cli.nombreComercial',
+                'cli.detraccion as cliente_detraccion',
                 DB::raw('COALESCE(cli.razonSocial, cli.nombreComercial, cli.idcliente) as cliente_nombre'),
                 'c.total',
                 'c.fechaHoraEmision',
+                'c.estado as cotizacion_estado',
                 'v.detalle as vigencia_detalle',
                 'fp.detalle as forma_pago_detalle',
                 'fp.tiempo as forma_pago_tiempo',
                 'm.detalle as moneda_detalle',
+                'm.simbolo as moneda_simbolo',
                 DB::raw("COALESCE(cotizacion_tipo.servicio, 'EQUIPAMIENTO') as servicio"),
             ]);
 
+        if (Schema::hasColumn('cotizacion', 'docReferencia')) {
+            $query->addSelect('c.docReferencia as cotizacion_doc_referencia');
+        }
+
+        $selectedIds = (array) ($request->input('selectedIds') ?? $request->query('selectedIds', []));
+        if (!empty($selectedIds)) {
+            $query->whereIn('c.nroCotizacion', $selectedIds);
+        }
+
         $this->applyQuotationFilters($query, $request);
-        $rows = $query->orderByDesc('c.fechaHoraEmision')->get();
+        $rawRows = $query->orderByDesc('c.fechaHoraEmision')->get();
 
-        $rows->transform(function ($row): mixed {
-            $row->monto_display = $this->formatCurrencyValue(
-                (float) ($row->total ?? 0),
-                $this->currencySymbol($row->moneda_detalle ?? null)
-            );
-            $row->grupo_display = trim((string) ($row->batch_id ?? '')) ?: 'Sin grupo';
-            $row->fecha_emision_display = $row->fechaHoraEmision
-                ? Carbon::parse($row->fechaHoraEmision)->format('d/m/Y')
-                : '-';
-            $row->vigencia_display = trim((string) ($row->vigencia_detalle ?? '')) ?: '-';
-            $formaPago = trim((string) ($row->forma_pago_detalle ?? ''));
-            $tiempo = (int) ($row->forma_pago_tiempo ?? 0);
-            if ($tiempo > 0 && !str_contains(mb_strtolower($formaPago, 'UTF-8'), 'contado')) {
-                $formaPago .= ' (' . $tiempo . ' días)';
-            }
-            $row->forma_pago_display = $formaPago !== '' ? $formaPago : '-';
-
-            return $row;
-        });
-
-        $columns = [
-            ['key' => 'nroCotizacion', 'label' => 'N° Cotización'],
-            ['key' => 'cliente_nombre', 'label' => 'Cliente'],
-            ['key' => 'monto_display', 'label' => 'Monto'],
-            ['key' => 'vigencia_display', 'label' => 'Vigencia de oferta'],
-            ['key' => 'forma_pago_display', 'label' => 'Formato de pago'],
-            ['key' => 'fecha_emision_display', 'label' => 'Fecha Emisión'],
-            ['key' => 'grupo_display', 'label' => 'Grupo'],
-            ['key' => 'servicio', 'label' => 'Servicio'],
-        ];
+        $rows = $this->prepareQuotationsExportData($rawRows);
         $filename = 'cotizaciones_cuentas_por_cobrar_' . now()->format('Ymd_His') . '.' . $format;
 
-        return $format === 'xlsx'
-            ? $this->exportXlsxResponse($rows, $columns, $filename)
-            : $this->exportPdfResponse($rows, $columns, 'Cotizaciones por cobrar', $filename);
+        if ($format === 'xlsx') {
+            return $this->exportCustomQuotationsXlsxResponse($rows, $filename);
+        }
+
+        $columns = [
+            ['key' => 'cliente', 'label' => 'CLIENTE'],
+            ['key' => 'ruc', 'label' => 'RUC'],
+            ['key' => 'fecha_emision', 'label' => 'FECHA EMISION'],
+            ['key' => 'nro_factura', 'label' => 'N° FACTURA'],
+            ['key' => 'total', 'label' => 'TOTAL'],
+            ['key' => 'pago_realizado', 'label' => 'PAGO REALIZADO'],
+            ['key' => 'observacion', 'label' => 'OBSERVACION'],
+            ['key' => 'detraccion', 'label' => 'DETRACCION'],
+            ['key' => 'fecha_abono_detraccion', 'label' => 'FECHA ABONO'],
+            ['key' => 'autodetraccion', 'label' => 'AUTODETRACCION'],
+            ['key' => 'fecha_abono_autodetraccion', 'label' => 'FECHA ABONO'],
+        ];
+
+        return $this->exportPdfResponse(collect($rows), $columns, 'Cotizaciones por cobrar', $filename);
+    }
+
+    protected function prepareQuotationsExportData($rawRows): array
+    {
+        if ($rawRows->isEmpty()) {
+            return [];
+        }
+
+        $quoteIds = $rawRows->pluck('nroCotizacion')
+            ->map(fn($id): string => (string) $id)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $cxcList = DB::table('cuentasporcobrar')
+            ->where(function ($query) use ($quoteIds): void {
+                $query->whereIn('descripcion', array_map(
+                    static fn(string $id): string => 'COTIZACION:' . $id,
+                    $quoteIds
+                ));
+                foreach ($quoteIds as $id) {
+                    $query->orWhere('descripcion', 'like', '%' . $id);
+                }
+            })
+            ->orderByDesc('idcuentasPorCobrar')
+            ->get([
+                'idcuentasPorCobrar',
+                'descripcion',
+                'docReferencia',
+                'docFactura',
+                'montoOriginal',
+                'montoActual',
+                'estado',
+                'fechaRegistro',
+                'fechaCancelacion',
+            ]);
+
+        $cxcByQuote = [];
+        foreach ($cxcList as $cxc) {
+            $quoteId = str_starts_with((string) $cxc->descripcion, 'COTIZACION:')
+                ? substr((string) $cxc->descripcion, strlen('COTIZACION:'))
+                : trim((string) substr((string) $cxc->descripcion, strrpos((string) $cxc->descripcion, ' ') ?: 0));
+            if (in_array($quoteId, $quoteIds, true) && !isset($cxcByQuote[$quoteId])) {
+                $cxcByQuote[$quoteId] = $cxc;
+            }
+        }
+
+        $cxcIds = array_values(array_unique(array_filter(array_map(
+            static fn($c): int => (int) $c->idcuentasPorCobrar,
+            $cxcByQuote
+        ))));
+
+        $detailsByCxc = [];
+        if (!empty($cxcIds)) {
+            $details = DB::table('detallecxc as dc')
+                ->leftJoin('bancos as b', 'b.idbancos', '=', 'dc.bancos_idbancos')
+                ->whereIn('dc.cuentasPorCobrar_idcuentasPorCobrar', $cxcIds)
+                ->orderBy('dc.iddetalleCXC')
+                ->get([
+                    'dc.iddetalleCXC',
+                    'dc.cuentasPorCobrar_idcuentasPorCobrar as cxc_id',
+                    'dc.descripcion as detalle_descripcion',
+                    'dc.fechaPago as detalle_fecha_pago',
+                    'dc.fechaPagoProgramada as detalle_fecha_programada',
+                    'dc.estado as detalle_estado',
+                    'dc.nCuota',
+                    'b.idbancos',
+                    'b.monto as banco_monto',
+                    'b.tipoMov as banco_tipo_mov',
+                    'b.fechaRegistro as banco_fecha_registro',
+                    'b.informacion as banco_informacion',
+                ]);
+
+            foreach ($details as $d) {
+                $detailsByCxc[(int) $d->cxc_id][] = $d;
+            }
+        }
+
+        $exportData = [];
+        foreach ($rawRows as $quote) {
+            $quoteNumber = (string) $quote->nroCotizacion;
+            $cxc = $cxcByQuote[$quoteNumber] ?? null;
+            $cxcId = $cxc ? (int) $cxc->idcuentasPorCobrar : null;
+            $items = $cxcId ? ($detailsByCxc[$cxcId] ?? []) : [];
+
+            $cliente = trim((string) ($quote->razonSocial ?: ($quote->nombreComercial ?: $quote->cliente_nombre)));
+            $ruc = trim((string) ($quote->cliente_idcliente ?? ''));
+
+            $fechaEmision = $quote->fechaHoraEmision
+                ? Carbon::parse($quote->fechaHoraEmision)->format('j/n/Y')
+                : '-';
+
+            $numFactura = trim((string) (
+                $cxc->docReferencia
+                ?? $cxc->docFactura
+                ?? ($quote->cotizacion_doc_referencia ?? '')
+            ));
+
+            $total = round((float) ($quote->total ?? 0), 2);
+            $simbolo = $this->currencySymbol($quote->moneda_simbolo ?: ($quote->moneda_detalle ?? null));
+            $totalFormatted = $simbolo . ' ' . number_format($total, 2, '.', ',');
+
+            // Pagos del cliente (tipoMov = 'I', 'C' o registros pagados que no sean detracción/retención)
+            $pagosCliente = array_filter(
+                $items,
+                static fn($d): bool => (string) $d->detalle_estado === '1'
+                    && in_array((string) ($d->banco_tipo_mov ?? ''), ['I', 'C', ''], true)
+                    && !str_contains(mb_strtolower((string) $d->detalle_descripcion, 'UTF-8'), 'detracción')
+                    && !str_contains(mb_strtolower((string) $d->detalle_descripcion, 'UTF-8'), 'retención')
+            );
+
+            $pagoRealizado = array_sum(array_map(
+                static fn($d): float => (float) ($d->banco_monto ?? 0),
+                $pagosCliente
+            ));
+
+            // Si la cuenta por cobrar está en 'Pendiente a Detracción'/'Pendiente a Retención':
+            // El cliente pagó con descuento y la deuda actual es la detracción pendiente (ej. 840 - 101 = 739)
+            if ($cxc && in_array((string) $cxc->estado, ['Pendiente a Detracción', 'Pendiente a Retención'], true)) {
+                $deudaDetraccion = (float) ($cxc->montoActual ?? 0);
+                $montoBase = (float) ($cxc->montoOriginal ?? $total);
+                if (
+                    $deudaDetraccion > 0
+                    && $montoBase > $deudaDetraccion
+                    && $pagoRealizado < $montoBase - 0.05
+                ) {
+                    $pagoRealizado = round($montoBase - $deudaDetraccion, 2);
+                }
+            }
+
+            // Si no se encontró monto en banco pero en detallecxc hay una descripción con monto de pago
+            if ($pagoRealizado <= 0) {
+                foreach ($items as $d) {
+                    if (preg_match('/(?:Se\s*pago|pago|monto:?)\s*([0-9]+(?:\.[0-9]+)?)/iu', (string) $d->detalle_descripcion, $m)) {
+                        $pagoRealizado = (float) $m[1];
+                        break;
+                    }
+                }
+            }
+
+            if ($pagoRealizado <= 0 && (string) ($quote->cotizacion_estado ?? '') === '2') {
+                $pagoRealizado = $total;
+            }
+
+            // Recopilar la observación directamente de detallecxc.descripcion
+            $observaciones = [];
+            foreach ($items as $item) {
+                $desc = trim((string) ($item->detalle_descripcion ?? ''));
+                if ($desc === '') {
+                    $desc = trim((string) ($item->banco_informacion ?? ''));
+                }
+
+                if ($desc === '') {
+                    continue;
+                }
+
+                if (str_contains($desc, '|')) {
+                    $parts = explode('|', $desc);
+                    $desc = trim(end($parts));
+                }
+
+                $descLower = mb_strtolower($desc, 'UTF-8');
+
+                // Ignorar descripciones generadas automáticamente por el sistema
+                if (
+                    str_starts_with($descLower, 'pago de cotización')
+                    || str_starts_with($descLower, 'cuota programada')
+                    || str_starts_with($descLower, 'detracción pendiente')
+                    || str_starts_with($descLower, 'retención pendiente')
+                    || str_starts_with($descLower, 'detracción pagada de')
+                    || str_starts_with($descLower, 'retención pagada de')
+                    || $descLower === 'detracción aplicada'
+                    || $descLower === 'retención aplicada'
+                    || $descLower === 'aplicación saldo a favor'
+                ) {
+                    continue;
+                }
+
+                if (!in_array($desc, $observaciones, true)) {
+                    $observaciones[] = $desc;
+                }
+            }
+
+            $observacion = implode(' - ', $observaciones);
+
+            // Tipo de servicio y tabla de destino
+            $serviceUpper = mb_strtoupper(trim((string) ($quote->servicio ?? 'EQUIPAMIENTO')), 'UTF-8');
+            $isEquipamiento = $serviceUpper === 'EQUIPAMIENTO';
+
+            // Todos los de tipo servicio EQUIPAMIENTO (tanto normales como retenciones) se ven en la tabla retención
+            $isRetentionTable = $isEquipamiento;
+
+            // Retención (3%) o Detracción (12%) SOLO se aplica a los que superan los 700 (o con estado CXC explícito de deducción pendiente)
+            $hasCxcDeductionState = $cxc && in_array((string) $cxc->estado, ['Pendiente a Detracción', 'Pendiente a Retención'], true);
+            $appliesWithholding = ($total > 700) || $hasCxcDeductionState;
+            $withholdingRate = $isRetentionTable ? 0.03 : 0.12;
+
+            // Verificar si en cxc o bancos ya existe un monto registrado para la deducción
+            $registeredDeduction = 0.0;
+            if ($hasCxcDeductionState) {
+                $deudaDeduccion = (float) ($cxc->montoActual ?? 0);
+                if ($deudaDeduccion > 0) {
+                    $registeredDeduction = $deudaDeduccion;
+                }
+            }
+
+            // Detalle de pago de detracción / retención en detallecxc (banco movimiento 'T')
+            $withholdingPaidDetail = null;
+            foreach ($items as $d) {
+                $descLower = mb_strtolower((string) $d->detalle_descripcion, 'UTF-8');
+                if (
+                    (str_contains($descLower, 'detracción') || str_contains($descLower, 'retención') || (string) ($d->banco_tipo_mov ?? '') === 'T')
+                    && (string) $d->detalle_estado === '1'
+                    && (string) ($d->banco_tipo_mov ?? '') === 'T'
+                ) {
+                    $withholdingPaidDetail = $d;
+                    if ((float) ($d->banco_monto ?? 0) > 0) {
+                        $registeredDeduction = (float) $d->banco_monto;
+                    }
+                    break;
+                }
+            }
+
+            $withholdingAmount = $registeredDeduction > 0
+                ? round($registeredDeduction, 2)
+                : round($total * $withholdingRate);
+
+            $withholdingPaidFecha = '';
+            if ($withholdingPaidDetail) {
+                $rawDate = $withholdingPaidDetail->detalle_fecha_pago ?: $withholdingPaidDetail->banco_fecha_registro;
+                if ($rawDate) {
+                    try {
+                        $withholdingPaidFecha = Carbon::parse($rawDate)->format('j/n/Y');
+                    } catch (\Throwable) {
+                        $withholdingPaidFecha = '';
+                    }
+                }
+            } elseif ($cxc && (string) $cxc->estado === 'CANCELADO' && (string) ($quote->cotizacion_estado ?? '') === '2') {
+                $firstClientPayment = !empty($pagosCliente) ? reset($pagosCliente) : null;
+                $rawDate = $cxc->fechaCancelacion
+                    ?: ($firstClientPayment ? ($firstClientPayment->banco_fecha_registro ?: $firstClientPayment->detalle_fecha_pago) : null);
+                if (!$rawDate) {
+                    $rawDate = $cxc->fechaRegistro ?: null;
+                }
+                if ($rawDate) {
+                    try {
+                        $withholdingPaidFecha = Carbon::parse($rawDate)->format('j/n/Y');
+                    } catch (\Throwable) {
+                        $withholdingPaidFecha = '';
+                    }
+                }
+            }
+
+            // Autodeducción aplica cuando el cliente pagó ENTERO el total (no se le descontó la deducción)
+            $isAuto = ($pagoRealizado >= $total - 0.05);
+
+            $detraccionMonto = '';
+            $detraccionFecha = '';
+            $autodetraccionMonto = '';
+            $autodetraccionFecha = '';
+            $retencionMonto = '';
+            $retencionFecha = '';
+            $autoretencionMonto = '';
+            $autoretencionFecha = '';
+
+            if ($appliesWithholding) {
+                $formattedWithholding = $simbolo . ' ' . number_format($withholdingAmount, 2, '.', ',');
+
+                if ($isRetentionTable) {
+                    if ($isAuto) {
+                        $autoretencionMonto = $formattedWithholding;
+                        // Fecha solo si ya fue pagada (banco T)
+                        if ($withholdingPaidDetail) {
+                            $rawDate = $withholdingPaidDetail->detalle_fecha_pago ?: $withholdingPaidDetail->banco_fecha_registro;
+                            if ($rawDate) {
+                                try {
+                                    $autoretencionFecha = Carbon::parse($rawDate)->format('j/n/Y');
+                                } catch (\Throwable) {
+                                    $autoretencionFecha = '';
+                                }
+                            }
+                        }
+                    } else {
+                        $retencionMonto = $formattedWithholding;
+                        $retencionFecha = $withholdingPaidFecha;
+                    }
+                } else {
+                    if ($isAuto) {
+                        $autodetraccionMonto = $formattedWithholding;
+                        if ($withholdingPaidDetail) {
+                            $rawDate = $withholdingPaidDetail->detalle_fecha_pago ?: $withholdingPaidDetail->banco_fecha_registro;
+                            if ($rawDate) {
+                                try {
+                                    $autodetraccionFecha = Carbon::parse($rawDate)->format('j/n/Y');
+                                } catch (\Throwable) {
+                                    $autodetraccionFecha = '';
+                                }
+                            }
+                        }
+                    } else {
+                        $detraccionMonto = $formattedWithholding;
+                        $detraccionFecha = $withholdingPaidFecha;
+                    }
+                }
+            }
+
+            $pagoRealizadoFormatted = $pagoRealizado > 0
+                ? ($simbolo . ' ' . number_format($pagoRealizado, 2, '.', ','))
+                : '';
+
+            $exportData[] = [
+                'cliente' => $cliente,
+                'ruc' => $ruc,
+                'fecha_emision' => $fechaEmision,
+                'nro_factura' => $numFactura,
+                'total' => $totalFormatted,
+                'pago_realizado' => $pagoRealizadoFormatted,
+                'observacion' => $observacion,
+                'detraccion' => $detraccionMonto,
+                'fecha_abono_detraccion' => $detraccionFecha,
+                'autodetraccion' => $autodetraccionMonto,
+                'fecha_abono_autodetraccion' => $autodetraccionFecha,
+                'retencion' => $retencionMonto,
+                'fecha_abono_retencion' => $retencionFecha,
+                'autoretencion' => $autoretencionMonto,
+                'fecha_abono_autoretencion' => $autoretencionFecha,
+                'is_retention' => $isRetentionTable,
+            ];
+        }
+
+        return $exportData;
+    }
+
+    protected function exportCustomQuotationsXlsxResponse(array $rows, string $filename)
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Cotizaciones CXC');
+
+        // Separar en detracciones y normales vs retenciones
+        if (isset($rows['detracciones']) || isset($rows['retenciones'])) {
+            $detraccionRows = $rows['detracciones'] ?? [];
+            $retencionRows = $rows['retenciones'] ?? [];
+        } else {
+            $detraccionRows = [];
+            $retencionRows = [];
+            foreach ($rows as $r) {
+                if (!empty($r['is_retention'])) {
+                    $retencionRows[] = $r;
+                } else {
+                    $detraccionRows[] = $r;
+                }
+            }
+        }
+
+        $detraccionHeaders = [
+            'A' => ['title' => 'CLIENTE', 'align' => Alignment::HORIZONTAL_LEFT, 'width' => 38],
+            'B' => ['title' => 'RUC', 'align' => Alignment::HORIZONTAL_CENTER, 'width' => 16],
+            'C' => ['title' => 'FECHA EMISION', 'align' => Alignment::HORIZONTAL_CENTER, 'width' => 16],
+            'D' => ['title' => 'N° FACTURA', 'align' => Alignment::HORIZONTAL_CENTER, 'width' => 16],
+            'E' => ['title' => 'TOTAL', 'align' => Alignment::HORIZONTAL_RIGHT, 'width' => 16],
+            'F' => ['title' => 'PAGO REALIZADO', 'align' => Alignment::HORIZONTAL_RIGHT, 'width' => 18],
+            'G' => ['title' => 'OBSERVACION', 'align' => Alignment::HORIZONTAL_LEFT, 'width' => 32],
+            'H' => ['title' => 'DETRACCION', 'align' => Alignment::HORIZONTAL_RIGHT, 'width' => 22],
+            'I' => ['title' => 'FECHA ABONO', 'align' => Alignment::HORIZONTAL_CENTER, 'width' => 16],
+            'J' => ['title' => 'AUTODETRACCION', 'align' => Alignment::HORIZONTAL_RIGHT, 'width' => 18],
+            'K' => ['title' => 'FECHA ABONO', 'align' => Alignment::HORIZONTAL_CENTER, 'width' => 16],
+        ];
+
+        $retencionHeaders = [
+            'A' => ['title' => 'CLIENTE', 'align' => Alignment::HORIZONTAL_LEFT, 'width' => 38],
+            'B' => ['title' => 'RUC', 'align' => Alignment::HORIZONTAL_CENTER, 'width' => 16],
+            'C' => ['title' => 'FECHA EMISION', 'align' => Alignment::HORIZONTAL_CENTER, 'width' => 16],
+            'D' => ['title' => 'N° FACTURA', 'align' => Alignment::HORIZONTAL_CENTER, 'width' => 16],
+            'E' => ['title' => 'TOTAL', 'align' => Alignment::HORIZONTAL_RIGHT, 'width' => 16],
+            'F' => ['title' => 'PAGO REALIZADO', 'align' => Alignment::HORIZONTAL_RIGHT, 'width' => 18],
+            'G' => ['title' => 'OBSERVACION', 'align' => Alignment::HORIZONTAL_LEFT, 'width' => 32],
+            'H' => ['title' => 'RETENCION', 'align' => Alignment::HORIZONTAL_RIGHT, 'width' => 22],
+            'I' => ['title' => 'FECHA ABONO', 'align' => Alignment::HORIZONTAL_CENTER, 'width' => 16],
+            'J' => ['title' => 'AUTORETENCION', 'align' => Alignment::HORIZONTAL_RIGHT, 'width' => 18],
+            'K' => ['title' => 'FECHA ABONO', 'align' => Alignment::HORIZONTAL_CENTER, 'width' => 16],
+        ];
+
+        $hasDetraccion = !empty($detraccionRows);
+        $hasRetencion = !empty($retencionRows);
+
+        if (!$hasDetraccion && !$hasRetencion) {
+            $hasDetraccion = true;
+        }
+
+        $writeTable = function (array $headers, array $tableRows, int $startRow, bool $isRetencionTable) use ($sheet): int {
+            $headerRow = $startRow;
+            $sheet->getRowDimension($headerRow)->setRowHeight(28);
+
+            foreach ($headers as $col => $meta) {
+                $sheet->setCellValueExplicit($col . $headerRow, $meta['title'], DataType::TYPE_STRING);
+                $sheet->getColumnDimension($col)->setWidth($meta['width']);
+            }
+
+            // Estilo cabecera celeste A..I (#42C2F5)
+            $sheet->getStyle('A' . $headerRow . ':I' . $headerRow)->applyFromArray([
+                'font' => [
+                    'bold' => true,
+                    'color' => ['rgb' => '000000'],
+                    'size' => 11,
+                    'name' => 'Calibri',
+                ],
+                'alignment' => [
+                    'horizontal' => Alignment::HORIZONTAL_CENTER,
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                    'wrapText' => true,
+                ],
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => '42C2F5'],
+                ],
+            ]);
+
+            // Estilo cabecera verde claro J..K (#A9DF8C)
+            $sheet->getStyle('J' . $headerRow . ':K' . $headerRow)->applyFromArray([
+                'font' => [
+                    'bold' => true,
+                    'color' => ['rgb' => '000000'],
+                    'size' => 11,
+                    'name' => 'Calibri',
+                ],
+                'alignment' => [
+                    'horizontal' => Alignment::HORIZONTAL_CENTER,
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                    'wrapText' => true,
+                ],
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'A9DF8C'],
+                ],
+            ]);
+
+            $rowIdx = $headerRow + 1;
+            foreach ($tableRows as $row) {
+                $sheet->getRowDimension($rowIdx)->setRowHeight(22);
+
+                $sheet->setCellValueExplicit('A' . $rowIdx, (string) ($row['cliente'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit('B' . $rowIdx, (string) ($row['ruc'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit('C' . $rowIdx, (string) ($row['fecha_emision'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit('D' . $rowIdx, (string) ($row['nro_factura'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit('E' . $rowIdx, (string) ($row['total'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit('F' . $rowIdx, (string) ($row['pago_realizado'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit('G' . $rowIdx, (string) ($row['observacion'] ?? ''), DataType::TYPE_STRING);
+
+                if ($isRetencionTable) {
+                    $sheet->setCellValueExplicit('H' . $rowIdx, (string) ($row['retencion'] ?: ($row['detraccion'] ?? '')), DataType::TYPE_STRING);
+                    $sheet->setCellValueExplicit('I' . $rowIdx, (string) ($row['fecha_abono_retencion'] ?: ($row['fecha_abono_detraccion'] ?? '')), DataType::TYPE_STRING);
+                    $sheet->setCellValueExplicit('J' . $rowIdx, (string) ($row['autoretencion'] ?: ($row['autodetraccion'] ?? '')), DataType::TYPE_STRING);
+                    $sheet->setCellValueExplicit('K' . $rowIdx, (string) ($row['fecha_abono_autoretencion'] ?: ($row['fecha_abono_autodetraccion'] ?? '')), DataType::TYPE_STRING);
+                } else {
+                    $sheet->setCellValueExplicit('H' . $rowIdx, (string) ($row['detraccion'] ?? ''), DataType::TYPE_STRING);
+                    $sheet->setCellValueExplicit('I' . $rowIdx, (string) ($row['fecha_abono_detraccion'] ?? ''), DataType::TYPE_STRING);
+                    $sheet->setCellValueExplicit('J' . $rowIdx, (string) ($row['autodetraccion'] ?? ''), DataType::TYPE_STRING);
+                    $sheet->setCellValueExplicit('K' . $rowIdx, (string) ($row['fecha_abono_autodetraccion'] ?? ''), DataType::TYPE_STRING);
+                }
+
+                foreach ($headers as $col => $meta) {
+                    $sheet->getStyle($col . $rowIdx)->applyFromArray([
+                        'font' => [
+                            'size' => 11,
+                            'name' => 'Calibri',
+                        ],
+                        'alignment' => [
+                            'horizontal' => $meta['align'],
+                            'vertical' => Alignment::VERTICAL_CENTER,
+                            'wrapText' => $col === 'G',
+                        ],
+                    ]);
+                }
+
+                // Pintar las 2 columnas completas de AUTODETRACCION / AUTORETENCION con fondo verde claro
+                $sheet->getStyle('J' . $rowIdx . ':K' . $rowIdx)->applyFromArray([
+                    'fill' => [
+                        'fillType' => Fill::FILL_SOLID,
+                        'startColor' => ['rgb' => 'A9DF8C'],
+                    ],
+                ]);
+
+                $rowIdx++;
+            }
+
+            $lastRow = max($headerRow, $rowIdx - 1);
+            $sheet->getStyle('A' . $headerRow . ':K' . $lastRow)->applyFromArray([
+                'borders' => [
+                    'allBorders' => [
+                        'borderStyle' => Border::BORDER_THIN,
+                        'color' => ['rgb' => '000000'],
+                    ],
+                ],
+            ]);
+
+            return $lastRow;
+        };
+
+        $currentRow = 1;
+
+        if ($hasDetraccion) {
+            $lastRow = $writeTable($detraccionHeaders, $detraccionRows, $currentRow, false);
+            $currentRow = $lastRow + 1;
+        }
+
+        if ($hasRetencion) {
+            if ($hasDetraccion) {
+                // Dejar 2 filas vacías de separación exactamente como en la imagen
+                $currentRow += 2;
+            }
+            $lastRow = $writeTable($retencionHeaders, $retencionRows, $currentRow, true);
+            $currentRow = $lastRow + 1;
+        }
+
+        $writer = new Xlsx($spreadsheet);
+        $tempFile = tempnam(sys_get_temp_dir(), 'export_cxc_cotiz_');
+        $writer->save($tempFile);
+
+        return response()->download($tempFile, $filename)->deleteFileAfterSend(true);
     }
 
     private function quotationServiceTypeQuery()
@@ -396,120 +1196,507 @@ class CuentasPorCobrarController extends Controller
 
     public function approveQuotation(Request $request, string $id): RedirectResponse
     {
-        $request->validate([
-            'archivoPago' => ['required', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
-            'fecha_pago' => ['nullable', 'date'],
-            'hora_pago' => ['nullable', 'string'],
-            'descripcion' => ['nullable', 'string', 'max:50'],
+        if ($request->boolean('completar_deduccion_pendiente')) {
+            $request->validate([
+                'archivoPago' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+                'descripcion' => ['nullable', 'string', 'max:70'],
+                'fecha_pago' => ['required', 'date'],
+            ]);
+
+            try {
+                $completion = DB::transaction(function () use ($id, $request): array {
+                    $quote = DB::table('cotizacion')
+                        ->where('nroCotizacion', $id)
+                        ->lockForUpdate()
+                        ->first(['nroCotizacion', 'estado']);
+                    if (!$quote || (string) $quote->estado !== '1') {
+                        abort(422, 'La cotización ya no tiene una detracción/retención pendiente.');
+                    }
+
+                    $cxc = DB::table('cuentasporcobrar')
+                        ->where('descripcion', 'COTIZACION:' . $id)
+                        ->lockForUpdate()
+                        ->first(['idcuentasPorCobrar', 'estado']);
+                    if (!$cxc) {
+                        abort(404, 'No se encontró la cuenta por cobrar de esta cotización.');
+                    }
+                    $withholdingType = str_contains(mb_strtolower((string) $cxc->estado, 'UTF-8'), 'retención')
+                        ? 'retención'
+                        : 'detracción';
+
+                    $this->cxcService->registrarDetraccionPendiente(
+                        (int) $cxc->idcuentasPorCobrar,
+                        $request->file('archivoPago'),
+                        null,
+                        trim((string) $request->input('descripcion', '')),
+                        Carbon::parse($request->input('fecha_pago'))->format('Y-m-d')
+                    );
+                    DB::table('cotizacion')->where('nroCotizacion', $id)->update(['estado' => '2']);
+
+                    return [
+                        'cxc_id' => (int) $cxc->idcuentasPorCobrar,
+                        'withholding_type' => $withholdingType,
+                    ];
+                });
+            } catch (\Throwable $exception) {
+                return redirect()->route('modules.cuentasporcobrar', ['tab' => 'cotizaciones'])
+                    ->withInput()->with('error', $exception->getMessage());
+            }
+
+            $this->publishResourceEvent('ventas.cotizaciones', $id, 'updated', [
+                'estado' => '2',
+                'origen' => 'cuentasporcobrar',
+            ]);
+            $this->publishResourceEvent(self::LOCK_RESOURCE, (string) $completion['cxc_id'], 'updated');
+
+            return redirect()->route('modules.cuentasporcobrar', ['tab' => 'cotizaciones'])
+                ->with('success', 'Depósito de ' . $completion['withholding_type'] . ' registrado y cotización aprobada.');
+        }
+
+        $validated = $request->validate([
+            'archivoPago' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+            'fecha_pago' => ['required', 'date'],
+            'descripcion' => ['nullable', 'string', 'max:70'],
+            'docReferencia' => ['required', 'string', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX],
+            'formaPago_idformaPago' => ['required', 'integer', 'exists:formapago,idformaPago'],
+            'entidadBancaria_identidadBancaria' => ['required', 'integer', 'exists:entidadbancaria,identidadBancaria'],
+            'modo_pago' => ['required', 'in:total,parcial'],
+            'montoPago' => ['required_if:modo_pago,parcial', 'nullable', 'numeric', 'min:0'],
+            'canCuotas' => ['nullable', 'integer', 'min:1', 'max:60'],
+            'cuotas_montos' => ['nullable', 'array'],
+            'cuotas_montos.*' => ['required', 'numeric', 'gt:0'],
+            'cuotas_fechas' => ['nullable', 'array'],
+            'cuotas_fechas.*' => ['required', 'date'],
+            'moneda_idmoneda' => ['required', 'integer', 'exists:moneda,idmoneda'],
+            'currency_selector' => ['nullable', 'integer', 'exists:moneda,idmoneda'],
+            'payment_currency_mode' => ['required', 'in:same,other'],
+            'monto_cancelado' => ['nullable', 'numeric', 'gt:0'],
+            'tipo_cambio' => ['nullable', 'numeric', 'gt:0'],
+            'withholding_decision' => ['nullable', 'in:paid,pending'],
+            'comprobante_detraccion' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+            'fecha_detraccion' => ['nullable', 'date'],
+            'descripcion_detraccion' => ['nullable', 'string', 'max:70'],
         ]);
+
+        $quote = DB::table('cotizacion')
+            ->where('nroCotizacion', $id)
+            ->first(['nroCotizacion', 'estado', 'cliente_idcliente', 'moneda_idmoneda', 'formaPago_idformaPago', 'total']);
+        if (!$quote) {
+            abort(404, 'No se encontró la cotización solicitada.');
+        }
+        $paymentMethod = DB::table('formapago')
+            ->where('idformaPago', $validated['formaPago_idformaPago'])
+            ->first(['detalle']);
+        $paymentMethodName = Str::ascii(mb_strtolower((string) ($paymentMethod->detalle ?? ''), 'UTF-8'));
+        $isCredit = $paymentMethod && str_contains($paymentMethodName, 'credito');
+        if (!$isCredit && $validated['modo_pago'] !== 'total') {
+            return redirect()->route('modules.cuentasporcobrar', ['tab' => 'cotizaciones'])
+                ->withInput()->with('error', 'El pago parcial solo está disponible para el formato de pago a crédito.');
+        }
+        if (
+            $validated['payment_currency_mode'] === 'other'
+            && (empty($validated['currency_selector']) || empty($validated['tipo_cambio']) || empty($validated['monto_cancelado']))
+        ) {
+            return redirect()->route('modules.cuentasporcobrar', ['tab' => 'cotizaciones'])
+                ->withInput()->with('error', 'Completa moneda, tipo de cambio y monto para registrar el pago en otra moneda.');
+        }
 
         $file = $request->file('archivoPago');
         $storedPath = null;
-        $updatedIds = [];
-        $fechaPago = $request->input('fecha_pago', date('Y-m-d'));
-        $horaPago = $request->input('hora_pago', date('H:i'));
-        $descripcion = trim((string) $request->input('descripcion', ''));
-
-        $fechaHoraPago = null;
-        if (!empty($fechaPago)) {
-            $timePart = !empty($horaPago) ? $horaPago : '00:00';
-            try {
-                $fechaHoraPago = Carbon::parse("{$fechaPago} {$timePart}")->format('Y-m-d H:i:s');
-            } catch (\Throwable $e) {
-                $fechaHoraPago = Carbon::now()->format('Y-m-d H:i:s');
-            }
-        }
-
+        $result = null;
         try {
-            DB::transaction(function () use ($id, $file, $fechaHoraPago, $descripcion, &$updatedIds, &$storedPath): void {
+            if ($file) {
+                $storedPath = $file->store('comprobantes-pago/cxc', 'public');
+                if (!$storedPath) {
+                    throw new \RuntimeException('No se pudo guardar el comprobante de pago.');
+                }
+            }
+
+            $result = DB::transaction(function () use ($id, $validated, $storedPath, $isCredit): array {
                 $quote = DB::table('cotizacion')
                     ->where('nroCotizacion', $id)
                     ->lockForUpdate()
-                    ->first(['nroCotizacion', 'estado', 'cliente_idcliente', 'moneda_idmoneda', 'total']);
+                    ->first(['nroCotizacion', 'estado', 'cliente_idcliente', 'moneda_idmoneda', 'formaPago_idformaPago', 'total']);
 
                 if (!$quote) {
                     abort(404, 'No se encontró la cotización solicitada.');
                 }
-
                 if ((string) $quote->estado !== '1') {
                     abort(422, 'La cotización ya no está en estado Aprobado(SP).');
                 }
-
-                $directory = 'comprobantes-pago/ind';
-                $filename = $this->buildPaymentFileName($id, $file->getClientOriginalExtension());
-                $storedPath = $file->storeAs($directory, $filename, 'public');
-                if (!$storedPath) {
-                    throw new \RuntimeException('No se pudo guardar el comprobante de pago.');
+                $marker = 'COTIZACION:' . $id;
+                $cxc = DB::table('cuentasporcobrar')
+                    ->where('descripcion', $marker)
+                    ->lockForUpdate()
+                    ->first();
+                if (!$cxc) {
+                    $cxc = DB::table('cuentasporcobrar')
+                        ->where('cliente_idcliente', $quote->cliente_idcliente)
+                        ->where('moneda_idmoneda', $quote->moneda_idmoneda)
+                        ->where('descripcion', 'like', '%' . $id)
+                        ->orderByDesc('idcuentasPorCobrar')
+                        ->lockForUpdate()
+                        ->first();
                 }
 
-                $updateData = [
-                    'archivoPago' => $storedPath,
-                    'estado' => '2',
-                ];
-
-                if ($fechaHoraPago !== null) {
-                    if (DB::getSchemaBuilder()->hasColumn('cotizacion', 'fechaPago')) {
-                        $updateData['fechaPago'] = $fechaHoraPago;
-                    } elseif (DB::getSchemaBuilder()->hasColumn('cotizacion', 'fecha_pago')) {
-                        $updateData['fecha_pago'] = $fechaHoraPago;
+                $cxcState = mb_strtolower(trim((string) ($cxc->estado ?? '')), 'UTF-8');
+                $isCreditContinuation = $isCredit && $cxc
+                    && (in_array((string) $cxc->estado, ['PagoCredito', 'Pendiente a credito'], true)
+                        || str_starts_with($cxcState, 'pendiente a credito'));
+                if ($cxc && (string) $cxc->estado !== 'NUEVO' && !$isCreditContinuation) {
+                    abort(422, 'La cuenta por cobrar ya no está pendiente de pago.');
+                }
+                $isInitialCredit = $isCredit && (!$cxc || (string) $cxc->estado === 'NUEVO');
+                $isInitialPayment = !$cxc || (string) $cxc->estado === 'NUEVO';
+                $sourceCurrencyId = (int) ($cxc->moneda_idmoneda ?? $quote->moneda_idmoneda);
+                $targetCurrencyId = $sourceCurrencyId;
+                $paymentCurrencyId = $sourceCurrencyId;
+                $sourceBalance = round((float) ($cxc->montoActual ?? $quote->total), 2);
+                $targetBalance = $sourceBalance;
+                $changesDebtCurrency = $validated['payment_currency_mode'] === 'other';
+                if ($changesDebtCurrency) {
+                    $selectedCurrencyId = (int) ($validated['currency_selector'] ?? 0);
+                    if ($selectedCurrencyId === $sourceCurrencyId) {
+                        abort(422, 'Selecciona una moneda distinta a la moneda de la cuenta por cobrar.');
+                    }
+                    $paymentCurrencyId = $selectedCurrencyId;
+                }
+                $quotationService = DB::query()
+                    ->fromSub($this->quotationServiceTypeQuery(), 'quotation_type')
+                    ->where('cotizacion_nroCotizacion', $id)
+                    ->value('servicio') ?? 'EQUIPAMIENTO';
+                $quotationServiceUpper = mb_strtoupper((string) $quotationService, 'UTF-8');
+                $canApplyQuotationWithholding = in_array(
+                    $quotationServiceUpper,
+                    ['EQUIPAMIENTO', 'SERVICIOS TÉCNICOS', 'PLANES'],
+                    true
+                );
+                $quotationUsesRetention = $quotationServiceUpper === 'EQUIPAMIENTO';
+                $withholdingPreview = self::quotationWithholdingBreakdown(
+                    $targetBalance,
+                    $canApplyQuotationWithholding,
+                    $quotationUsesRetention
+                );
+                $installmentTotal = $withholdingPreview['net'];
+                if ($isInitialCredit && empty($validated['canCuotas'])) {
+                    abort(422, 'Indica la cantidad de cuotas para registrar el pago a crédito.');
+                }
+                if ($isInitialCredit && count($validated['cuotas_montos'] ?? []) !== (int) $validated['canCuotas']) {
+                    abort(422, 'Completa el monto de cada cuota del pago a crédito.');
+                }
+                $installmentNumber = null;
+                $installmentDate = null;
+                if ($isInitialCredit) {
+                    $installmentAmounts = array_map(
+                        static fn($amount): int => (int) round((float) $amount * 100),
+                        $validated['cuotas_montos'] ?? []
+                    );
+                    $installmentDates = $validated['cuotas_fechas'] ?? [];
+                    $quoteTotalCents = (int) round($installmentTotal * 100);
+                    if (
+                        count($installmentDates) !== (int) $validated['canCuotas']
+                        || array_sum($installmentAmounts) !== $quoteTotalCents
+                        || in_array(0, $installmentAmounts, true)
+                    ) {
+                        abort(422, 'Las cuotas deben tener monto y fecha, ser mayores a cero y sumar el total pendiente después de la detracción/retención.');
+                    }
+                    $installmentNumber = 1;
+                    $installmentDate = Carbon::parse($installmentDates[0])->format('Y-m-d');
+                    $expectedFirstAmount = $installmentAmounts[0] / 100;
+                    $receivedFirstAmount = $changesDebtCurrency
+                        ? CxcService::convertPaymentAmountToDebtCurrency(
+                            (float) $validated['monto_cancelado'],
+                            (float) $validated['tipo_cambio'],
+                            $sourceCurrencyId,
+                            $paymentCurrencyId
+                        )
+                        : round((float) ($validated['montoPago'] ?? 0), 2);
+                    if (abs($receivedFirstAmount - $expectedFirstAmount) > 0.005) {
+                        abort(422, 'El pago inicial debe coincidir con el monto de la primera cuota.');
+                    }
+                } elseif ($isCreditContinuation) {
+                    $nextInstallment = DB::table('detallecxc')
+                        ->where('cuentasPorCobrar_idcuentasPorCobrar', $cxc->idcuentasPorCobrar)
+                        ->where('estado', '0')
+                        ->whereNotNull('nCuota')
+                        ->orderBy('nCuota')
+                        ->lockForUpdate()
+                        ->first(['nCuota as numero', 'descripcion', 'fechaPagoProgramada as fecha_pago']);
+                    if ($nextInstallment) {
+                        $installmentNumber = (int) $nextInstallment->numero;
+                        $installmentDate = (string) $nextInstallment->fecha_pago;
+                        if (preg_match('/Monto:\s*([0-9]+(?:\.[0-9]{1,2})?)/', (string) $nextInstallment->descripcion, $match) === 1) {
+                            $expectedAmount = round((float) $match[1], 2);
+                            $receivedAmount = $changesDebtCurrency
+                                ? CxcService::convertPaymentAmountToDebtCurrency(
+                                    (float) $validated['monto_cancelado'],
+                                    (float) $validated['tipo_cambio'],
+                                    $sourceCurrencyId,
+                                    $paymentCurrencyId
+                                )
+                                : round((float) ($validated['montoPago'] ?? 0), 2);
+                            if (abs($receivedAmount - $expectedAmount) > 0.005) {
+                                abort(422, 'El pago debe coincidir con el monto de la siguiente cuota pendiente.');
+                            }
+                        }
                     }
                 }
 
-                if ($descripcion !== '') {
-                    if (DB::getSchemaBuilder()->hasColumn('cotizacion', 'observacion')) {
-                        $updateData['observacion'] = $descripcion;
-                    } elseif (DB::getSchemaBuilder()->hasColumn('cotizacion', 'descripcion')) {
-                        $updateData['descripcion'] = $descripcion;
+                $submittedAmount = $changesDebtCurrency
+                    ? CxcService::convertPaymentAmountToDebtCurrency(
+                        (float) ($validated['monto_cancelado'] ?? 0),
+                        (float) $validated['tipo_cambio'],
+                        $sourceCurrencyId,
+                        $paymentCurrencyId
+                    )
+                    : round((float) ($validated['montoPago'] ?? $installmentTotal), 2);
+                $withholdingDecision = null;
+                if ($isInitialPayment && $withholdingPreview['deduction'] > 0 && !$isCreditContinuation) {
+                    if ($isInitialCredit) {
+                        if (
+                            (int) $validated['canCuotas'] === 1
+                            && ($validated['modo_pago'] ?? 'total') === 'total'
+                            && abs($submittedAmount - $targetBalance) <= 0.01
+                        ) {
+                            $withholdingDecision = 'full_pending';
+                        } elseif (
+                            (int) $validated['canCuotas'] === 1
+                            && ($validated['modo_pago'] ?? 'total') === 'total'
+                            && abs($submittedAmount - $withholdingPreview['net']) <= 0.01
+                        ) {
+                            $withholdingDecision = $validated['withholding_decision'] ?? null;
+                            if (!in_array($withholdingDecision, ['paid', 'pending'], true)) {
+                                abort(422, 'Confirma si el cliente ya pagó la detracción/retención antes de guardar.');
+                            }
+                        } else {
+                            $withholdingDecision = 'paid';
+                        }
+                    } elseif (abs($submittedAmount - $withholdingPreview['net']) <= 0.01) {
+                        $withholdingDecision = $validated['withholding_decision'] ?? null;
+                        if (!in_array($withholdingDecision, ['paid', 'pending'], true)) {
+                            abort(422, 'Confirma si el cliente ya pagó la detracción/retención antes de guardar.');
+                        }
+                    } elseif (abs($submittedAmount - $targetBalance) <= 0.01) {
+                        $withholdingDecision = 'full_pending';
+                    } else {
+                        abort(422, 'El monto debe ser el neto sugerido o el total bruto de la cotización para registrar correctamente la detracción/retención.');
                     }
                 }
+                $requiresWithholdingProof = $isInitialPayment
+                    && $withholdingPreview['deduction'] > 0
+                    && abs($submittedAmount - $withholdingPreview['net']) <= 0.01
+                    && $withholdingDecision === 'paid';
+                if ($requiresWithholdingProof && empty($validated['comprobante_detraccion'])) {
+                    abort(422, 'Debe cargar el comprobante de detracción/retención para confirmar que ya fue pagada.');
+                }
 
-                DB::table('cotizacion')
-                    ->where('nroCotizacion', $id)
-                    ->update($updateData);
+                if (!$cxc) {
+                    $cxcData = [
+                        'cliente_idcliente' => $quote->cliente_idcliente,
+                        'tipoCobro_idtipoCobros' => 1,
+                        'moneda_idmoneda' => $targetCurrencyId,
+                        'docReferencia' => trim((string) ($validated['docReferencia'] ?? '')),
+                        'descripcion' => $marker,
+                        'montoOriginal' => $targetBalance,
+                        'montoActual' => $targetBalance,
+                        'canCuotas' => null,
+                        'fechaRegistro' => now()->format('Y-m-d H:i:s'),
+                        'fechaCancelacion' => null,
+                        'estado' => 'NUEVO',
+                    ];
+                    if (DB::getSchemaBuilder()->hasColumn('cuentasporcobrar', 'docFactura')) {
+                        $cxcData['docFactura'] = trim((string) ($validated['docReferencia'] ?? ''));
+                    }
+                    $cxcId = DB::table('cuentasporcobrar')->insertGetId($cxcData);
+                } else {
+                    $cxcId = (int) $cxc->idcuentasPorCobrar;
+                }
 
-                $cxcDescripcion = trim($descripcion !== '' ? "{$descripcion} {$id}" : $id);
-
-                $cxcData = [
-                    'cliente_idcliente' => $quote->cliente_idcliente ?? null,
-                    'tipoCobro_idtipoCobros' => 1,
-                    'moneda_idmoneda' => $quote->moneda_idmoneda ?? null,
-                    'docReferencia' => null,
-                    'descripcion' => $cxcDescripcion,
-                    'montoOriginal' => (float) ($quote->total ?? 0),
-                    'montoActual' => (float) ($quote->total ?? 0),
-                    'canCuotas' => null,
-                    'fechaRegistro' => $fechaHoraPago ?? now()->format('Y-m-d H:i:s'),
-                    'fechaCancelacion' => null,
-                    'estado' => 'NUEVO',
-                ];
-
+                $invoiceReference = trim((string) $validated['docReferencia']);
+                $cxcUpdate = ['docReferencia' => $invoiceReference];
                 if (DB::getSchemaBuilder()->hasColumn('cuentasporcobrar', 'docFactura')) {
-                    $cxcData['docFactura'] = null;
+                    $cxcUpdate['docFactura'] = $invoiceReference;
+                }
+                DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $cxcId)
+                    ->update($cxcUpdate);
+
+                if (DB::getSchemaBuilder()->hasColumn('cotizacion', 'docReferencia')) {
+                    DB::table('cotizacion')
+                        ->where('nroCotizacion', $id)
+                        ->update(['docReferencia' => $invoiceReference]);
                 }
 
-                DB::table('cuentasporcobrar')->insert($cxcData);
+                $currentBalance = $targetBalance;
+                if ($currentBalance <= 0) {
+                    DB::table('cuentasporcobrar')
+                        ->where('idcuentasPorCobrar', $cxcId)
+                        ->update([
+                            'montoActual' => (float) ($cxc->montoOriginal ?? $quote->total ?? 0),
+                            'moneda_idmoneda' => $targetCurrencyId,
+                            'estado' => 'CANCELADO',
+                            'fechaCancelacion' => Carbon::parse($validated['fecha_pago'])->format('Y-m-d H:i:s'),
+                        ]);
 
-                $updatedIds = [$id];
+                    $quoteUpdate = ['estado' => '2'];
+                    if ($storedPath !== null) {
+                        $quoteUpdate['archivoPago'] = $storedPath;
+                    }
+                    if (DB::getSchemaBuilder()->hasColumn('cotizacion', 'fechaPago')) {
+                        $quoteUpdate['fechaPago'] = $validated['fecha_pago'];
+                    } elseif (DB::getSchemaBuilder()->hasColumn('cotizacion', 'fecha_pago')) {
+                        $quoteUpdate['fecha_pago'] = $validated['fecha_pago'];
+                    }
+                    DB::table('cotizacion')->where('nroCotizacion', $id)->update($quoteUpdate);
+
+                    return ['cxc_id' => $cxcId, 'paid' => true];
+                }
+
+                $descripcion = trim((string) ($validated['descripcion'] ?? ''));
+                $paymentData = [
+                    'entidadBancaria_identidadBancaria' => $validated['entidadBancaria_identidadBancaria'],
+                    'formaPago_idformaPago' => $validated['formaPago_idformaPago'],
+                    'tipoCobro_idtipoCobros' => 1,
+                    'moneda_idmoneda' => $targetCurrencyId,
+                    'currency_selector' => $paymentCurrencyId,
+                    'payment_currency_mode' => $changesDebtCurrency ? 'other' : 'same',
+                    'tipo_cambio' => $changesDebtCurrency ? $validated['tipo_cambio'] : 1,
+                    'monto_cancelado' => $validated['monto_cancelado'] ?? null,
+                    'monto_banco' => $changesDebtCurrency
+                        ? ($validated['monto_cancelado'] ?? null)
+                        : null,
+                    'modo_pago' => $validated['modo_pago'],
+                    'montoPago' => $changesDebtCurrency
+                        ? $submittedAmount
+                        : ($validated['montoPago'] ?? null),
+                    'monto_recibido' => $changesDebtCurrency ? ($validated['monto_cancelado'] ?? null) : null,
+                    'monto_convertido' => $changesDebtCurrency ? $submittedAmount : null,
+                    'canCuotas' => $validated['canCuotas'] ?? null,
+                    'cuotas_montos' => $validated['cuotas_montos'] ?? [],
+                    'cuotas_fechas' => $validated['cuotas_fechas'] ?? [],
+                    'fechaPago' => $validated['fecha_pago'],
+                    'docReferencia' => trim((string) ($validated['docReferencia'] ?? '')),
+                    'descripcion' => $descripcion !== '' ? $descripcion : 'Pago de cotización ' . $id,
+                    'renewal_cxc_id' => $cxcId,
+                    'aplicar_deduccion' => $isInitialPayment && $canApplyQuotationWithholding,
+                    'is_retention_override' => $quotationUsesRetention,
+                    'withholding_decision' => $withholdingDecision,
+                    'origen_pago' => 'cotizacion',
+                ];
+                if ($requiresWithholdingProof) {
+                    $paymentData['withholding_proof'] = $validated['comprobante_detraccion'];
+                    $paymentData['withholding_fecha'] = $validated['fecha_detraccion'] ?? $validated['fecha_pago'];
+                    $paymentData['withholding_description'] = $validated['descripcion_detraccion'] ?? '';
+                }
+                if ($installmentNumber !== null) {
+                    $paymentData['cuota_cotizacion_numero'] = $installmentNumber;
+                    $paymentData['cuota_cotizacion_fecha'] = $installmentDate;
+                }
+                $this->cxcService->procesarPagoGrupo([$cxcId], $paymentData, $storedPath);
+
+                $updatedCxc = DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $cxcId)
+                    ->lockForUpdate()
+                    ->first(['montoActual', 'estado']);
+                $isPaid = (float) ($updatedCxc->montoActual ?? 0) <= 0.01;
+                $isWithholdingPending = in_array((string) ($updatedCxc->estado ?? ''), [
+                    'Pendiente Autodetracción',
+                    'Pendiente a Detracción',
+                    'Pendiente a Retención',
+                ], true);
+                $paidCxcAmount = $targetBalance;
+                $paidCurrencyId = $targetCurrencyId;
+                $hasOtherCurrencyPayments = $changesDebtCurrency || DB::table('detallecxc')
+                    ->where('cuentasPorCobrar_idcuentasPorCobrar', $cxcId)
+                    ->where('estado', '1')
+                    ->where('moneda_idmoneda', '<>', $targetCurrencyId)
+                    ->exists();
+                if ($isPaid && !$hasOtherCurrencyPayments) {
+                    $paidCxcAmount = (float) DB::table('detallecxc as dc')
+                        ->join('bancos as b', 'b.idbancos', '=', 'dc.bancos_idbancos')
+                        ->where('dc.cuentasPorCobrar_idcuentasPorCobrar', $cxcId)
+                        ->where('dc.moneda_idmoneda', $paidCurrencyId)
+                        ->where('dc.estado', '1')
+                        ->whereIn('b.tipoMov', ['I', 'T'])
+                        ->where('b.informacion', 'not like', '[ANULADO]%')
+                        ->sum('b.monto');
+                }
+                DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $cxcId)
+                    ->update([
+                        'montoActual' => $isPaid
+                            ? ($hasOtherCurrencyPayments ? $updatedCxc->montoActual : $paidCxcAmount)
+                            : $updatedCxc->montoActual,
+                        'moneda_idmoneda' => $paidCurrencyId,
+                        'estado' => $isPaid ? 'CANCELADO' : ($isWithholdingPending
+                            ? $updatedCxc->estado
+                            : 'PagoCredito'),
+                        'fechaCancelacion' => $isPaid ? Carbon::parse($validated['fecha_pago'])->format('Y-m-d H:i:s') : null,
+                    ]);
+
+                $quoteUpdate = [];
+                if ($isPaid) {
+                    $quoteUpdate['estado'] = '2';
+                    if (DB::getSchemaBuilder()->hasColumn('cotizacion', 'fechaPago')) {
+                        $quoteUpdate['fechaPago'] = $validated['fecha_pago'];
+                    } elseif (DB::getSchemaBuilder()->hasColumn('cotizacion', 'fecha_pago')) {
+                        $quoteUpdate['fecha_pago'] = $validated['fecha_pago'];
+                    }
+                }
+                if ($storedPath !== null && $isInitialPayment) {
+                    $quoteUpdate['archivoPago'] = $storedPath;
+                }
+                if ($quoteUpdate !== []) {
+                    DB::table('cotizacion')->where('nroCotizacion', $id)->update($quoteUpdate);
+                }
+
+                return [
+                    'cxc_id' => $cxcId,
+                    'paid' => $isPaid,
+                    'withholding_pending' => $isWithholdingPending,
+                    'withholding_type' => $quotationUsesRetention ? 'retención' : 'detracción',
+                ];
             });
         } catch (\Throwable $exception) {
             if ($storedPath !== null && Storage::disk('public')->exists($storedPath)) {
                 Storage::disk('public')->delete($storedPath);
             }
 
-            throw $exception;
+            return redirect()->route('modules.cuentasporcobrar', ['tab' => 'cotizaciones'])
+                ->withInput()->with('error', $exception->getMessage());
         }
 
-        foreach ($updatedIds as $updatedId) {
-            $this->publishResourceEvent('ventas.cotizaciones', (string) $updatedId, 'updated', [
-                'estado' => '2',
-                'archivoPago' => $storedPath,
-                'origen' => 'cuentasporcobrar',
-            ]);
-        }
+        $this->publishResourceEvent('ventas.cotizaciones', $id, 'updated', [
+            'estado' => $result['paid'] ? '2' : '1',
+            'origen' => 'cuentasporcobrar',
+        ]);
+        $this->publishResourceEvent(self::LOCK_RESOURCE, (string) $result['cxc_id'], 'updated');
 
         return redirect()
             ->route('modules.cuentasporcobrar', ['tab' => 'cotizaciones'])
-            ->with('success', 'Comprobante guardado y cotización aprobada correctamente.');
+            ->with('success', $result['withholding_pending']
+                ? 'Pago registrado. La ' . $result['withholding_type'] . ' quedó pendiente para registrar su depósito.'
+                : ($result['paid']
+                    ? 'Cotización aprobada correctamente.'
+                    : 'Pago registrado.'));
+    }
+
+    private static function quotationWithholdingBreakdown(
+        float $gross,
+        bool $eligibleService,
+        bool $isRetention
+    ): array {
+        $gross = round(max(0, $gross), 2);
+        $deduction = $eligibleService && $gross > 700
+            ? round($gross * ($isRetention ? 0.03 : 0.12))
+            : 0.0;
+
+        return [
+            'gross' => $gross,
+            'deduction' => $deduction,
+            'net' => round($gross - $deduction, 2),
+            'is_retention' => $isRetention,
+        ];
     }
 
     public function export(Request $request, string $format)
@@ -549,6 +1736,155 @@ class CuentasPorCobrarController extends Controller
         }
 
         return $this->exportPdfResponse($rows, $columns, 'Listado de Cuentas por Cobrar', $filename);
+    }
+
+    public function exportServices(Request $request, string $format)
+    {
+        if (strtolower($format) !== 'xlsx') {
+            abort(404);
+        }
+
+        $filters = $this->serviceFiltersFromRequest($request);
+        $serviceIndexData = $this->cuentasPorCobrarService->prepareServicesIndex($filters);
+        $groups = $this->filterServiceGroups($serviceIndexData['serviciosPorVencerGrouped'], $filters);
+        return $this->exportServiceGroupsXlsx($groups);
+    }
+
+    private function exportServiceGroupsXlsx(array $groups)
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Servicios por vencer');
+
+        $headers = ['RUC / DNI', 'CLIENTE', 'SERVICIO', 'VEHÍCULO', 'FECHA LÍMITE', 'MES', 'FACTURA', 'MONTO'];
+        $lastColumn = 'H';
+        $months = [];
+
+        foreach ($groups as $group) {
+            $date = $group['fecha_fin_iso'] ?? null;
+            $monthKey = $date ? Carbon::parse($date)->format('Y-m') : sprintf('%04d-%02d', (int) ($group['anio'] ?? 0), 0);
+            $months[$monthKey][] = $group;
+        }
+        ksort($months);
+
+        $rowIndex = 1;
+        foreach ($months as $monthKey => $monthGroups) {
+            $monthDate = preg_match('/^\d{4}-\d{2}$/', $monthKey) && substr($monthKey, -2) !== '00'
+                ? Carbon::createFromFormat('Y-m', $monthKey)
+                : null;
+            $monthLabel = $monthDate
+                ? mb_strtoupper($monthDate->locale('es')->translatedFormat('F Y'), 'UTF-8')
+                : mb_strtoupper((string) ($monthGroups[0]['mes'] ?? 'SERVICIOS'), 'UTF-8');
+
+            $sheet->mergeCells("A{$rowIndex}:{$lastColumn}{$rowIndex}");
+            $sheet->setCellValueExplicit("A{$rowIndex}", 'SERVICIOS - ' . $monthLabel, DataType::TYPE_STRING);
+            $sheet->getStyle("A{$rowIndex}:{$lastColumn}{$rowIndex}")->applyFromArray([
+                'font' => ['bold' => true, 'size' => 13, 'color' => ['argb' => 'FFFFFFFF']],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => 'FF334155']],
+                'alignment' => ['vertical' => Alignment::VERTICAL_CENTER],
+            ]);
+            $sheet->getRowDimension($rowIndex)->setRowHeight(25);
+            $rowIndex++;
+
+            foreach ($headers as $columnIndex => $label) {
+                $column = chr(ord('A') + $columnIndex);
+                $sheet->setCellValueExplicit($column . $rowIndex, $label, DataType::TYPE_STRING);
+            }
+            $headerRow = $rowIndex;
+            $sheet->getStyle("A{$headerRow}:{$lastColumn}{$headerRow}")->applyFromArray([
+                'font' => ['bold' => true, 'color' => ['argb' => 'FF1E293B']],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => 'FFDBEAFE']],
+                'alignment' => ['vertical' => Alignment::VERTICAL_CENTER, 'wrapText' => true],
+                'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['argb' => 'FF94A3B8']]],
+            ]);
+            $sheet->getRowDimension($headerRow)->setRowHeight(24);
+            $rowIndex++;
+            $dataStartRow = $rowIndex;
+            $summaryRows = [];
+
+            foreach ($monthGroups as $group) {
+                $this->writeServiceExportRow($sheet, $rowIndex, [
+                    $group['cliente_id'] ?? '',
+                    $group['cliente_nombre'] ?? '',
+                    $group['num_tservicios'] ?? 0,
+                    $group['num_unidades'] ?? 0,
+                    $group['fecha_fin'] ?? '-',
+                    $group['mes'] ?? '',
+                    $group['documento'] ?? '-',
+                    $group['monto_total_display'] ?? '',
+                ]);
+                $summaryRows[] = $rowIndex++;
+
+                foreach (($group['tipos_servicios'] ?? []) as $service) {
+                    $vehicles = $service['vehiculos'] ?? [];
+                    if ($vehicles === []) {
+                        $this->writeServiceExportRow($sheet, $rowIndex++, [
+                            $group['cliente_id'] ?? '',
+                            $group['cliente_nombre'] ?? '',
+                            $service['servicio_nombre'] ?? '',
+                            '-',
+                            $group['fecha_fin'] ?? '-',
+                            $group['mes'] ?? '',
+                            $group['documento'] ?? '-',
+                            $service['monto_subtotal_display'] ?? '',
+                        ]);
+                        continue;
+                    }
+
+                    foreach ($vehicles as $vehicle) {
+                        $this->writeServiceExportRow($sheet, $rowIndex++, [
+                            $group['cliente_id'] ?? '',
+                            $group['cliente_nombre'] ?? '',
+                            $service['servicio_nombre'] ?? '',
+                            $vehicle['placa'] ?? '-',
+                            $vehicle['fecha_vencimiento_display'] ?? $group['fecha_fin'] ?? '-',
+                            $vehicle['mes'] ?? $group['mes'] ?? '',
+                            $vehicle['doc_referencia'] ?? $group['documento'] ?? '-',
+                            $vehicle['monto_display'] ?? '',
+                        ]);
+                    }
+                }
+            }
+
+            $dataEndRow = $rowIndex - 1;
+            if ($dataEndRow >= $dataStartRow) {
+                $sheet->getStyle("A{$dataStartRow}:{$lastColumn}{$dataEndRow}")
+                    ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+                $sheet->getStyle("A{$dataStartRow}:{$lastColumn}{$dataEndRow}")
+                    ->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+                $sheet->getStyle("A{$dataStartRow}:{$lastColumn}{$dataEndRow}")
+                    ->getAlignment()->setWrapText(true);
+            }
+            foreach ($summaryRows as $summaryRow) {
+                $sheet->getStyle("A{$summaryRow}:{$lastColumn}{$summaryRow}")->applyFromArray([
+                    'font' => ['bold' => true],
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => 'FFE2E8F0']],
+                ]);
+            }
+            $rowIndex++;
+        }
+
+        foreach ([14, 34, 48, 18, 18, 16, 18, 18] as $index => $width) {
+            $sheet->getColumnDimension(chr(ord('A') + $index))->setWidth($width);
+        }
+        $sheet->freezePane('A1');
+
+        $filename = 'servicios_por_vencer_' . now()->format('Ymd_His') . '.xlsx';
+        $tempFile = tempnam(sys_get_temp_dir(), 'export_xlsx_');
+        if ($tempFile === false) {
+            throw new \RuntimeException('No se pudo crear el archivo temporal para exportar servicios.');
+        }
+        (new Xlsx($spreadsheet))->save($tempFile);
+
+        return response()->download($tempFile, $filename)->deleteFileAfterSend(true);
+    }
+
+    private function writeServiceExportRow(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet, int $row, array $values): void
+    {
+        foreach ($values as $index => $value) {
+            $column = chr(ord('A') + $index);
+            $sheet->setCellValueExplicit($column . $row, (string) ($value ?? ''), DataType::TYPE_STRING);
+        }
     }
 
     public function create(): View
@@ -596,7 +1932,7 @@ class CuentasPorCobrarController extends Controller
                     'type' => 'text',
                     'label' => 'Descripción',
                     'required' => false,
-                    'maxlength' => 50,
+                    'maxlength' => 80,
                     'helpText' => 'Breve descripción.',
                 ],
                 $this->decimalFieldDefinition('montoOriginal', 'Monto original', null, true),
@@ -633,7 +1969,12 @@ class CuentasPorCobrarController extends Controller
                         ['value' => '4', 'label' => 'Vencido'],
                         ['value' => 'Pendiente Pago parcial', 'label' => 'Pendiente Pago parcial'],
                         ['value' => 'Pendiente a credito', 'label' => 'Pendiente a credito'],
-                        ['value' => 'Cancelado Detracción', 'label' => 'Cancelado Detracción'],
+                        ['value' => 'NUEVO', 'label' => 'Nuevo'],
+                        ['value' => 'PagoCredito', 'label' => 'PagoCredito'],
+                        ['value' => 'Aprobado', 'label' => 'Aprobado'],
+                        ['value' => 'Pendiente Autodetracción', 'label' => 'Pendiente Autodetracción'],
+                        ['value' => 'Pendiente a Detracción', 'label' => 'Pendiente a Detracción'],
+                        ['value' => 'Pendiente a Retención', 'label' => 'Pendiente a Retención'],
                     ],
                     'placeholder' => 'Selecciona estado',
                 ],
@@ -648,13 +1989,13 @@ class CuentasPorCobrarController extends Controller
             'cliente_idcliente' => ['required', 'string', 'exists:cliente,idcliente'],
             'tipoCobro_idtipoCobros' => ['required', 'integer', 'exists:tipocobro,idtipoCobros'],
             'docReferencia' => ['nullable', 'string', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX],
-            'descripcion' => ['required', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'descripcion' => ['required', 'string', 'max:80', 'regex:' . self::SAFE_TEXT_REGEX],
             'montoOriginal' => ['required', 'numeric', 'min:0'],
             'montoActual' => ['required', 'numeric', 'min:0'],
             'canCuotas' => ['nullable', 'numeric', 'min:1'],
             'fechaRegistro' => ['nullable', 'date'],
             'fechaCancelacion' => ['nullable', 'date'],
-            'estado' => ['required', 'in:1,2,3,4,Pendiente Pago parcial,Pendiente a credito,Cancelado Detracción'],
+            'estado' => ['required', 'in:1,2,3,4,NUEVO,PagoCredito,Aprobado,Pendiente Pago parcial,Pendiente a credito,Cancelado Detracción,Pendiente Autodetracción,Pendiente a Detracción,Pendiente a Retención'],
         ]);
         $validated = $this->normalizeDecimalFields($validated);
 
@@ -667,153 +2008,27 @@ class CuentasPorCobrarController extends Controller
     public function darDeBajaServicios(Request $request)
     {
         $validated = $request->validate([
-            'servicio_ids'   => ['required', 'array', 'min:1'],
+            'servicio_ids' => ['required', 'array', 'min:1'],
             'servicio_ids.*' => ['required', 'integer', 'exists:serviciocliente,idservicioCliente'],
-            'baja_modo'      => ['required', 'in:ahora,periodo'],
-            'comentario'     => ['nullable', 'string', 'max:500'],
-            'mantener_sim'   => ['nullable', 'in:si,no'],
+            'baja_modo' => ['required', 'in:ahora,periodo'],
+            'comentario' => ['required', 'string', 'max:500'],
+            'mantener_sim' => ['nullable', 'in:si,no'],
         ]);
 
         $serviceIds = array_values(array_map('intval', $validated['servicio_ids']));
         $modo = $validated['baja_modo'];
-        $comentario = trim($validated['comentario'] ?? 'Servicio dado de baja desde Cuentas por Cobrar');
+        $comentario = trim($validated['comentario']);
         $mantenerSim = $validated['mantener_sim'] ?? 'si';
         $usuario = (string) $request->session()->get('erp_auth.usuario', 'anonimo');
-        $now = Carbon::now()->format('Y-m-d H:i:s');
-        $today = Carbon::today();
 
         try {
-            DB::transaction(function () use ($serviceIds, $modo, $comentario, $mantenerSim, $usuario, $now, $today): void {
-                $services = DB::table('serviciocliente as sc')
-                    ->whereIn('sc.idservicioCliente', $serviceIds)
-                    ->get();
-
-                foreach ($services as $svc) {
-                    $svcId = $svc->idservicioCliente;
-                    $vencimiento = $svc->fecheVencimiento ? Carbon::parse($svc->fecheVencimiento)->startOfDay() : null;
-                    $isExpiredOrToday = $vencimiento ? $vencimiento->lte($today) : true;
-
-                    if ($modo === 'ahora' || ($modo === 'periodo' && $isExpiredOrToday)) {
-                        // 1. Inactivar servicio inmediatamente
-                        DB::table('serviciocliente')->where('idservicioCliente', $svcId)->update([
-                            'estado' => 'inactivo',
-                        ]);
-
-                        $deviceInfo = DB::table('detalle_serviciodispositivo')
-                            ->where('servicioCliente_idservicioCliente', $svcId)
-                            ->orderByDesc('iddetalle_serviciodispositivo')
-                            ->first();
-
-                        $deviceId = $deviceInfo->dispositivoCliente_iddispositivoCliente ?? null;
-                        $phoneNumber = null;
-
-                        if ($deviceId) {
-                            $phoneNumber = DB::table('detnumerosdispositivo')
-                                ->where('dispositivoCliente_iddispositivoCliente', $deviceId)
-                                ->orderByDesc('fechaAsignacion')
-                                ->value('numeroTelefonico_numeroTelefonico');
-
-                            // Desvincular dispositivo del cliente
-                            DB::table('dispositivocliente')
-                                ->where('iddispositivoCliente', $deviceId)
-                                ->update(['estado' => '0', 'fechaBaja' => $now]);
-
-                            $latestStockDevice = DB::table('elementoalmacen')->where('imei', $deviceId)->first();
-                            if ($latestStockDevice) {
-                                $deviceState = (int) $latestStockDevice->estado;
-                                DB::table('elementoalmacen')
-                                    ->where('imei', $deviceId)
-                                    ->update(['estado' => $this->stateAfterServiceDeactivation($deviceState)]);
-                            }
-                        }
-
-                        // 2. Manejo de SIM y Número Telefónico
-                        if ($phoneNumber) {
-                            if ($mantenerSim === 'no') {
-                                // No mantener: Numero y SIM se separan, ambos pasan a estado LIBRE (estado = '1')
-                                $activeSimPair = DB::table('detallesimcard')
-                                    ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
-                                    ->where('estado', '0')
-                                    ->first();
-
-                                if ($activeSimPair) {
-                                    DB::table('detallesimcard')
-                                        ->where('iddetalleSimCard', $activeSimPair->iddetalleSimCard)
-                                        ->update(['estado' => '1']); // desacoplado/libre
-
-                                    DB::table('simcard')
-                                        ->where('idsimCard', $activeSimPair->simCard_idsimCard)
-                                        ->where('estado', '!=', '0')
-                                        ->update(['estado' => '1']); // libre
-                                }
-
-                                DB::table('numerotelefonico')
-                                    ->where('numeroTelefonico', $phoneNumber)
-                                    ->where('estado', '!=', '0')
-                                    ->update(['estado' => '1']); // libre
-                            } else {
-                                // Sí mantener: Numero y SIM se mantienen juntos para uso futuro (estado = '2' o preservado)
-                                DB::table('numerotelefonico')
-                                    ->where('numeroTelefonico', $phoneNumber)
-                                    ->where('estado', '!=', '0')
-                                    ->update(['estado' => '2']);
-
-                                $activeSimPair = DB::table('detallesimcard')
-                                    ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
-                                    ->where('estado', '0')
-                                    ->first();
-
-                                if ($activeSimPair) {
-                                    DB::table('simcard')
-                                        ->where('idsimCard', $activeSimPair->simCard_idsimCard)
-                                        ->where('estado', '!=', '0')
-                                        ->update(['estado' => '2']);
-                                }
-                            }
-
-                            // Desvincular número del dispositivo
-                            if ($deviceId) {
-                                DB::table('detnumerosdispositivo')
-                                    ->where('dispositivoCliente_iddispositivoCliente', $deviceId)
-                                    ->where('numeroTelefonico_numeroTelefonico', $phoneNumber)
-                                    ->delete();
-                            }
-                        }
-
-                        // 3. Historial de servicio
-                        DB::table('historial_servicio')->insert([
-                            'usuario_usuario' => $usuario,
-                            'serv_usuario' => $usuario,
-                            'servicioCliente_idservicioCliente' => $svcId,
-                            'fecha_accion' => $now,
-                            'motivo' => 'Dado de baja',
-                            'descripcion' => $comentario . ' (Mantener SIM/Número: ' . ($mantenerSim === 'si' ? 'Sí' : 'No') . ')',
-                            'doc_referencia' => $svc->docReferencia ?? null,
-                            'dispositivo' => $deviceId,
-                            'numerotelefono' => $phoneNumber,
-                        ]);
-                    } else {
-                        // Baja programada al terminar periodo
-                        DB::table('historial_servicio')->insert([
-                            'usuario_usuario' => $usuario,
-                            'serv_usuario' => $usuario,
-                            'servicioCliente_idservicioCliente' => $svcId,
-                            'fecha_accion' => $now,
-                            'motivo' => 'Baja programada al finalizar periodo',
-                            'descripcion' => $comentario . ' (Mantener SIM/Número: ' . ($mantenerSim === 'si' ? 'Sí' : 'No') . ')',
-                            'doc_referencia' => $svc->docReferencia ?? null,
-                            'dispositivo' => null,
-                            'numerotelefono' => null,
-                        ]);
-
-                        DB::table('serviciocliente')
-                            ->where('idservicioCliente', $svcId)
-                            ->update([
-                                'observacion' => DB::raw("CONCAT(COALESCE(observacion, ''), ' [Baja programada fin de periodo]')")
-                            ]);
-                    }
-                }
-            });
+            $processed = $this->cxcService->darDeBajaServicios(
+                $serviceIds,
+                $modo,
+                $comentario,
+                $mantenerSim,
+                $usuario
+            );
         } catch (\Throwable $e) {
             if ($request->wantsJson() || $request->ajax()) {
                 return response()->json(['success' => false, 'message' => 'No se pudo procesar la baja: ' . $e->getMessage()], 422);
@@ -822,7 +2037,9 @@ class CuentasPorCobrarController extends Controller
                 ->with('error', 'No se pudo procesar la baja de los servicios: ' . $e->getMessage());
         }
 
-        $msg = $modo === 'ahora' ? 'Servicio(s) dado(s) de baja correctamente.' : 'Baja programada al finalizar el periodo.';
+        $msg = $processed === 0
+            ? 'No se encontraron servicios activos para dar de baja.'
+            : ($modo === 'ahora' ? 'Servicio(s) dado(s) de baja correctamente.' : 'Baja programada al finalizar el periodo.');
 
         if ($request->wantsJson() || $request->ajax()) {
             return response()->json(['success' => true, 'message' => $msg]);
@@ -833,11 +2050,33 @@ class CuentasPorCobrarController extends Controller
 
     public function getPaymentDetails(string $id): JsonResponse
     {
+        $latestPayment = DB::table('detallecxc as payment_detail')
+            ->leftJoin('bancos as payment_bank', 'payment_bank.idbancos', '=', 'payment_detail.bancos_idbancos')
+            ->selectRaw('payment_detail.cuentasPorCobrar_idcuentasPorCobrar, MAX(payment_detail.iddetalleCXC) as iddetalleCXC')
+            ->where('payment_detail.estado', '1')
+            ->whereNotNull('payment_detail.fechaPago')
+            ->where(function ($query): void {
+                $query->whereNull('payment_bank.tipoMov')
+                    ->orWhere('payment_bank.tipoMov', '<>', 'T');
+            })
+            ->groupBy('payment_detail.cuentasPorCobrar_idcuentasPorCobrar');
+        $latestEvidence = DB::table('evidenciapago')
+            ->selectRaw('bancos_idbancos, MAX(idevidenciaPago) as idevidenciaPago')
+            ->groupBy('bancos_idbancos');
+
         $cxc = DB::table('cuentasporcobrar as c')
             ->leftJoin('cliente as cli', 'cli.idcliente', '=', 'c.cliente_idcliente')
-            ->leftJoin('detallecxc as dc', 'dc.cuentasPorCobrar_idcuentasPorCobrar', '=', 'c.idcuentasPorCobrar')
+            ->leftJoinSub($latestPayment, 'latest_payment', function ($join) {
+                $join->on('latest_payment.cuentasPorCobrar_idcuentasPorCobrar', '=', 'c.idcuentasPorCobrar');
+            })
+            ->leftJoin('detallecxc as dc', 'dc.iddetalleCXC', '=', 'latest_payment.iddetalleCXC')
             ->leftJoin('bancos as b', 'b.idbancos', '=', 'dc.bancos_idbancos')
-            ->leftJoin('evidenciapago as ep', 'ep.idevidenciaPago', '=', 'dc.bancos_idbancos')
+            ->leftJoin('entidadbancaria as eb', 'eb.identidadBancaria', '=', 'b.entidadBancaria_identidadBancaria')
+            ->leftJoin('formapago as fp', 'fp.idformaPago', '=', 'dc.formaPago_idformaPago')
+            ->leftJoinSub($latestEvidence, 'latest_evidence', function ($join) {
+                $join->on('latest_evidence.bancos_idbancos', '=', 'dc.bancos_idbancos');
+            })
+            ->leftJoin('evidenciapago as ep', 'ep.idevidenciaPago', '=', 'latest_evidence.idevidenciaPago')
             ->leftJoin('moneda as m', 'm.idmoneda', '=', 'c.moneda_idmoneda')
             ->select([
                 'c.idcuentasPorCobrar',
@@ -845,19 +2084,22 @@ class CuentasPorCobrarController extends Controller
                 'c.tipoCobro_idtipoCobros',
                 'c.docReferencia',
                 'c.montoOriginal',
-                'c.montoActual',
-                'c.fechaRegistro',
                 'c.fechaCancelacion',
                 'c.estado',
                 'c.descripcion as cxc_descripcion',
-                'c.docFactura',
                 'c.moneda_idmoneda',
+                'cli.detraccion as cliente_detraccion',
+                'dc.iddetalleCXC',
                 DB::raw('COALESCE(cli.razonSocial, cli.nombreComercial, cli.idcliente) as cliente_nombre'),
                 'dc.formaPago_idformaPago',
                 'dc.bancos_idbancos',
                 'dc.fechaPago',
                 'dc.descripcion as detalle_descripcion',
-                'b.informacion as banco_nombre',
+                'b.informacion as pago_descripcion',
+                'b.entidadBancaria_identidadBancaria',
+                'eb.razonSocial as banco_nombre',
+                'fp.detalle as forma_pago_nombre',
+                'm.simbolo as moneda_simbolo',
                 'ep.archivo as comprobante_archivo',
             ])
             ->where('c.idcuentasPorCobrar', $id)
@@ -867,22 +2109,165 @@ class CuentasPorCobrarController extends Controller
             return response()->json(['success' => false, 'message' => 'Cuenta por cobrar no encontrada'], 444);
         }
 
-        $cxc->detalle_descripcion = trim((string) ($cxc->detalle_descripcion ?? ''))
-            ?: trim((string) ($cxc->cxc_descripcion ?? ''));
+        $withholding = DB::table('detallecxc as withholding_detail')
+            ->join('bancos as withholding_bank', 'withholding_bank.idbancos', '=', 'withholding_detail.bancos_idbancos')
+            ->where('withholding_detail.cuentasPorCobrar_idcuentasPorCobrar', $id)
+            ->where('withholding_detail.estado', '1')
+            ->whereNotNull('withholding_detail.fechaPago')
+            ->where('withholding_bank.tipoMov', 'T')
+            ->where(function ($query): void {
+                $query->where('withholding_detail.descripcion', 'like', 'Detracción aplicada%')
+                    ->orWhere('withholding_detail.descripcion', 'like', 'Retención aplicada%');
+            })
+            ->orderByDesc('withholding_detail.iddetalleCXC')
+            ->first([
+                'withholding_detail.descripcion',
+                'withholding_detail.fechaPago',
+                'withholding_bank.monto',
+                'withholding_bank.idbancos',
+                'withholding_bank.informacion',
+            ]);
 
-
-        if (empty($cxc->comprobante_archivo) && !empty($cxc->bancos_idbancos)) {
-            $evid = DB::table('evidenciapago')
-                ->where('bancos_idbancos', $cxc->bancos_idbancos)
-                ->latest('idevidenciaPago')
-                ->value('archivo');
-
-            if ($evid) {
-                $cxc->comprobante_archivo = $evid;
+        $withholdingEvidence = $withholding
+            ? DB::table('evidenciapago')
+                ->where('bancos_idbancos', $withholding->idbancos)
+                ->orderByDesc('idevidenciaPago')
+                ->value('archivo')
+            : null;
+        $withholdingComment = '';
+        if ($withholding && str_contains((string) $withholding->informacion, '|')) {
+            $informationParts = array_map('trim', explode('|', (string) $withholding->informacion));
+            $lastInformationPart = trim((string) end($informationParts));
+            if ($lastInformationPart !== '' && !str_starts_with(mb_strtolower($lastInformationPart, 'UTF-8'), 'se pagó ')) {
+                $withholdingComment = $lastInformationPart;
             }
         }
+        $paymentDescription = trim((string) ($cxc->pago_descripcion ?? ''));
+        $serviceDescription = trim((string) ($cxc->detalle_descripcion ?? ''));
+        if (str_starts_with($serviceDescription, 'Obs: ')) {
+            $paymentDescription = trim(mb_substr($serviceDescription, mb_strlen('Obs: ', 'UTF-8'), null, 'UTF-8'));
+        } elseif (
+            str_starts_with($serviceDescription, 'Pago ')
+            && preg_match('/\((.*)$/u', $paymentDescription, $matches) === 1
+        ) {
+            $paymentDescription = trim($matches[1]);
+            if (str_ends_with($paymentDescription, ')')) {
+                $paymentDescription = substr($paymentDescription, 0, -1);
+            }
+        }
+        $cxc->detalle_descripcion = $paymentDescription;
+        $cxc->fechaFin = $cxc->fechaCancelacion;
+        $cxc->comprobante_url = $cxc->comprobante_archivo
+            ? Storage::disk('public')->url($cxc->comprobante_archivo)
+            : null;
+        $cxc->withholding_applies = (float) ($cxc->montoOriginal ?? 0) > 700;
+        $cxc->withholding_type = $withholding
+            ? (str_starts_with((string) $withholding->descripcion, 'Retención') ? 'retención' : 'detracción')
+            : ((string) ($cxc->cliente_detraccion ?? '') === '1' ? 'retención' : 'detracción');
+        $cxc->withholding_fecha = $withholding?->fechaPago
+            ? Carbon::parse($withholding->fechaPago)->format('Y-m-d')
+            : '';
+        $cxc->withholding_monto = $withholding ? (float) $withholding->monto : null;
+        $currencySymbol = trim((string) ($cxc->moneda_simbolo ?? '')) ?: 'S/';
+        $cxc->withholding_monto_display = $withholding
+            ? $this->formatCurrencyValue((float) $withholding->monto, $currencySymbol)
+            : '';
+        $cxc->withholding_comment = $withholdingComment;
+        $cxc->withholding_comprobante_url = $withholdingEvidence
+            ? Storage::disk('public')->url($withholdingEvidence)
+            : null;
 
         return response()->json(['success' => true, 'data' => $cxc]);
+    }
+
+    public function updatePaymentDetails(Request $request, string $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'descripcion' => ['sometimes', 'nullable', 'string', 'max:70'],
+            'comprobante' => ['sometimes', 'nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+            'eliminar_comprobante' => ['sometimes', 'boolean'],
+        ]);
+
+        $cxc = DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $id)
+            ->first(['estado']);
+        if (!$cxc) {
+            return response()->json(['success' => false, 'message' => 'Cuenta por cobrar no encontrada.'], 404);
+        }
+        if (!in_array(strtoupper((string) $cxc->estado), ['3', 'CANCELADO'], true)) {
+            return response()->json(['success' => false, 'message' => 'Solo se pueden editar los datos de una cuenta cancelada.'], 422);
+        }
+
+        $payment = DB::table('detallecxc')
+            ->where('cuentasPorCobrar_idcuentasPorCobrar', $id)
+            ->where('estado', '1')
+            ->whereNotNull('fechaPago')
+            ->orderByDesc('iddetalleCXC')
+            ->first(['iddetalleCXC', 'bancos_idbancos', 'descripcion']);
+        if (!$payment || !$payment->bancos_idbancos) {
+            return response()->json(['success' => false, 'message' => 'No se encontró el movimiento bancario del pago.'], 422);
+        }
+
+        $newPath = null;
+        $oldPath = null;
+        $removeProof = $request->boolean('eliminar_comprobante');
+
+        try {
+            DB::transaction(function () use ($request, $validated, $payment, &$newPath, &$oldPath, $removeProof): void {
+                $bankQuery = DB::table('bancos')
+                    ->where('idbancos', $payment->bancos_idbancos)
+                    ->lockForUpdate();
+                if (!$bankQuery->exists()) {
+                    throw new \RuntimeException('No se encontró el movimiento bancario del pago.');
+                }
+                if (array_key_exists('descripcion', $validated)) {
+                    $description = trim((string) ($validated['descripcion'] ?? ''));
+                    $bankQuery->update(['informacion' => $description]);
+                    if (str_starts_with((string) $payment->descripcion, 'Obs: ')) {
+                        DB::table('detallecxc')
+                            ->where('iddetalleCXC', $payment->iddetalleCXC)
+                            ->update(['descripcion' => mb_substr('Obs: ' . $description, 0, 80)]);
+                    }
+                }
+
+                $evidenceQuery = DB::table('evidenciapago')
+                    ->where('bancos_idbancos', $payment->bancos_idbancos)
+                    ->orderByDesc('idevidenciaPago');
+                $evidence = $evidenceQuery->first(['idevidenciaPago', 'archivo']);
+
+                if ($request->hasFile('comprobante')) {
+                    $newPath = $request->file('comprobante')->store('comprobantes-pago/cxc', 'public');
+                    if (!$newPath) {
+                        throw new \RuntimeException('No se pudo guardar el comprobante de pago.');
+                    }
+                    $oldPath = $evidence?->archivo;
+                    if ($evidence) {
+                        DB::table('evidenciapago')->where('idevidenciaPago', $evidence->idevidenciaPago)
+                            ->update(['archivo' => $newPath, 'fechaCarga' => now()]);
+                    } else {
+                        DB::table('evidenciapago')->insert([
+                            'archivo' => $newPath,
+                            'fechaCarga' => now(),
+                            'bancos_idbancos' => $payment->bancos_idbancos,
+                        ]);
+                    }
+                } elseif ($removeProof && $evidence) {
+                    $oldPath = $evidence->archivo;
+                    DB::table('evidenciapago')->where('idevidenciaPago', $evidence->idevidenciaPago)->delete();
+                }
+            });
+        } catch (\Throwable $exception) {
+            if ($newPath) {
+                Storage::disk('public')->delete($newPath);
+            }
+            return response()->json(['success' => false, 'message' => $exception->getMessage()], 422);
+        }
+
+        if ($oldPath && Storage::disk('public')->exists($oldPath) && !Storage::disk('public')->delete($oldPath)) {
+            return response()->json(['success' => false, 'message' => 'Los datos se actualizaron, pero no se pudo eliminar el archivo anterior.'], 500);
+        }
+
+        return response()->json(['success' => true, 'message' => 'Los datos del pago se actualizaron correctamente.']);
     }
 
     public function registrarFactura(Request $request, string $id)
@@ -894,10 +2279,12 @@ class CuentasPorCobrarController extends Controller
             'servicio_ids.*' => ['integer', 'exists:serviciocliente,idservicioCliente'],
             'cxc_ids' => ['nullable', 'array'],
             'cxc_ids.*' => ['integer', 'exists:cuentasporcobrar,idcuentasPorCobrar'],
+            'nota_credito_ids' => ['nullable', 'array', 'max:1'],
+            'nota_credito_ids.*' => ['integer', 'distinct', 'exists:nota_credito,idnotacredito'],
             'usar_saldo_favor' => ['sometimes', 'boolean'],
             'docReferencia' => ['nullable', 'string', 'max:50'],
-            'descripcionFactura' => ['nullable', 'string', 'max:100'],
-            'descripcionPago' => ['nullable', 'string', 'max:100'],
+            'descripcionFactura' => ['nullable', 'string', 'max:70'],
+            'descripcionPago' => ['nullable', 'string', 'max:70'],
             'realizar_cobro' => ['nullable', 'in:0,1'],
             'monto_factura' => ['nullable', 'numeric', 'min:0.01'],
             'tipoCobro_idtipoCobros' => ['required_if:realizar_cobro,1', 'nullable', 'integer', 'exists:tipocobro,idtipoCobros'],
@@ -920,6 +2307,9 @@ class CuentasPorCobrarController extends Controller
             'factura_cuotas_fechas' => ['nullable', 'array'],
             'factura_cuotas_fechas.*' => ['nullable', 'date'],
             'comprobante' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+            'withholding_proof' => ['required_if:factura_withholding_decision,paid', 'nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+            'withholding_fecha' => ['nullable', 'date'],
+            'withholding_description' => ['nullable', 'string', 'max:70'],
         ]);
 
         try {
@@ -944,23 +2334,27 @@ class CuentasPorCobrarController extends Controller
             }
 
             $paymentResult = DB::transaction(function () use ($id, $cxcIds, $file, $docText, $serviceIds, $validated, $request, $realizarCobro): ?array {
+                $this->cxcService->linkServicesToReceivables($cxcIds, $serviceIds, (int) $id);
+
                 foreach ($cxcIds as $targetCxcId) {
                     $this->cxcService->registrarFactura(
                         $targetCxcId,
-                        $file ?? ($docText ?: 'FAC-' . time()),
+                        $file ?? '',
                         $docText,
                         !empty($serviceIds) ? $serviceIds : null
                     );
 
-                    if (!empty($validated['descripcionFactura'])
-                        || ((int) $targetCxcId === (int) $id && !$realizarCobro && (int) ($validated['adelanto_meses'] ?? 0) > 1)) {
+                    if (
+                        !empty($validated['descripcionFactura'])
+                        || ((int) $targetCxcId === (int) $id && !$realizarCobro && (int) ($validated['adelanto_meses'] ?? 0) > 1)
+                    ) {
                         $description = $validated['descripcionFactura'] ?? '';
                         $invoiceDescription = (int) $targetCxcId === (int) $id && !$realizarCobro
                             ? CxcService::descriptionWithAdvanceMonths(
                                 $description,
                                 (int) ($validated['adelanto_meses'] ?? 0)
                             )
-                            : mb_substr($description, 0, 50);
+                            : mb_substr($description, 0, 70);
                         DB::table('cuentasporcobrar')
                             ->where('idcuentasPorCobrar', $targetCxcId)
                             ->update(['descripcion' => $invoiceDescription]);
@@ -968,24 +2362,7 @@ class CuentasPorCobrarController extends Controller
                 }
 
                 if (!$realizarCobro) {
-                    if (!empty($validated['monto_factura'])) {
-                        DB::table('cuentasporcobrar')
-                            ->where('idcuentasPorCobrar', $id)
-                            ->update([
-                                'montoOriginal' => round((float) $validated['monto_factura'], 2),
-                                'montoActual' => round((float) $validated['monto_factura'], 2),
-                            ]);
-                    }
                     return null;
-                }
-
-                if ((int) ($validated['adelanto_meses'] ?? 0) <= 1 && !empty($validated['monto_factura'])) {
-                    DB::table('cuentasporcobrar')
-                        ->where('idcuentasPorCobrar', $id)
-                        ->update([
-                            'montoOriginal' => round((float) $validated['monto_factura'], 2),
-                            'montoActual' => round((float) $validated['monto_factura'], 2),
-                        ]);
                 }
 
                 $paymentData = [
@@ -1002,7 +2379,11 @@ class CuentasPorCobrarController extends Controller
                     'monto_factura' => $validated['monto_factura'] ?? null,
                     'modo_pago' => $request->input('factura_modo_pago', 'total'),
                     'usar_saldo_favor' => $request->boolean('usar_saldo_favor'),
+                    'nota_credito_ids' => $validated['nota_credito_ids'] ?? [],
                     'withholding_decision' => $validated['factura_withholding_decision'] ?? null,
+                    'withholding_proof' => $request->file('withholding_proof'),
+                    'withholding_fecha' => $validated['withholding_fecha'] ?? null,
+                    'withholding_description' => $validated['withholding_description'] ?? '',
                     'canCuotas' => $validated['canCuotas'] ?? null,
                     'cuotas_montos' => $request->input('factura_cuotas_montos', []),
                     'cuotas_fechas' => $request->input('factura_cuotas_fechas', []),
@@ -1037,6 +2418,7 @@ class CuentasPorCobrarController extends Controller
 
     public function cobrarServicios(Request $request)
     {
+        $isWithholdingCompletion = $request->boolean('completar_detraccion_pendiente');
         $request->merge([
             'payment_currency_mode' => $request->input('payment_currency_mode', 'same'),
         ]);
@@ -1074,13 +2456,16 @@ class CuentasPorCobrarController extends Controller
         $validated = $request->validate([
             'cxc_ids' => ['nullable', 'array'],
             'cxc_ids.*' => ['integer', 'exists:cuentasporcobrar,idcuentasPorCobrar'],
+            'nota_credito_ids' => ['nullable', 'array', 'max:1'],
+            'nota_credito_ids.*' => ['integer', 'distinct', 'exists:nota_credito,idnotacredito'],
             'servicio_ids' => ['nullable', 'array'],
             'servicio_ids.*' => ['integer', 'distinct', 'exists:serviciocliente,idservicioCliente'],
-            'idcuentasPorCobrar' => ['nullable'],
-            'tipoCobro_idtipoCobros' => ['required', 'integer'],
-            'formaPago_idformaPago' => ['required', 'integer'],
-            'entidadBancaria_identidadBancaria' => ['required', 'integer', 'exists:entidadbancaria,identidadBancaria'],
-            'modo_pago' => ['required', 'in:total,parcial'],
+            'idcuentasPorCobrar' => [$isWithholdingCompletion ? 'required' : 'nullable', 'exists:cuentasporcobrar,idcuentasPorCobrar'],
+            'completar_detraccion_pendiente' => ['nullable', 'boolean'],
+            'tipoCobro_idtipoCobros' => [$isWithholdingCompletion ? 'nullable' : 'required', 'integer'],
+            'formaPago_idformaPago' => [$isWithholdingCompletion ? 'nullable' : 'required', 'integer'],
+            'entidadBancaria_identidadBancaria' => [$isWithholdingCompletion ? 'nullable' : 'required', 'integer', 'exists:entidadbancaria,identidadBancaria'],
+            'modo_pago' => [$isWithholdingCompletion ? 'nullable' : 'required', 'in:total,parcial'],
             'usar_saldo_favor' => ['sometimes', 'boolean'],
             'moneda_idmoneda' => ['nullable', 'integer', 'exists:moneda,idmoneda'],
             'currency_selector' => ['nullable', 'integer', 'exists:moneda,idmoneda'],
@@ -1090,6 +2475,7 @@ class CuentasPorCobrarController extends Controller
             'tipo_cambio' => ['nullable', 'numeric', 'gt:0'],
             'withholding_decision' => ['nullable', 'in:paid,pending,full_pending'],
             'montoPago' => ['nullable', 'numeric', 'min:0'],
+            'monto_factura' => ['nullable', 'numeric', 'min:0'],
             'canCuotas' => ['nullable', 'integer', 'min:1', 'max:60'],
             'cuotas_montos' => ['nullable', 'array'],
             'cuotas_montos.*' => ['nullable', 'numeric', 'gt:0'],
@@ -1098,9 +2484,12 @@ class CuentasPorCobrarController extends Controller
             'fechaPago' => ['nullable', 'date'],
             'fechaFin' => ['nullable', 'date'],
             'adelanto_meses' => ['nullable', 'integer', 'min:1', 'max:120'],
-            'descripcion' => ['required', 'string', 'max:100'],
+            'descripcion' => ['nullable', 'string', 'max:70'],
             'docReferencia' => ['nullable', 'string', 'max:15'],
-            'comprobante' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+            'comprobante' => [$isWithholdingCompletion ? 'required' : 'nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+            'withholding_proof' => ['required_if:withholding_decision,paid', 'nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+            'withholding_fecha' => ['nullable', 'date'],
+            'withholding_description' => ['nullable', 'string', 'max:70'],
         ]);
 
         $validated['moneda_idmoneda'] = $request->input('moneda_idmoneda') ?: ($validated['moneda_idmoneda'] ?? null);
@@ -1132,8 +2521,27 @@ class CuentasPorCobrarController extends Controller
         }
 
         try {
+            if ($isWithholdingCompletion) {
+                $result = $this->cxcService->registrarDetraccionPendiente(
+                    (int) $validated['idcuentasPorCobrar'],
+                    $request->file('comprobante'),
+                    $validated['servicio_ids'] ?? [],
+                    $validated['descripcion'] ?? '',
+                    $validated['fechaPago'] ?? null,
+                    true
+                );
+                $message = 'Comprobante registrado. La ' . $result['tipoDeduccion'] . ' quedó pagada y la cuenta fue cancelada.';
+
+                if ($request->wantsJson() || $request->ajax()) {
+                    return response()->json(['success' => true, 'message' => $message, 'result' => $result]);
+                }
+
+                return redirect()->route('modules.cuentasporcobrar', ['tab' => 'servicios'])
+                    ->with('success', $message);
+            }
+
             $file = $request->file('comprobante');
-            
+
             $cxcIds = $validated['cxc_ids'] ?? [];
             if (empty($cxcIds) && !empty($validated['idcuentasPorCobrar'])) {
                 $cxcIds = [(int) $validated['idcuentasPorCobrar']];
@@ -1152,7 +2560,7 @@ class CuentasPorCobrarController extends Controller
 
                     $cxcId = DB::table('cuentasporcobrar')
                         ->where('cliente_idcliente', $firstService->cliente_idcliente)
-                        ->whereIn('estado', ['PENDIENTE', 'VENCIDO', 'FACTURADO', 'Pendiente Pago parcial', 'Pendiente a credito', '1', '2'])
+                        ->whereIn('estado', ['PENDIENTE', 'VENCIDO', 'FACTURADO', 'NUEVO', 'PagoCredito', 'Pendiente Pago parcial', 'Pendiente a credito', '1', '2'])
                         ->where('descripcion', 'like', '%' . $periodRange . '%')
                         ->orderByDesc('fechaRegistro')
                         ->value('idcuentasPorCobrar');
@@ -1176,7 +2584,7 @@ class CuentasPorCobrarController extends Controller
             if (empty($cxcIds) && $request->input('cliente_idcliente')) {
                 $cxcId = DB::table('cuentasporcobrar')
                     ->where('cliente_idcliente', $request->input('cliente_idcliente'))
-                    ->whereIn('estado', ['PENDIENTE', 'VENCIDO', 'FACTURADO', 'Pendiente Pago parcial', 'Pendiente a credito', '1', '2'])
+                    ->whereIn('estado', ['PENDIENTE', 'VENCIDO', 'FACTURADO', 'NUEVO', 'PagoCredito', 'Pendiente Pago parcial', 'Pendiente a credito', '1', '2'])
                     ->orderByDesc('fechaRegistro')
                     ->value('idcuentasPorCobrar');
                 if ($cxcId) {
@@ -1201,9 +2609,14 @@ class CuentasPorCobrarController extends Controller
                 'monto_cancelado' => $validated['monto_cancelado'] ?? null,
                 'tipo_cambio' => $validated['tipo_cambio'] ?? null,
                 'modo_pago' => $validated['modo_pago'],
-                'montoPago' => $validated['montoPago'] ?? 0,
+                'montoPago' => $validated['montoPago'] ?? null,
+                'monto_factura' => $validated['monto_factura'] ?? null,
                 'usar_saldo_favor' => $request->boolean('usar_saldo_favor'),
+                'nota_credito_ids' => $validated['nota_credito_ids'] ?? [],
                 'withholding_decision' => $validated['withholding_decision'] ?? null,
+                'withholding_proof' => $request->file('withholding_proof'),
+                'withholding_fecha' => $validated['withholding_fecha'] ?? null,
+                'withholding_description' => $validated['withholding_description'] ?? '',
                 'canCuotas' => $validated['canCuotas'] ?? null,
                 'cuotas_montos' => $request->input('cuotas_montos', []),
                 'cuotas_fechas' => $request->input('cuotas_fechas', []),
@@ -1211,7 +2624,7 @@ class CuentasPorCobrarController extends Controller
                 'fechaFin' => $validated['fechaFin'] ?? null,
                 'adelanto_meses' => $validated['adelanto_meses'] ?? null,
                 'docReferencia' => $validated['docReferencia'] ?? '',
-                'descripcion' => $validated['descripcion'],
+                'descripcion' => $validated['descripcion'] ?? '',
                 'servicio_ids' => $serviceIds,
                 'renewal_cxc_id' => (int) ($validated['idcuentasPorCobrar'] ?? ($cxcIds[0] ?? 0)),
             ];
@@ -1232,6 +2645,25 @@ class CuentasPorCobrarController extends Controller
             return redirect()->route('modules.cuentasporcobrar', ['tab' => 'servicios'])
                 ->withInput()->with('error', $exception->getMessage());
         }
+    }
+
+    public function getNotasCreditoCliente(string $clienteId): JsonResponse
+    {
+        $validated = request()->validate([
+            'moneda_idmoneda' => ['required', 'integer', 'exists:moneda,idmoneda'],
+        ]);
+
+        if (!DB::table('cliente')->where('idcliente', $clienteId)->exists()) {
+            return response()->json(['success' => false, 'message' => 'Cliente no encontrado.'], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'notas_credito' => $this->cxcService->notasCreditoDisponibles(
+                $clienteId,
+                (int) $validated['moneda_idmoneda']
+            ),
+        ]);
     }
 
     public function getDeudasCliente(string $clienteId): JsonResponse
@@ -1278,7 +2710,7 @@ class CuentasPorCobrarController extends Controller
         $hasCurrentOrFuturePeriod = !$currentCxcId || $currentCxcId === '0'
             ? true
             : $currentPeriodEnd !== null
-                && $currentPeriodEnd->copy()->startOfMonth()->gte(Carbon::today()->startOfMonth());
+            && $currentPeriodEnd->copy()->startOfMonth()->gte(Carbon::today()->startOfMonth());
         $currencyId = $currentCxc
             ? (int) $currentCxc->moneda_idmoneda
             : null;
@@ -1288,7 +2720,7 @@ class CuentasPorCobrarController extends Controller
         $query = DB::table('cuentasporcobrar as c')
             ->select('c.idcuentasPorCobrar', 'c.cliente_idcliente', 'c.descripcion', 'c.montoActual', 'c.montoOriginal', 'c.fechaRegistro', 'c.fechaCancelacion', 'c.estado', 'c.docReferencia', 'c.moneda_idmoneda')
             ->where('c.cliente_idcliente', $clienteId)
-            ->whereIn('c.estado', ['1', '2', '4', 'PENDIENTE', 'FACTURADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito'])
+            ->whereIn('c.estado', ['1', '2', '4', 'NUEVO', 'PagoCredito', 'PENDIENTE', 'FACTURADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito'])
             ->where('c.montoActual', '>', 0)
             ->orderByDesc('c.fechaCancelacion')
             ->orderByDesc('c.idcuentasPorCobrar');
@@ -1369,7 +2801,7 @@ class CuentasPorCobrarController extends Controller
             $cxc->mes_display = $periodEndDate
                 ? ucfirst($periodEndDate->monthName) . ' ' . $periodEndDate->year
                 : 'Periodo anterior';
-            $cxc->montoActualDisplay = number_format((float)$cxc->montoActual, 2);
+            $cxc->montoActualDisplay = number_format((float) $cxc->montoActual, 2);
             $paymentDate = $paymentDatesByCxc->get($cxc->idcuentasPorCobrar);
             $cxc->fechaDisplay = $paymentDate ? Carbon::parse($paymentDate)->format('d/m/Y') : '-';
             return $cxc;
@@ -1380,7 +2812,7 @@ class CuentasPorCobrarController extends Controller
             ->select('detraccion')
             ->first();
 
-        $esRetencion = $cliente && (string)($cliente->detraccion ?? '') === '1';
+        $esRetencion = $cliente && (string) ($cliente->detraccion ?? '') === '1';
         $saldoFavorDisponible = $currencyId
             ? $this->cxcService->saldoFavorDisponible($clienteId, $currencyId)
             : 0.0;
@@ -1398,25 +2830,37 @@ class CuentasPorCobrarController extends Controller
     {
         $validated = $request->validate([
             'motivo' => ['required', 'string', 'max:255'],
+            'cxc_ids' => ['sometimes', 'array', 'min:1', 'max:50'],
+            'cxc_ids.*' => ['integer', 'distinct', 'exists:cuentasporcobrar,idcuentasPorCobrar'],
         ]);
 
         try {
-            $result = $this->cxcService->revertirPagoCancelado(
-                $id,
-                (string) $request->session()->get('erp_auth.usuario', 'anonimo'),
-                $validated['motivo']
-            );
+            $usuario = (string) $request->session()->get('erp_auth.usuario', 'anonimo');
+            if (isset($validated['cxc_ids']) && !in_array((int) $id, array_map('intval', $validated['cxc_ids']), true)) {
+                throw new \RuntimeException('La cuenta principal debe formar parte del grupo que se va a revertir.');
+            }
+            $result = isset($validated['cxc_ids'])
+                ? $this->cxcService->revertirPagoCanceladoGrupo(
+                    $validated['cxc_ids'],
+                    $usuario,
+                    $validated['motivo']
+                )
+                : $this->cxcService->revertirPagoCancelado($id, $usuario, $validated['motivo']);
 
             if ($request->wantsJson() || $request->ajax()) {
                 return response()->json([
                     'success' => true,
-                    'message' => 'Pago revertido correctamente. La cuenta volvió a estado ' . ($result['estado'] === '4' ? 'VENCIDO.' : 'PENDIENTE.'),
+                    'message' => 'Pago revertido correctamente. '
+                        . ((int) ($result['count'] ?? 1) > 1 ? 'Se revirtieron ' . $result['count'] . ' cuentas del grupo. ' : '')
+                        . 'La cuenta volvió a estado ' . ($result['estado'] === '4' ? 'VENCIDO.' : 'PENDIENTE.'),
                     'result' => $result,
                 ]);
             }
 
             return redirect()->route('modules.cuentasporcobrar', ['tab' => 'servicios'])
-                ->with('success', 'Pago revertido correctamente. La cuenta volvió a estado ' . ($result['estado'] === '4' ? 'VENCIDO.' : 'PENDIENTE.'));
+                ->with('success', 'Pago revertido correctamente. '
+                    . ((int) ($result['count'] ?? 1) > 1 ? 'Se revirtieron ' . $result['count'] . ' cuentas del grupo. ' : '')
+                    . 'La cuenta volvió a estado ' . ($result['estado'] === '4' ? 'VENCIDO.' : 'PENDIENTE.'));
         } catch (\Throwable $exception) {
             if ($request->wantsJson() || $request->ajax()) {
                 return response()->json(['success' => false, 'message' => $exception->getMessage()], 422);
@@ -1499,7 +2943,7 @@ class CuentasPorCobrarController extends Controller
                 ['name' => 'cliente_idcliente', 'type' => 'select', 'label' => 'Cliente', 'required' => true, 'tomSelect' => true, 'optionsData' => $this->clienteOptions(), 'optionKey' => 'idcliente', 'optionLabel' => 'cliente_label', 'placeholder' => 'Selecciona cliente'],
                 ['name' => 'tipoCobro_idtipoCobros', 'type' => 'select', 'label' => 'Tipo de cobro', 'required' => true, 'tomSelect' => true, 'optionsData' => $this->tipoCobroOptions(), 'optionKey' => 'idtipoCobros', 'optionLabel' => 'label', 'placeholder' => 'Selecciona tipo de cobro'],
                 ['name' => 'docReferencia', 'type' => 'text', 'label' => 'Documento referencia', 'required' => false, 'maxlength' => 15, 'helpText' => 'Número de documento o referencia.'],
-                ['name' => 'descripcion', 'type' => 'text', 'label' => 'Descripción', 'required' => false, 'maxlength' => 50, 'helpText' => 'Breve descripción.'],
+                ['name' => 'descripcion', 'type' => 'text', 'label' => 'Descripción', 'required' => false, 'maxlength' => 70, 'helpText' => 'Breve descripción.'],
                 $this->decimalFieldDefinition('montoOriginal', 'Monto original', data_get($record, 'montoOriginal'), true),
                 $this->decimalFieldDefinition('montoActual', 'Monto actual', data_get($record, 'montoActual'), true),
                 ['name' => 'canCuotas', 'type' => 'number', 'label' => 'Cuotas', 'required' => false, 'inputmode' => 'numeric', 'maxlength' => 5],
@@ -1517,7 +2961,12 @@ class CuentasPorCobrarController extends Controller
                         ['value' => '4', 'label' => 'Vencido'],
                         ['value' => 'Pendiente Pago parcial', 'label' => 'Pendiente Pago parcial'],
                         ['value' => 'Pendiente a credito', 'label' => 'Pendiente a credito'],
-                        ['value' => 'Cancelado Detracción', 'label' => 'Cancelado Detracción'],
+                        ['value' => 'NUEVO', 'label' => 'Nuevo'],
+                        ['value' => 'PagoCredito', 'label' => 'PagoCredito'],
+                        ['value' => 'Aprobado', 'label' => 'Aprobado'],
+                        ['value' => 'Pendiente Autodetracción', 'label' => 'Pendiente Autodetracción'],
+                        ['value' => 'Pendiente a Detracción', 'label' => 'Pendiente a Detracción'],
+                        ['value' => 'Pendiente a Retención', 'label' => 'Pendiente a Retención'],
                     ],
                     'placeholder' => 'Selecciona estado'
                 ],
@@ -1535,7 +2984,7 @@ class CuentasPorCobrarController extends Controller
         $currentState = DB::table('cuentasporcobrar')
             ->where('idcuentasPorCobrar', $id)
             ->value('estado');
-        if (in_array((string) $currentState, ['2', '3', '4', 'FACTURADO', 'CANCELADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito', 'Cancelado Detracción'], true)) {
+        if (in_array((string) $currentState, ['2', '3', '4', 'NUEVO', 'PagoCredito', 'Aprobado', 'FACTURADO', 'CANCELADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito', 'Cancelado Detracción', 'Pendiente Autodetracción', 'Pendiente a Detracción', 'Pendiente a Retención'], true)) {
             return redirect()->route('modules.cuentasporcobrar')
                 ->with('error', 'Las cuentas históricas no se pueden editar.');
         }
@@ -1544,13 +2993,13 @@ class CuentasPorCobrarController extends Controller
             'cliente_idcliente' => ['required', 'string', 'exists:cliente,idcliente'],
             'tipoCobro_idtipoCobros' => ['required', 'integer', 'exists:tipocobro,idtipoCobros'],
             'docReferencia' => ['nullable', 'string', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX],
-            'descripcion' => ['nullable', 'string', 'max:50', 'regex:' . self::SAFE_TEXT_REGEX],
+            'descripcion' => ['nullable', 'string', 'max:80', 'regex:' . self::SAFE_TEXT_REGEX],
             'montoOriginal' => ['required', 'numeric', 'min:0'],
             'montoActual' => ['required', 'numeric', 'min:0'],
             'canCuotas' => ['nullable', 'numeric', 'min:1'],
             'fechaRegistro' => ['nullable', 'date'],
             'fechaCancelacion' => ['nullable', 'date'],
-            'estado' => ['required', 'in:1,2,3,4,Pendiente Pago parcial,Pendiente a credito,Cancelado Detracción'],
+            'estado' => ['required', 'in:1,2,3,4,NUEVO,PagoCredito,Aprobado,Pendiente Pago parcial,Pendiente a credito,Cancelado Detracción,Pendiente Autodetracción,Pendiente a Detracción,Pendiente a Retención'],
         ]);
         $validated = $this->normalizeDecimalFields($validated);
 
@@ -1671,28 +3120,62 @@ class CuentasPorCobrarController extends Controller
         return trim($symbol) . ' ' . number_format((float) $value, 2, '.', ',');
     }
 
+    public function anularCotizaciones(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'quotation_ids' => ['required', 'array', 'min:1', 'max:100'],
+            'quotation_ids.*' => ['required', 'string', 'max:100', 'distinct'],
+        ]);
+
+        $quoteIds = array_map('strval', $validated['quotation_ids']);
+        foreach ($quoteIds as $quoteId) {
+            if (
+                $redirect = $this->assertLockAvailable(
+                    $request,
+                    'ventas.cotizaciones',
+                    $quoteId,
+                    'registro de cotización',
+                    'modules.cuentasporcobrar'
+                )
+            ) {
+                return $redirect->with('error', 'No se pudo anular la selección porque una cotización está bloqueada.');
+            }
+        }
+
+        $result = $this->cotizacionService->anularCotizaciones($quoteIds);
+        if (!$result['success']) {
+            return redirect()
+                ->route('modules.cuentasporcobrar', ['tab' => 'cotizaciones'])
+                ->with('error', $result['message']);
+        }
+
+        foreach ($result['quote_ids'] as $quoteId) {
+            $this->publishResourceEvent('ventas.cotizaciones', $quoteId, 'updated', [
+                'estado' => CotizacionService::STATE_ANULADO,
+            ]);
+        }
+        foreach ($result['ticket_ids'] as $ticketId) {
+            $this->publishResourceEvent('ticket', (string) $ticketId, 'updated', [
+                'estado' => 'Resuelto',
+                'motivo' => 'cotizacion_anulada',
+            ]);
+        }
+
+        return redirect()
+            ->route('modules.cuentasporcobrar', ['tab' => 'cotizaciones'])
+            ->with('success', count($result['quote_ids']) === 1
+                ? 'Cotización anulada correctamente.'
+                : 'Cotizaciones anuladas correctamente.');
+    }
+
     private function applyQuotationFilters($query, Request $request, string $defaultStatus = ''): void
     {
-        $search = trim((string) $request->query('quote_q', ''));
-        $group = trim((string) $request->query('quote_group', ''));
         $client = trim((string) $request->query('quote_client', ''));
-        $currency = trim((string) $request->query('quote_currency', ''));
+        $number = trim((string) $request->query('quote_number', ''));
+        $paymentFormat = trim((string) $request->query('quote_payment_format', ''));
+        $validity = trim((string) $request->query('quote_validity', ''));
         $service = trim((string) $request->query('quote_service', ''));
         $date = trim((string) $request->query('quote_date', ''));
-
-        if ($search !== '') {
-            $term = '%' . $search . '%';
-            $query->where(function ($builder) use ($term) {
-                $builder->where('c.nroCotizacion', 'like', $term)
-                    ->orWhere('c.batch_id', 'like', $term)
-                    ->orWhere('cli.razonSocial', 'like', $term)
-                    ->orWhere('cli.nombreComercial', 'like', $term);
-            });
-        }
-
-        if ($group !== '') {
-            $query->where('c.batch_id', 'like', '%' . $group . '%');
-        }
 
         if ($client !== '') {
             $term = '%' . $client . '%';
@@ -1703,8 +3186,16 @@ class CuentasPorCobrarController extends Controller
             });
         }
 
-        if ($currency !== '') {
-            $query->where('m.detalle', 'like', '%' . $currency . '%');
+        if ($number !== '') {
+            $query->where('c.nroCotizacion', 'like', '%' . $number . '%');
+        }
+
+        if (ctype_digit($paymentFormat)) {
+            $query->where('c.formaPago_idformaPago', (int) $paymentFormat);
+        }
+
+        if (ctype_digit($validity)) {
+            $query->where('c.vigenciaOferta_idvigenciaOferta', (int) $validity);
         }
 
         if (in_array($service, ['EQUIPAMIENTO', 'PLANES', 'SERVICIOS TÉCNICOS'], true)) {
@@ -1712,10 +3203,70 @@ class CuentasPorCobrarController extends Controller
         }
 
         $status = trim((string) $request->query('quote_status', $defaultStatus));
-        if ($status === '2') {
-            $query->where('c.estado', '2');
-        } elseif ($status === '1') {
-            $query->where('c.estado', '1');
+        $status = ['1' => 'pending', '2' => 'approved', '' => 'all'][$status] ?? $status;
+        $quoteCxcMatch = DB::connection()->getDriverName() === 'sqlite'
+            ? "(quote_cxc.descripcion = 'COTIZACION:' || c.nroCotizacion OR quote_cxc.descripcion LIKE '%' || c.nroCotizacion)"
+            : "(quote_cxc.descripcion = CONCAT('COTIZACION:', c.nroCotizacion) OR quote_cxc.descripcion LIKE CONCAT('%', c.nroCotizacion))";
+        if ($status === 'pending') {
+            $query->where(function ($builder) use ($quoteCxcMatch): void {
+                $builder->where('c.estado', '1')
+                    ->orWhereExists(function ($subquery) use ($quoteCxcMatch): void {
+                        $subquery->selectRaw('1')
+                            ->from('cuentasporcobrar as quote_cxc')
+                            ->whereRaw($quoteCxcMatch)
+                            ->whereRaw('LOWER(quote_cxc.estado) LIKE ?', ['%pendiente%']);
+                    });
+            });
+        } elseif (in_array($status, ['pending_credit', 'pending_autodetraccion', 'pending_detraccion', 'pending_retencion'], true)) {
+            $query->whereExists(function ($subquery) use ($status, $quoteCxcMatch): void {
+                $subquery->selectRaw('1')
+                    ->from('cuentasporcobrar as quote_cxc')
+                    ->whereRaw($quoteCxcMatch);
+
+                if ($status === 'pending_credit') {
+                    $subquery->where(function ($stateQuery): void {
+                        $stateQuery->whereRaw('LOWER(quote_cxc.estado) LIKE ?', ['%pendiente%credito%'])
+                            ->orWhereRaw("LOWER(quote_cxc.estado) = 'pagocredito'");
+                    });
+                } elseif (in_array($status, ['pending_autodetraccion', 'pending_detraccion'], true)) {
+                    $expectedGrossPayment = $status === 'pending_autodetraccion';
+                    $paymentDetailExists = function ($paymentDetail) use ($expectedGrossPayment): void {
+                        $paymentDetail->selectRaw('1')
+                            ->from('detallecxc as pending_detail')
+                            ->join('bancos as pending_bank', 'pending_bank.idbancos', '=', 'pending_detail.bancos_idbancos')
+                            ->whereColumn('pending_detail.cuentasPorCobrar_idcuentasPorCobrar', 'quote_cxc.idcuentasPorCobrar')
+                            ->where('pending_detail.estado', '0')
+                            ->where('pending_detail.descripcion', 'like', 'Detracción pendiente:%')
+                            ->whereRaw(
+                                $expectedGrossPayment
+                                ? 'pending_bank.monto + 0.01 >= quote_cxc.montoOriginal'
+                                : 'pending_bank.monto + 0.01 < quote_cxc.montoOriginal'
+                            );
+                    };
+                    if ($expectedGrossPayment) {
+                        $subquery->where(function ($stateQuery) use ($paymentDetailExists): void {
+                            $stateQuery->where('quote_cxc.estado', 'Pendiente Autodetracción')
+                                ->orWhere(function ($legacyStateQuery) use ($paymentDetailExists): void {
+                                    $legacyStateQuery->where('quote_cxc.estado', 'Pendiente a Detracción')
+                                        ->whereExists($paymentDetailExists);
+                                });
+                        });
+                    } else {
+                        $subquery->where('quote_cxc.estado', 'Pendiente a Detracción')
+                            ->whereExists($paymentDetailExists);
+                    }
+                } else {
+                    $subquery->where('quote_cxc.estado', 'Pendiente a Retención');
+                }
+            });
+        } elseif ($status === 'approved') {
+            $query->where('c.estado', '2')
+                ->whereNotExists(function ($subquery) use ($quoteCxcMatch): void {
+                    $subquery->selectRaw('1')
+                        ->from('cuentasporcobrar as quote_cxc')
+                        ->whereRaw($quoteCxcMatch)
+                        ->whereRaw('LOWER(quote_cxc.estado) LIKE ?', ['%pendiente%']);
+                });
         } else {
             $query->whereIn('c.estado', ['1', '2']);
         }
@@ -1725,17 +3276,10 @@ class CuentasPorCobrarController extends Controller
         }
     }
 
-    private function buildPaymentFileName(string $quoteId, string $extension): string
-    {
-        $safeId = preg_replace('/[^A-Za-z0-9_-]+/', '_', $quoteId) ?: 'cotizacion';
-        $safeExtension = strtolower(preg_replace('/[^A-Za-z0-9]+/', '', $extension) ?: 'bin');
-
-        return $safeId . '_' . now()->format('YmdHis') . '_' . bin2hex(random_bytes(4)) . '.' . $safeExtension;
-    }
-
     private function currencySymbol(?string $currency): string
     {
-        $currency = mb_strtolower(trim((string) ($currency ?? '')), 'UTF-8');
+        $rawCurrency = trim((string) ($currency ?? ''));
+        $currency = mb_strtolower($rawCurrency, 'UTF-8');
 
         if (str_contains($currency, 'dolar') || str_contains($currency, 'dólar') || str_contains($currency, '$')) {
             return '$';
@@ -1745,38 +3289,19 @@ class CuentasPorCobrarController extends Controller
             return '€';
         }
 
-        return 'S/';
+        if (
+            $rawCurrency === '' || in_array($currency, ['s', 's/', 's/.', 'sol', 'soles', 'pen'], true)
+            || str_contains($currency, 'sol peru')
+        ) {
+            return 'S/';
+        }
+
+        return $rawCurrency;
     }
 
     private function formatServicioPeriodo(mixed $value): string
     {
-        if ($value === null || trim((string) $value) === '' || trim((string) $value) === 'No') {
-            return '';
-        }
-
-        if (!is_numeric($value)) {
-            return trim((string) $value);
-        }
-
-        return match ((int) $value) {
-            30 => 'Mensual',
-            90 => '3 Meses',
-            180 => '6 Meses',
-            365 => '12 Meses',
-            730 => '24 Meses',
-            1095 => '36 Meses',
-            1460 => '48 Meses',
-            default => trim((string) $value),
-        };
-    }
-
-    private function normalizeServicioPeriodoDays(mixed $value): ?int
-    {
-        if ($value === null || trim((string) $value) === '' || trim((string) $value) === 'No') {
-            return null;
-        }
-
-        return is_numeric($value) ? (int) $value : null;
+        return ServicePeriod::label($value);
     }
 
     private function formatDisplayDate(mixed $value): string
@@ -1807,7 +3332,7 @@ class CuentasPorCobrarController extends Controller
                     ->selectRaw('cuentasPorCobrar_idcuentasPorCobrar as cxc_id, MAX(fechaPago) as fecha_pago')
                     ->groupBy('cuentasPorCobrar_idcuentasPorCobrar'),
                 'pago',
-                fn ($join) => $join->on('pago.cxc_id', '=', 'c.idcuentasPorCobrar')
+                fn($join) => $join->on('pago.cxc_id', '=', 'c.idcuentasPorCobrar')
             )
             ->select([
                 'c.idcuentasPorCobrar',
@@ -1915,7 +3440,10 @@ class CuentasPorCobrarController extends Controller
     private function paymentBreakdownMessage(array $breakdown): string
     {
         $symbol = trim((string) ($breakdown['currency_symbol'] ?? 'S/')) ?: 'S/';
-        $format = fn (mixed $amount): string => $symbol . ' ' . number_format((float) $amount, 2, '.', ',');
+        if ($symbol === 'S') {
+            $symbol = 'S/';
+        }
+        $format = fn(mixed $amount): string => $symbol . ' ' . number_format((float) $amount, 2, '.', ',');
         $parts = [];
 
         if ((float) ($breakdown['deduction'] ?? 0) > 0) {
@@ -1923,7 +3451,7 @@ class CuentasPorCobrarController extends Controller
             $parts[] = $label . ': ' . $format($breakdown['deduction']);
         }
         if ((float) ($breakdown['credit_applied'] ?? 0) > 0) {
-            $parts[] = 'Saldo a favor aplicado: ' . $format($breakdown['credit_applied']);
+            $parts[] = 'Crédito del cliente aplicado: ' . $format($breakdown['credit_applied']);
         }
         if ((float) ($breakdown['cash_applied'] ?? 0) > 0) {
             $parts[] = 'Efectivo aplicado: ' . $format($breakdown['cash_applied']);
@@ -1998,20 +3526,18 @@ class CuentasPorCobrarController extends Controller
             ->orderBy('razonSocial')
             ->orderBy('descripcion')
             ->get()
-            ->map(fn($row): array => [
-                'value' => (string) $row->identidadBancaria,
-                'label' => trim((string) ($row->descripcion ?? ''))
-                    ?: (trim((string) ($row->razonSocial ?? '')) ?: 'Entidad bancaria #' . $row->identidadBancaria),
-            ]);
+            ->map(function ($row): array {
+                $description = trim((string) ($row->descripcion ?? ''));
+                $companyName = trim((string) ($row->razonSocial ?? ''));
+                $searchText = mb_strtoupper($description . ' ' . $companyName, 'UTF-8');
+                $searchText = str_replace('É', 'E', $searchText);
+
+                return [
+                    'value' => (string) $row->identidadBancaria,
+                    'label' => $description ?: ($companyName ?: 'Entidad bancaria #' . $row->identidadBancaria),
+                    'is_bcp' => preg_match('/\bBCP\b|BANCO DE CREDITO/u', $searchText) === 1,
+                ];
+            });
     }
 
-    private function stateAfterServiceDeactivation(int $state): int
-    {
-        return match ($state) {
-            3 => 2,
-            5 => 4,
-            2, 4 => $state,
-            default => 0,
-        };
-    }
 }

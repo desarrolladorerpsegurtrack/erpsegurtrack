@@ -17,6 +17,7 @@ Route::middleware(['erp.auth'])->group(function () {
     Route::get('/api/notificaciones', [\App\Http\Controllers\NotificacionController::class, 'index'])->name('api.notificaciones.index');
     Route::post('/api/notificaciones/mark-all-read', [\App\Http\Controllers\NotificacionController::class, 'markAllAsRead'])->name('api.notificaciones.read_all');
     Route::post('/api/notificaciones/{id}/read', [\App\Http\Controllers\NotificacionController::class, 'markAsRead'])->name('api.notificaciones.read');
+    Route::post('/api/notificaciones/preference', [\App\Http\Controllers\NotificacionController::class, 'updatePreference'])->name('api.notificaciones.preference');
     Route::get('/api/notificaciones/trigger-cron', [\App\Http\Controllers\NotificacionController::class, 'triggerCron'])->name('api.notificaciones.trigger_cron');
 });
 

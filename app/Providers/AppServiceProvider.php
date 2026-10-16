@@ -2,8 +2,11 @@
 
 namespace App\Providers;
 
+use App\Http\Controllers\NotificacionController;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\View;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -20,6 +23,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        View::composer(['dashboard.overview-1', 'layouts.layout'], function ($view): void {
+            $usuario = (string) session('erp_auth.usuario', '');
+            $muted = $usuario !== '' && NotificacionController::notificationsMutedFor($usuario);
+
+            $view->with('notificationsMuted', $muted);
+        });
+
         if (! app()->runningInConsole() && $this->shouldUseHttps()) {
             URL::forceScheme('https');
             config(['session.secure' => true]);

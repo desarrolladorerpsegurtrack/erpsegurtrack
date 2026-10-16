@@ -38,6 +38,8 @@ class ErpPermissionRouteResolutionTest extends TestCase
             'modules.ventas' => 'ventas.planes_servicios',
             'modules.ventas.cotizaciones.index' => 'ventas.cotizaciones',
             'modules.ventas.cotizaciones.crear' => 'ventas.cotizaciones',
+            'modules.cuentasporcobrar.quotations.approve' => 'cuentasporcobrar',
+            'modules.cuentasporcobrar.quotations.anular' => 'ventas.cotizaciones',
         ];
 
         foreach ($cases as $routeName => $expectedPermissionKey) {
@@ -55,6 +57,22 @@ class ErpPermissionRouteResolutionTest extends TestCase
         $this->assertSame('eliminar', ErpPermission::inferActionFromRouteName('modules.clientes.destroy', 'DELETE'));
         $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.clientes.export', 'GET'));
         $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.vehiculos.index', 'GET'));
+        $this->assertSame(
+            'aprobar',
+            ErpPermission::inferActionFromRouteName('modules.cuentasporcobrar.quotations.approve', 'POST')
+        );
+        $this->assertSame(
+            'crear',
+            ErpPermission::inferActionFromRouteName('modules.cuentasporcobrar.cobrar-servicios', 'POST')
+        );
+        $this->assertSame(
+            'exportar',
+            ErpPermission::inferActionFromRouteName('modules.cuentasporcobrar.quotations.export.post', 'POST')
+        );
+        $this->assertSame(
+            'anular',
+            ErpPermission::inferActionFromRouteName('modules.cuentasporcobrar.quotations.anular', 'POST')
+        );
         $this->assertSame('editar', ErpPermission::inferActionFromRouteName('modules.clientes.lock', 'POST'));
         $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.lineas-chips.detallesimcard.import.preview', 'POST'));
         $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.lineas-chips.detallesimcard.import.process', 'POST'));
@@ -107,6 +125,28 @@ class ErpPermissionRouteResolutionTest extends TestCase
         $this->assertSame('cuentasporcobrar', ErpPermission::normalizePermissionKey('cuenta por cobrar'));
         $this->assertSame('cuentasporcobrar', ErpPermission::normalizePermissionKey('cuentasporcobrar.index'));
         $this->assertSame('cuentasporcobrar', ErpPermission::normalizePermissionKey('cuentas-por-cobrar.ver'));
+    }
+
+    public function test_cuentasporcobrar_matrix_offers_approval_instead_of_delete(): void
+    {
+        $matrix = \App\Support\RolePermissionMatrix::defaultMatrix();
+
+        $this->assertArrayHasKey('aprobar', $matrix['cuentasporcobrar']);
+        $this->assertArrayNotHasKey('anular', $matrix['cuentasporcobrar']);
+        $this->assertArrayNotHasKey('eliminar', $matrix['cuentasporcobrar']);
+
+        $selected = \App\Support\RolePermissionMatrix::extractSelectedPermissions([
+            'cuentasporcobrar' => ['aprobar' => true, 'eliminar' => true],
+        ]);
+
+        $this->assertContains(
+            ['modulo' => 'cuentasporcobrar', 'accion' => 'aprobar'],
+            $selected
+        );
+        $this->assertNotContains(
+            ['modulo' => 'cuentasporcobrar', 'accion' => 'eliminar'],
+            $selected
+        );
     }
 
     public function test_normalizes_dar_de_baja_action_and_route(): void

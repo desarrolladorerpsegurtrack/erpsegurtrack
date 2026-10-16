@@ -9,6 +9,8 @@ const wsPort = isHttpsPage
 const wsPortSegment = wsPort ? `:${wsPort}` : '';
 const wsUrl = `${wsScheme}://${wsHost}${wsPortSegment}`;
 const previousRealtimeState = window.ERPRealtime || {};
+const notificationPopupsEnabled =
+    document.querySelector('meta[name="erp-notification-popups-enabled"]')?.content === '1';
 
 window.ERPRealtime = {
     ws: previousRealtimeState.ws || null,
@@ -17,6 +19,14 @@ window.ERPRealtime = {
     subscribedTopics: previousRealtimeState.subscribedTopics instanceof Set ? previousRealtimeState.subscribedTopics : new Set(),
     pageLockBlocked: Boolean(previousRealtimeState.pageLockBlocked),
     currentUser: previousRealtimeState.currentUser || document.querySelector('meta[name="erp-current-user"]')?.content || '',
+    notificationsMuted: document.querySelector('meta[name="erp-notifications-muted"]')?.content === '1',
+    activeNotificationToasts: previousRealtimeState.activeNotificationToasts instanceof Set ? previousRealtimeState.activeNotificationToasts : new Set(),
+    hideNotificationToasts() {
+        for (const toast of this.activeNotificationToasts) {
+            toast.hideToast();
+        }
+        this.activeNotificationToasts.clear();
+    },
     currentResource: previousRealtimeState.currentResource || '',
     currentResourceId: previousRealtimeState.currentResourceId || '',
     currentListResource: previousRealtimeState.currentListResource || '',
@@ -25,6 +35,11 @@ window.ERPRealtime = {
     suppressUnloadRelease: Boolean(previousRealtimeState.suppressUnloadRelease),
 
     notify(message, type = 'info') {
+        if (!notificationPopupsEnabled || this.notificationsMuted) {
+            console[type === 'error' ? 'error' : 'info'](`[Realtime] ${message}`);
+            return;
+        }
+
         const event = new CustomEvent('erp-realtime-notification', {
             detail: { message, type },
         });
@@ -112,6 +127,10 @@ window.ERPRealtime = {
                 const isNotificationForVista = payload?.type === 'resource.changed' && payload?.resource === 'vista' && payload?.action === 'ticket.assigned';
 
                 if (isNotificationForUser || isNotificationForVista) {
+                    if (!notificationPopupsEnabled || this.notificationsMuted) {
+                        return;
+                    }
+
                     const message = (payload.meta && payload.meta.message) ? payload.meta.message : 'Tienes una nueva gestión para atender.';
                     const url = payload.meta && payload.meta.url ? payload.meta.url : null;
 
@@ -148,7 +167,7 @@ window.ERPRealtime = {
                             }
 
                             // Mostrar Toastify como sticky (duration -1) y con Close (X)
-                            Toastify({
+                            const toast = Toastify({
                                 node: node,
                                 duration: -1,
                                 close: true,
@@ -160,7 +179,10 @@ window.ERPRealtime = {
                                 position: 'right',
                                 stopOnFocus: true,
                                 onClick: function () {},
-                            }).showToast();
+                                callback: () => this.activeNotificationToasts.delete(toast),
+                            });
+                            this.activeNotificationToasts.add(toast);
+                            toast.showToast();
                         } catch (e) {
                             console.warn('[Realtime] error showing template notification', e);
                         }
@@ -169,7 +191,7 @@ window.ERPRealtime = {
 
                     // Fallback textual si no hay plantilla o Toastify
                     if (typeof Toastify === 'function') {
-                        Toastify({
+                        const toast = Toastify({
                             text: message,
                             duration: -1,
                             close: true,
@@ -180,8 +202,11 @@ window.ERPRealtime = {
                                 if (url) {
                                     window.location.href = url;
                                 }
-                            }
-                        }).showToast();
+                            },
+                            callback: () => this.activeNotificationToasts.delete(toast),
+                        });
+                        this.activeNotificationToasts.add(toast);
+                        toast.showToast();
                     } else {
                         // Último recurso: alert/confirm
                         if (url) {

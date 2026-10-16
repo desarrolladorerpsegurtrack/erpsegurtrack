@@ -7,9 +7,28 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class NotificacionController extends Controller
 {
+    public const PREFERENCE_NOTIFICATION_TYPE = 'App\\Notifications\\UserNotificationPreference';
+
+    public static function notificationsMutedFor(string $usuario): bool
+    {
+        $preference = DB::table('notificaciones')
+            ->where('notifiable_id', $usuario)
+            ->where('type', self::PREFERENCE_NOTIFICATION_TYPE)
+            ->value('data');
+
+        if (!$preference) {
+            return false;
+        }
+
+        $data = is_string($preference) ? json_decode($preference, true) : (array) $preference;
+
+        return (bool) ($data['muted'] ?? false);
+    }
+
     /**
      * Obtener las notificaciones no leídas del usuario en sesión.
      */
@@ -23,6 +42,7 @@ class NotificacionController extends Controller
 
         $rows = DB::table('notificaciones')
             ->where('notifiable_id', $usuario)
+            ->where('type', '!=', self::PREFERENCE_NOTIFICATION_TYPE)
             ->orderByDesc('created_at')
             ->limit(20)
             ->get();
@@ -76,6 +96,7 @@ class NotificacionController extends Controller
             'success' => true,
             'count' => $formatted->count(),
             'items' => $formatted,
+            'muted' => self::notificationsMutedFor($usuario),
         ]);
     }
 
@@ -105,6 +126,54 @@ class NotificacionController extends Controller
         }
 
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * Guardar la preferencia individual para mostrar alertas emergentes.
+     */
+    public function updatePreference(Request $request): JsonResponse
+    {
+        $usuario = $request->session()->get('erp_auth.usuario');
+
+        if (!$usuario) {
+            return response()->json(['success' => false, 'message' => 'No autorizado'], 401);
+        }
+
+        $validated = $request->validate([
+            'muted' => ['required', 'boolean'],
+        ]);
+        $now = Carbon::now();
+
+        $preference = DB::table('notificaciones')
+            ->where('notifiable_id', $usuario)
+            ->where('type', self::PREFERENCE_NOTIFICATION_TYPE)
+            ->first();
+        $data = json_encode(['muted' => (bool) $validated['muted']], JSON_THROW_ON_ERROR);
+
+        if ($preference) {
+            DB::table('notificaciones')
+                ->where('id', $preference->id)
+                ->update([
+                    'data' => $data,
+                    'updated_at' => $now,
+                ]);
+        } else {
+            DB::table('notificaciones')->insert([
+                'id' => (string) Str::uuid(),
+                'type' => self::PREFERENCE_NOTIFICATION_TYPE,
+                'notifiable_type' => 'App\\Models\\User',
+                'notifiable_id' => $usuario,
+                'data' => $data,
+                'read_at' => null,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'muted' => (bool) $validated['muted'],
+        ]);
     }
 
     /**

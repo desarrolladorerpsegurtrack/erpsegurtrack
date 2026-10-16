@@ -36,6 +36,11 @@
 					el.value = val;
 				}
 			};
+			const isCurrentClientIntegrator = () => {
+				const value = readValue(cliente);
+				const flag = clienteMeta[value];
+				return serverIsIntegrador || (!!value && (flag === true || flag === 1 || flag === '1' || flag === 'true' || flag === 'si' || flag === 'yes'));
+			};
 
 			if (isEdit) {
 				const vehicleDisplay = document.querySelector('[name="vehiculo_display"]');
@@ -124,21 +129,8 @@
 				const wrapper = numeroSelect?.closest('.crud-field-wrapper');
 				if (!numeroSelect) return;
 
-				if (isIntegrador) {
-					numeroSelect.disabled = true;
-					numeroSelect.removeAttribute('required');
-					numeroSelect.setAttribute('aria-required', 'false');
-					if (numeroSelect.tomselect) {
-						numeroSelect.tomselect.clear();
-						numeroSelect.tomselect.clearOptions();
-					}
-					numeroSelect.value = '';
-					if (wrapper) wrapper.style.display = 'none';
-					return;
-				}
-
 				numeroSelect.disabled = false;
-				const requiresPhone = !isEdit || getTomValue(estadoSelect) === 'activo';
+				const requiresPhone = !isIntegrador && (!isEdit || getTomValue(estadoSelect) === 'activo');
 				if (requiresPhone) {
 					numeroSelect.setAttribute('required', 'required');
 					numeroSelect.setAttribute('aria-required', 'true');
@@ -146,17 +138,27 @@
 					numeroSelect.removeAttribute('required');
 					numeroSelect.setAttribute('aria-required', 'false');
 				}
-				if (wrapper) wrapper.style.display = '';
+				const indicator = wrapper?.querySelector('label .text-red-500');
+				if (indicator) {
+					indicator.style.display = requiresPhone ? '' : 'none';
+				} else if (requiresPhone) {
+					const label = wrapper?.querySelector('label');
+					if (label) {
+						const requiredIndicator = document.createElement('span');
+						requiredIndicator.className = 'text-red-500';
+						requiredIndicator.textContent = '*';
+						label.appendChild(requiredIndicator);
+					}
+				}
 			};
 
 			if (cliente) {
 				const syncClienteIntegradorState = () => {
-					const value = readValue(cliente);
-					const isIntegrador = serverIsIntegrador || (!!value && !!(clienteMeta[value] === true || clienteMeta[value] === 1 || clienteMeta[value] === '1' || clienteMeta[value] === 'true' || clienteMeta[value] === 'si' || clienteMeta[value] === 'yes'));
-					toggleNumeroTelefonicoField(isIntegrador);
+					toggleNumeroTelefonicoField(isCurrentClientIntegrator());
 				};
 				cliente.addEventListener('change', async () => {
 					const value = readValue(cliente);
+					syncClienteIntegradorState();
 					const instance = vehiculo?.tomselect;
 					const deviceInstance = deviceSelect?.tomselect;
 					if (!vehiculo || !instance) return;
@@ -167,7 +169,6 @@
 						deviceInstance.clearOptions();
 					}
 					if (!value) return;
-					syncClienteIntegradorState();
 					const [vehiclesResponse, devicesResponse] = await Promise.all([
 						fetch(`${vehiculosUrl}?cliente_idcliente=${encodeURIComponent(value)}`, { headers: { Accept: 'application/json' } }),
 						dispositivosUrl ? fetch(`${dispositivosUrl}?cliente_idcliente=${encodeURIComponent(value)}`, { headers: { Accept: 'application/json' } }) : Promise.resolve(null),
@@ -205,26 +206,17 @@
 			};
 			vehiculo?.addEventListener('change', reloadServices);
 
-			const normalizePeriodoDays = (value) => {
+			const normalizePeriodoMonths = (value) => {
 				const raw = String(value ?? '').trim();
 				if (raw === '') return null;
 				if (/^\d+$/.test(raw)) return Number(raw);
 
 				const normalized = raw.toLowerCase().replace(/\s+/g, ' ').replace(/\./g, '').trim();
-				const map = {
-					'mensual': 30,
-					'1 mes': 30,
-					'3 meses': 90,
-					'6 meses': 180,
-					'12 meses': 365,
-					'24 meses': 730,
-					'36 meses': 1095,
-					'48 meses': 1460,
-				};
-				if (map[normalized] !== undefined) return map[normalized];
-
-				const match = raw.match(/(\d+)/);
-				return match ? Number(match[1]) : null;
+				if (normalized === 'mensual') return 1;
+				const monthMatch = normalized.match(/^(\d+)\s*mes(?:es)?$/);
+				if (monthMatch) return Number(monthMatch[1]);
+				const yearMatch = normalized.match(/^(\d+)\s*a(?:ñ|n)o(?:s)?$/);
+				return yearMatch ? Number(yearMatch[1]) * 12 : null;
 			};
 
 			const calculate = () => {
@@ -232,13 +224,18 @@
 
 				const data = servicioMeta[readServicioValue()] || {};
 				const startIso = toIsoDate(inicio?.value) || inicio?.value || '';
-				const periodoDays = normalizePeriodoDays(data.periodo);
-				if (!inicio || !vencimiento || !startIso || !Number.isFinite(periodoDays) || periodoDays <= 0) {
+				const periodoMonths = normalizePeriodoMonths(data.periodo);
+				if (!inicio || !vencimiento || !startIso || !Number.isFinite(periodoMonths) || periodoMonths <= 0) {
 					return;
 				}
 
 				const date = new Date(`${startIso}T00:00:00`);
-				date.setDate(date.getDate() + periodoDays);
+				const day = date.getDate();
+				const targetMonthIndex = date.getMonth() + periodoMonths;
+				const targetYear = date.getFullYear() + Math.floor(targetMonthIndex / 12);
+				const targetMonth = targetMonthIndex % 12;
+				const lastTargetDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+				date.setFullYear(targetYear, targetMonth, Math.min(day, lastTargetDay));
 				const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 				const formatted = displayDate(iso);
 				vencimiento.value = formatted;
@@ -599,7 +596,7 @@
 						previousEstado = 'inactivo';
 						if (mantenerSimInput) mantenerSimInput.value = 'si';
 						setTimeout(() => {
-							if (previousNumero && !serverIsIntegrador) {
+							if (previousNumero) {
 								openBajaSimConfirmModal(
 									() => {
 										if (mantenerSimInput) mantenerSimInput.value = 'si';
@@ -618,7 +615,7 @@
 					} else {
 						setTomValue(estadoSelect, previousEstado, true);
 					}
-					toggleNumeroTelefonicoField(serverIsIntegrador);
+					toggleNumeroTelefonicoField(isCurrentClientIntegrator());
 					document.body.style.overflow = previousBodyOverflow;
 
 					modalOverlay.style.opacity = '0';
@@ -700,7 +697,7 @@
 						} else {
 							setTomValue(estadoSelect, previousEstado, true);
 						}
-						toggleNumeroTelefonicoField(serverIsIntegrador);
+						toggleNumeroTelefonicoField(isCurrentClientIntegrator());
 						document.body.style.overflow = prevOverflow;
 						modalActivacionOverlay.style.opacity = '0';
 						setTimeout(() => {
@@ -723,7 +720,7 @@
 
 				const onEstadoChange = () => {
 					const newValue = readValue(estadoSelect);
-					toggleNumeroTelefonicoField(serverIsIntegrador);
+					toggleNumeroTelefonicoField(isCurrentClientIntegrator());
 					if (previousEstado === 'activo' && newValue === 'inactivo') {
 						buildModal();
 					} else if (previousEstado === 'inactivo' && newValue === 'activo') {

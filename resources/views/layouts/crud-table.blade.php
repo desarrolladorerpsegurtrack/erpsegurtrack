@@ -1233,7 +1233,7 @@
                 @php
                     $activeImportPreview = $importPreview ?? $detallesimcardImportPreview ?? null;
                     $activeImportType = $activeImportPreview['importType'] ?? (isset($importModalTitle) && str_contains(mb_strtolower($importModalTitle), 'simcard') ? 'simcard' : (isset($importModalTitle) && str_contains(mb_strtolower($importModalTitle), 'número') ? 'numero' : 'detallesimcard'));
-                    $modalTitle = $importModalTitle ?? 'Cargar números por archivo';
+                    $modalTitle = $importModalTitle ?? 'Cargar asignacion por archivo';
                     $modalHint = $importModalHint ?? 'Archivo (.xlsx) con las columnas: Numero, SimCard, Operador';
                     $btnLabel = $importButtonLabel ?? 'Cargar números';
                 @endphp
@@ -1289,6 +1289,7 @@
                                                         <th class="px-3 py-2">Número</th>
                                                         <th class="px-3 py-2">SimCard</th> 
                                                         <th class="px-3 py-2">Operador</th>
+                                                        <th class="px-3 py-2">Plan</th>
                                                     @endif
                                                     <th class="px-3 py-2">Estado</th>
                                                 </tr>
@@ -1306,6 +1307,7 @@
                                                             <td class="px-3 py-2">{{ $previewRow['numero'] ?? '' }}</td>
                                                             <td class="px-3 py-2">{{ $previewRow['simcard'] ?? '' }}</td>
                                                             <td class="px-3 py-2">{{ $previewRow['operador'] ?? '' }}</td>
+                                                            <td class="px-3 py-2">{{ $previewRow['plan'] ?? '' }}</td>
                                                         @endif
                                                         <td class="px-3 py-2">{{ $previewRow['status'] ?? '' }}</td>
                                                     </tr>
@@ -2775,6 +2777,7 @@
                             <td class="px-3 py-2">${row.numero ?? ''}</td>
                             <td class="px-3 py-2">${row.simcard ?? ''}</td>
                             <td class="px-3 py-2">${row.operador ?? ''}</td>
+                            <td class="px-3 py-2">${row.plan ?? ''}</td>
                             <td class="px-3 py-2">${row.status ?? ''}</td>
                         </tr>
                     `;
@@ -2848,6 +2851,7 @@
                     <th class="px-3 py-2">Número</th>
                     <th class="px-3 py-2">SimCard</th>
                     <th class="px-3 py-2">Operador</th>
+                    <th class="px-3 py-2">Plan</th>
                     <th class="px-3 py-2">Estado</th>
                 `;
 

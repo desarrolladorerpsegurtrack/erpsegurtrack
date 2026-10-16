@@ -393,6 +393,12 @@ class LineasChipsController extends Controller
                 ->with('error', 'No se encontro el número telefónico solicitado.');
         }
 
+        if (!self::isEstadoDisponibleParaEdicion((string) $record->estado)) {
+            return redirect()
+                ->route('modules.lineas-chips.numeros-telefonico.index')
+                ->with('error', 'No se puede editar este Número telefónico porque está ' . self::normalizeEstadoLabel((string) $record->estado) . '. Solo se permite editar cuando está Libre o Disponible.');
+        }
+
         $priceDetail = DB::table('detalle_precionumero')
             ->where('numeroTelefonico_numeroTelefonico', $id)
             ->orderByDesc('iddetalle_precionumero')
@@ -400,12 +406,12 @@ class LineasChipsController extends Controller
         $record->precio = $priceDetail?->precio;
         $record->moneda = $priceDetail?->moneda ?? 'S/';
 
-        $historialPrevio = $this->countNumeroHistorialSinRelacionActual($id);
-        if ($historialPrevio > 0) {
-            $relacion = $this->buildNumeroRelacionActualTexto($id);
+        $historialPrevio = $this->countNumeroAsignaciones($id);
+        if ($historialPrevio > 1) {
+            $relacion = $this->buildNumeroRelacionTexto($id);
             return redirect()
                 ->route('modules.lineas-chips.numeros-telefonico.index')
-                ->with('error', 'No se puede editar este número telefónico porque tiene asignaciones. ' . $relacion);
+                ->with('error', 'No se puede editar este Número telefónico porque tiene más de una relación de asignación. ' . $relacion);
         }
 
         $record->estado = self::normalizeEstado($record->estado);
@@ -497,11 +503,20 @@ class LineasChipsController extends Controller
             return $redirect;
         }
 
-        $historialPrevio = $this->countNumeroHistorialSinRelacionActual($id);
-        if ($historialPrevio > 0) {
+        $estadoActual = (string) DB::table('numerotelefonico')
+            ->where('numeroTelefonico', $id)
+            ->value('estado');
+        if (!self::isEstadoDisponibleParaEdicion($estadoActual)) {
             return redirect()
                 ->route('modules.lineas-chips.numeros-telefonico.index')
-                ->with('error', 'No se puede editar este número telefónico porque tiene asignaciones. ' . $this->buildNumeroRelacionActualTexto($id));
+                ->with('error', 'No se puede editar este Número telefónico porque está ' . self::normalizeEstadoLabel($estadoActual) . '. Solo se permite editar cuando está Libre o Disponible.');
+        }
+
+        $historialPrevio = $this->countNumeroAsignaciones($id);
+        if ($historialPrevio > 1) {
+            return redirect()
+                ->route('modules.lineas-chips.numeros-telefonico.index')
+                ->with('error', 'No se puede editar este Número telefónico porque tiene más de una relación de asignación. ' . $this->buildNumeroRelacionTexto($id));
         }
 
         $validated = $request->validate([
@@ -693,6 +708,7 @@ class LineasChipsController extends Controller
                 ['key' => 'numero', 'label' => 'Número'],
                 ['key' => 'simcard', 'label' => 'SimCard'],
                 ['key' => 'operador', 'label' => 'Operador'],
+                ['key' => 'plan', 'label' => 'Plan'],
                 ['key' => 'status', 'label' => 'Estado'],
             ];
             $filename = 'detallesimcard_carga_preview_' . now()->format('Ymd_His') . '.xlsx';
@@ -1239,12 +1255,18 @@ class LineasChipsController extends Controller
                 ->with('error', 'No se encontro la SimCard solicitada.');
         }
 
-        $historialPrevio = $this->countSimCardHistorialSinRelacionActual($id);
-        if ($historialPrevio > 0) {
-            $relacion = $this->buildSimCardRelacionActualTexto($id);
+        if (!self::isEstadoDisponibleParaEdicion((string) $record->estado)) {
             return redirect()
                 ->route('modules.lineas-chips.simcard.index')
-                ->with('error', 'No se puede editar esta SimCard porque tiene asignaciones. ' . $relacion);
+                ->with('error', 'No se puede editar esta SimCard porque está ' . self::normalizeEstadoLabel((string) $record->estado) . '. Solo se permite editar cuando está Libre o Disponible.');
+        }
+
+        $historialPrevio = $this->countSimCardHistorialSinRelacionActual($id);
+        if ($historialPrevio > 1) {
+            $relacion = $this->buildSimCardRelacionTexto($id);
+            return redirect()
+                ->route('modules.lineas-chips.simcard.index')
+                ->with('error', 'No se puede editar esta SimCard porque tiene más de una relación de asignación. ' . $relacion);
         }
 
         $record->estado = self::normalizeEstado($record->estado);
@@ -1313,11 +1335,20 @@ class LineasChipsController extends Controller
             return $redirect;
         }
 
-        $historialPrevio = $this->countSimCardHistorialSinRelacionActual($id);
-        if ($historialPrevio > 0) {
+        $estadoActual = (string) DB::table('simcard')
+            ->where('idsimCard', $id)
+            ->value('estado');
+        if (!self::isEstadoDisponibleParaEdicion($estadoActual)) {
             return redirect()
                 ->route('modules.lineas-chips.simcard.index')
-                ->with('error', 'No se puede editar esta SimCard porque tiene asignaciones. ' . $this->buildSimCardRelacionActualTexto($id));
+                ->with('error', 'No se puede editar esta SimCard porque está ' . self::normalizeEstadoLabel($estadoActual) . '. Solo se permite editar cuando está Libre o Disponible.');
+        }
+
+        $historialPrevio = $this->countSimCardHistorialSinRelacionActual($id);
+        if ($historialPrevio > 1) {
+            return redirect()
+                ->route('modules.lineas-chips.simcard.index')
+                ->with('error', 'No se puede editar esta SimCard porque tiene más de una relación de asignación. ' . $this->buildSimCardRelacionTexto($id));
         }
 
         $validated = $request->validate([
@@ -1770,6 +1801,9 @@ class LineasChipsController extends Controller
             'bulkDeactivateRoute' => route('modules.lineas-chips.detallesimcard.bulk-deactivate'),
             'importPreviewRoute' => route('modules.lineas-chips.detallesimcard.import.preview'),
             'importProcessRoute' => route('modules.lineas-chips.detallesimcard.import.process'),
+            'importButtonLabel' => 'Cargar asignaciones',
+            'importModalTitle' => 'Cargar asignación por archivo',
+            'importModalHint' => 'Archivo (.xlsx) con las columnas: Número, SimCard, Operador, Plan (opcional)',
             'numeroTelefonicoStateList' => DB::table('numerotelefonico')
                 ->where('estado', '1')
                 ->select('numeroTelefonico', DB::raw('1 as isActive'))
@@ -2869,12 +2903,13 @@ class LineasChipsController extends Controller
                 'numero' => 0,
                 'simcard' => 1,
                 'operador' => 2,
+                'plan' => 3,
             ];
 
             if (!empty($records)) {
                 $firstRow = array_map(fn($value) => mb_strtolower(trim((string) $value)), $records[0]);
                 $isHeaderRow = false;
-                $headerKeywords = ['simcard', 'simcards', 'sim card', 'operador', 'operadores', 'operator', 'numero', 'número', 'numeros', 'números', 'telefono', 'teléfono', 'telefonos', 'teléfonos'];
+                $headerKeywords = ['simcard', 'simcards', 'sim card', 'iccid', 'operador', 'operadores', 'operator', 'numero', 'número', 'numeros', 'números', 'telefono', 'teléfono', 'telefonos', 'teléfonos', 'numero telefonico', 'número telefónico', 'plan', 'planes'];
                 foreach ($firstRow as $header) {
                     if (in_array($header, $headerKeywords, true)) {
                         $isHeaderRow = true;
@@ -2884,9 +2919,10 @@ class LineasChipsController extends Controller
 
                 if ($isHeaderRow) {
                     $headerMap = array_flip($firstRow);
-                    $columnIndexes['simcard'] = $headerMap['simcard'] ?? $headerMap['simcards'] ?? $headerMap['sim card'] ?? $columnIndexes['simcard'];
-                    $columnIndexes['numero'] = $headerMap['numero'] ?? $headerMap['número'] ?? $headerMap['numeros'] ?? $headerMap['números'] ?? $headerMap['telefono'] ?? $headerMap['teléfono'] ?? $columnIndexes['numero'];
+                    $columnIndexes['simcard'] = $headerMap['simcard'] ?? $headerMap['simcards'] ?? $headerMap['sim card'] ?? $headerMap['iccid'] ?? $columnIndexes['simcard'];
+                    $columnIndexes['numero'] = $headerMap['numero'] ?? $headerMap['número'] ?? $headerMap['numeros'] ?? $headerMap['números'] ?? $headerMap['telefono'] ?? $headerMap['teléfono'] ?? $headerMap['numero telefonico'] ?? $headerMap['número telefónico'] ?? $columnIndexes['numero'];
                     $columnIndexes['operador'] = $headerMap['operador'] ?? $headerMap['operadores'] ?? $headerMap['operator'] ?? $columnIndexes['operador'];
+                    $columnIndexes['plan'] = $headerMap['plan'] ?? $headerMap['planes'] ?? $columnIndexes['plan'];
                     array_shift($records);
                 }
             }
@@ -2957,25 +2993,27 @@ class LineasChipsController extends Controller
                 }
             }
 
-            $defaultOperatorId = $this->getDefaultOperatorId();
-            $seenInFile = [];
+            $seenSimcards = [];
+            $seenNumeros = [];
             $lineNumber = 1;
 
             foreach ($records as $parts) {
                 $simcard = trim((string) ($parts[$columnIndexes['simcard']] ?? ''));
                 $operatorName = trim((string) ($parts[$columnIndexes['operador']] ?? ''));
                 $numero = trim((string) ($parts[$columnIndexes['numero']] ?? ''));
-                $extraValues = array_slice($parts, max($columnIndexes['numero'], $columnIndexes['operador'], $columnIndexes['simcard']) + 1);
+                $plan = trim((string) ($parts[$columnIndexes['plan']] ?? ''));
+                $extraValues = array_slice($parts, max($columnIndexes) + 1);
                 $hasExtraData = count(array_filter($extraValues, fn($value) => $value !== '')) > 0;
 
-                if ($simcard === '' || $numero === '') {
+                if ($simcard === '' || $numero === '' || $operatorName === '') {
                     $emptyCount++;
                     $previewRows[] = [
                         'line' => $lineNumber,
                         'simcard' => $simcard,
                         'operador' => $operatorName,
                         'numero' => $numero,
-                        'status' => 'Fila vacía o incompleta',
+                        'plan' => $plan,
+                        'status' => 'Fila vacía o incompleta (Número, SimCard y Operador son obligatorios)',
                         'importable' => false,
                     ];
                     $lineNumber++;
@@ -2989,6 +3027,7 @@ class LineasChipsController extends Controller
                         'simcard' => $simcard,
                         'operador' => $operatorName,
                         'numero' => $numero,
+                        'plan' => $plan,
                         'status' => 'Inválido (columnas extras)',
                         'importable' => false,
                     ];
@@ -2996,31 +3035,23 @@ class LineasChipsController extends Controller
                     continue;
                 }
 
-                $totalRows++;
-                $pairKey = "$simcard|$numero";
-                if (isset($seenInFile[$pairKey])) {
-                    $fileDuplicates++;
+                if (mb_strlen($plan) > 45 || ($plan !== '' && !preg_match(self::SAFE_TEXT_REGEX, $plan))) {
+                    $invalidCount++;
                     $previewRows[] = [
                         'line' => $lineNumber,
                         'simcard' => $simcard,
                         'operador' => $operatorName,
                         'numero' => $numero,
-                        'status' => 'Duplicado en archivo',
+                        'plan' => $plan,
+                        'status' => 'Inválido (formato o longitud del plan incorrecto)',
                         'importable' => false,
                     ];
                     $lineNumber++;
                     continue;
                 }
-                $seenInFile[$pairKey] = true;
 
-                $operatorId = null;
-                if ($operatorName !== '') {
-                    $operatorId = $operatorMap[mb_strtolower($operatorName)] ?? null;
-                }
-                if ($operatorId === null) {
-                    $operatorId = $defaultOperatorId;
-                }
-
+                $totalRows++;
+                $operatorId = $operatorMap[mb_strtolower($operatorName)] ?? null;
                 if ($operatorId === null) {
                     $invalidCount++;
                     $previewRows[] = [
@@ -3028,13 +3059,32 @@ class LineasChipsController extends Controller
                         'simcard' => $simcard,
                         'operador' => $operatorName,
                         'numero' => $numero,
-                        'status' => 'Inválido (sin operador en BD)',
+                        'plan' => $plan,
+                        'status' => 'Inválido (operador no existe en BD)',
                         'importable' => false,
                     ];
                     $lineNumber++;
                     continue;
                 }
 
+                if (isset($seenSimcards[$simcard]) || isset($seenNumeros[$numero])) {
+                    $fileDuplicates++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'status' => 'Duplicado en archivo (Número o SimCard)',
+                        'importable' => false,
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+                $seenSimcards[$simcard] = true;
+                $seenNumeros[$numero] = true;
+
+                $pairKey = "$simcard|$numero";
                 $pairExists = isset($pairExistsSet[$pairKey]);
                 $simExists = isset($simExistsSet[$simcard]);
                 $numExists = isset($numExistsSet[$numero]);
@@ -3046,6 +3096,7 @@ class LineasChipsController extends Controller
                         'simcard' => $simcard,
                         'operador' => $operatorName,
                         'numero' => $numero,
+                        'plan' => $plan,
                         'status' => 'Existe en BD',
                         'importable' => false,
                     ];
@@ -3059,6 +3110,7 @@ class LineasChipsController extends Controller
                     'simcard' => $simcard,
                     'operador' => $operatorName,
                     'numero' => $numero,
+                    'plan' => $plan,
                     'status' => 'Nuevo',
                     'importable' => true,
                     'operatorId' => $operatorId,
@@ -3143,7 +3195,6 @@ class LineasChipsController extends Controller
         try {
             $processedCount = 0;
             DB::transaction(function () use ($preview, &$processedCount) {
-                $defaultOperatorId = $this->getDefaultOperatorId();
                 $simcardRows = [];
                 $numeroRows = [];
                 $detalleRows = [];
@@ -3155,23 +3206,21 @@ class LineasChipsController extends Controller
 
                     $simcard = trim((string) ($row['simcard'] ?? ''));
                     $numero = trim((string) ($row['numero'] ?? ''));
-                    $operatorId = isset($row['operatorId']) ? (int) $row['operatorId'] : $defaultOperatorId;
-                    if ($simcard === '' || $numero === '') {
-                        continue;
-                    }
-
-                    if ($operatorId === 0) {
+                    $plan = trim((string) ($row['plan'] ?? ''));
+                    $operatorId = (int) ($row['operatorId'] ?? 0);
+                    if ($simcard === '' || $numero === '' || $operatorId === 0) {
                         continue;
                     }
 
                     $simcardRows[] = [
                         'idsimCard' => $simcard,
-                        'estado' => '1',
+                        'estado' => '2',
                         'operador_idoperador' => $operatorId,
                     ];
                     $numeroRows[] = [
                         'numeroTelefonico' => $numero,
-                        'estado' => '1',
+                        'plan' => $plan,
+                        'estado' => '2',
                     ];
                     $detalleRows[] = [
                         'simCard_idsimCard' => $simcard,
@@ -3949,6 +3998,13 @@ class LineasChipsController extends Controller
         return ($hasSimcardRelation || $hasDeviceRelation) ? 1 : 0;
     }
 
+    private function countNumeroAsignaciones(string $numeroTelefonico): int
+    {
+        return DB::table('detallesimcard')
+            ->where('numeroTelefonico_numeroTelefonico', $numeroTelefonico)
+            ->count();
+    }
+
     private function countSimCardHistorialSinRelacionActual(string $simCardId): int
     {
         return DB::table('detallesimcard')
@@ -4692,6 +4748,11 @@ class LineasChipsController extends Controller
             '1' => 'Libre',
             default => 'Inactivo',
         };
+    }
+
+    private static function isEstadoDisponibleParaEdicion(string|null $estado): bool
+    {
+        return in_array(self::normalizeEstado($estado), ['1', '2'], true);
     }
 
     private static function normalizeDetalleSimCardEstadoLabel(string|null $estado): string

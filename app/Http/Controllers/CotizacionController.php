@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use App\Services\CorrelativoService;
+use App\Services\CxcService;
 use App\Services\CotizacionService;
 use App\Services\TicketsService;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -29,11 +30,13 @@ class CotizacionController extends Controller
 
     private CotizacionService $cotizacionService;
     private TicketsService $ticketsService;
+    private CxcService $cxcService;
 
-    public function __construct(CotizacionService $cotizacionService, TicketsService $ticketsService)
+    public function __construct(CotizacionService $cotizacionService, TicketsService $ticketsService, CxcService $cxcService)
     {
         $this->cotizacionService = $cotizacionService;
         $this->ticketsService = $ticketsService;
+        $this->cxcService = $cxcService;
     }
 
     public function index(Request $request): View
@@ -94,7 +97,10 @@ class CotizacionController extends Controller
             $row->canApprove = ($estado === CotizacionService::STATE_GENERADO) && !$row->is_vigencia_expired && $row->canEdit;
             $row->approveRoute = $row->canApprove ? route('modules.ventas.cotizaciones.approve', ['id' => $row->nroCotizacion]) : null;
             $row->canDelete = !in_array($estado, [CotizacionService::STATE_FINALIZADO, CotizacionService::STATE_EJECUTADO_SP, CotizacionService::STATE_ANULADO], true);
-            $row->canAnular = ($estado === CotizacionService::STATE_GENERADO);
+            $row->canAnular = in_array($estado, [
+                CotizacionService::STATE_GENERADO,
+                CotizacionService::STATE_APROBADO_SP,
+            ], true);
             $row->anularRoute = $row->canAnular ? route('modules.ventas.cotizaciones.anular', ['id' => $row->nroCotizacion]) : null;
             $row->download_link = '<a href="' . route('modules.ventas.cotizaciones.pdf', ['id' => $row->nroCotizacion]) . '" data-download-cotizacion="' . e($row->nroCotizacion) . '" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item text-slate-600 w-full text-left" title="Descargar PDF"><i data-lucide="download" class="mr-1 h-4 w-4 stroke-[1.3]"></i>Descargar</a>';
             $batchId = $row->batch_id ?? null;
@@ -1396,22 +1402,24 @@ class CotizacionController extends Controller
             return $redirect;
         }
 
-        $record = DB::table('cotizacion')->where('nroCotizacion', $id)->first();
-        if (!$record) {
+        $result = $this->cotizacionService->anularCotizaciones([$id]);
+        if (!$result['success']) {
             return redirect()
                 ->route('modules.ventas.cotizaciones.index')
-                ->with('error', 'No se encontró la cotización solicitada.');
+                ->with('error', $result['message']);
         }
 
-        // Only allow anular when state is Generado
-        if ((string) ($record->estado ?? '') !== CotizacionService::STATE_GENERADO) {
-            return redirect()
-                ->route('modules.ventas.cotizaciones.index')
-                ->with('error', 'Solo se puede anular una cotización en estado Generado.');
+        foreach ($result['quote_ids'] as $quoteId) {
+            $this->publishResourceEvent(self::LOCK_RESOURCE, $quoteId, 'updated', [
+                'estado' => CotizacionService::STATE_ANULADO,
+            ]);
         }
-
-        DB::table('cotizacion')->where('nroCotizacion', $id)->update(['estado' => CotizacionService::STATE_ANULADO]);
-        $this->publishResourceEvent(self::LOCK_RESOURCE, (string) $id, 'updated', ['estado' => CotizacionService::STATE_ANULADO]);
+        foreach ($result['ticket_ids'] as $ticketId) {
+            $this->publishResourceEvent('ticket', (string) $ticketId, 'updated', [
+                'estado' => 'Resuelto',
+                'motivo' => 'cotizacion_anulada',
+            ]);
+        }
 
         return redirect()
             ->route('modules.ventas.cotizaciones.index')
@@ -1606,6 +1614,18 @@ class CotizacionController extends Controller
         $referenciaToUse = trim((string) ($record->batch_id ?? '')) ?: $id;
 
         DB::transaction(function () use ($id, $isGroup, $record, $newEstado, $currentUser, &$ticketId, $referenciaToUse) {
+            $lockedQuotesQuery = DB::table('cotizacion')
+                ->where($isGroup ? 'batch_id' : 'nroCotizacion', $isGroup ? $record->batch_id : $id)
+                ->orderBy('nroCotizacion')
+                ->lockForUpdate();
+            $lockedQuotes = $lockedQuotesQuery->get(['nroCotizacion', 'estado']);
+
+            if ($lockedQuotes->isEmpty() || $lockedQuotes->contains(
+                fn($quote): bool => (string) ($quote->estado ?? '') !== CotizacionService::STATE_GENERADO
+            )) {
+                abort(422, 'Solo se puede aprobar una cotización en estado Generado.');
+            }
+
             if ($isGroup) {
                 DB::table('cotizacion')
                     ->where('batch_id', $record->batch_id)
@@ -1614,6 +1634,14 @@ class CotizacionController extends Controller
                 DB::table('cotizacion')
                     ->where('nroCotizacion', $id)
                     ->update(['estado' => $newEstado]);
+            }
+
+            if ($newEstado === CotizacionService::STATE_APROBADO_SP) {
+                DB::table('cotizacion')
+                    ->where($isGroup ? 'batch_id' : 'nroCotizacion', $isGroup ? $record->batch_id : $id)
+                    ->orderBy('nroCotizacion')
+                    ->pluck('nroCotizacion')
+                    ->each(fn ($quoteId) => $this->cxcService->ensureQuotationReceivable((string) $quoteId));
             }
 
             $ticketId = $this->createTicketForApprovedCotizacion($referenciaToUse, $currentUser);

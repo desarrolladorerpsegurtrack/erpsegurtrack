@@ -2,21 +2,29 @@
 
 namespace App\Services;
 
+use App\Support\ErpPermission;
 use App\Support\ServicePeriod;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class CotizacionService
 {
     protected const SAFE_TEXT_REGEX = '/^[^;<>`]+$/u';
+
     public const STATE_GENERADO = '0';
+
     public const STATE_APROBADO_SP = '1';
+
     public const STATE_APROBADO = '2';
+
     public const STATE_EJECUTADO_SP = '3';
+
     public const STATE_FINALIZADO = '4';
+
     public const STATE_ANULADO = '5';
 
     public function prepareCreateViewData(Request $request): array
@@ -28,7 +36,7 @@ class CotizacionService
         $fields = $this->applyDefaultTipoDocumento($fields, $tipoDefault);
         $fields = $this->applyCreateFechaHoraEmisionField($fields);
 
-        if (!$canListPersonal && !empty($currentDni)) {
+        if (! $canListPersonal && ! empty($currentDni)) {
             $fields = $this->applyReadonlyPersonalField($fields, $currentDni);
         }
 
@@ -138,19 +146,19 @@ class CotizacionService
                 'p.apellido as personal_apellido',
             );
 
-        $userRoles = collect(session('erp_auth.roles') ?? [])->map(fn($r) => mb_strtolower(trim((string) $r)))->filter();
+        $userRoles = collect(session('erp_auth.roles') ?? [])->map(fn ($r) => mb_strtolower(trim((string) $r)))->filter();
         $isAdmin = $userRoles->contains('admin');
         $authPermissions = collect(session('erp_auth.permissions') ?? []);
-        $personalActions = collect($authPermissions->get('ventas.personal', []))->map(fn($v) => \App\Support\ErpPermission::normalizeAction((string) $v))->filter();
+        $personalActions = collect($authPermissions->get('ventas.personal', []))->map(fn ($v) => ErpPermission::normalizeAction((string) $v))->filter();
         $canListPersonal = $isAdmin || $personalActions->contains('ver');
         $currentDni = session('erp_auth.personal_dni') ?? null;
-        if (!$canListPersonal && !empty($currentDni)) {
+        if (! $canListPersonal && ! empty($currentDni)) {
             $query->where('c.personal_dniPersonal', $currentDni);
         }
 
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
-            $term = '%' . $search . '%';
+            $term = '%'.$search.'%';
             $query->where(function ($builder) use ($term, $search) {
                 $builder->where('c.nroCotizacion', 'like', $term)
                     ->orWhere('cli.razonSocial', 'like', $term)
@@ -168,13 +176,13 @@ class CotizacionService
             if (preg_match('/^\d+$/', $vigenciaSearch)) {
                 $query->where('c.vigenciaOferta_idvigenciaOferta', $vigenciaSearch);
             } else {
-                $query->where('v.detalle', 'like', '%' . $vigenciaSearch . '%');
+                $query->where('v.detalle', 'like', '%'.$vigenciaSearch.'%');
             }
         }
 
         $formaPagoSearch = trim((string) $request->input('forma_pago_search', ''));
         if ($formaPagoSearch !== '') {
-            $term = '%' . $formaPagoSearch . '%';
+            $term = '%'.$formaPagoSearch.'%';
             $query->where('fp.detalle', 'like', $term);
         }
 
@@ -187,7 +195,7 @@ class CotizacionService
 
         $subtotalSearch = trim((string) $request->input('subtotal_search', ''));
         if ($subtotalSearch !== '') {
-            $query->where('c.subtotal', 'like', '%' . $subtotalSearch . '%');
+            $query->where('c.subtotal', 'like', '%'.$subtotalSearch.'%');
         }
 
         $fechaSearch = trim((string) $request->input('fecha_search', ''));
@@ -195,13 +203,13 @@ class CotizacionService
             if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $fechaSearch)) {
                 $query->whereDate('c.fechaHoraEmision', $fechaSearch);
             } else {
-                $query->where('c.fechaHoraEmision', 'like', '%' . $fechaSearch . '%');
+                $query->where('c.fechaHoraEmision', 'like', '%'.$fechaSearch.'%');
             }
         }
 
         $totalSearch = trim((string) $request->input('total_search', ''));
         if ($totalSearch !== '') {
-            $query->where('c.total', 'like', '%' . $totalSearch . '%');
+            $query->where('c.total', 'like', '%'.$totalSearch.'%');
         }
 
         $estadoSearch = trim((string) $request->input('estado_search', ''));
@@ -213,13 +221,13 @@ class CotizacionService
     }
 
     /**
-     * @param array<int, string> $quoteIds
+     * @param  array<int, string>  $quoteIds
      * @return array{success: bool, message: string, quote_ids: array<int, string>, ticket_ids: array<int, int>}
      */
     public function anularCotizaciones(array $quoteIds): array
     {
         $quoteIds = collect($quoteIds)
-            ->map(fn($quoteId): string => trim((string) $quoteId))
+            ->map(fn ($quoteId): string => trim((string) $quoteId))
             ->filter()
             ->unique()
             ->values()
@@ -234,108 +242,195 @@ class CotizacionService
             ];
         }
 
-        return DB::transaction(function () use ($quoteIds): array {
-            $quotes = DB::table('cotizacion')
-                ->whereIn('nroCotizacion', $quoteIds)
-                ->orderBy('nroCotizacion')
-                ->lockForUpdate()
-                ->get(['nroCotizacion', 'batch_id', 'estado']);
+        try {
+            return DB::transaction(function () use ($quoteIds): array {
+                $quotes = DB::table('cotizacion')
+                    ->whereIn('nroCotizacion', $quoteIds)
+                    ->orderBy('nroCotizacion')
+                    ->lockForUpdate()
+                    ->get(['nroCotizacion', 'batch_id', 'estado', 'fechaHoraEmision']);
 
-            if ($quotes->count() !== count($quoteIds)) {
-                return [
-                    'success' => false,
-                    'message' => 'Una o más cotizaciones seleccionadas ya no existen.',
-                    'quote_ids' => [],
-                    'ticket_ids' => [],
-                ];
-            }
-
-            if ($quotes->contains(fn($quote): bool => !in_array(
-                (string) ($quote->estado ?? ''),
-                [self::STATE_GENERADO, self::STATE_APROBADO_SP],
-                true
-            ))) {
-                return [
-                    'success' => false,
-                    'message' => 'Solo se pueden anular cotizaciones en estado Generado o Aprobado(SP).',
-                    'quote_ids' => [],
-                    'ticket_ids' => [],
-                ];
-            }
-
-            $paidQuoteMarkers = $quotes
-                ->pluck('nroCotizacion')
-                ->map(static fn(string $quoteId): string => 'COTIZACION:' . $quoteId)
-                ->all();
-            if (DB::table('cuentasporcobrar')
-                ->whereIn('descripcion', $paidQuoteMarkers)
-                ->where('estado', '<>', 'NUEVO')
-                ->exists()) {
-                return [
-                    'success' => false,
-                    'message' => 'No se puede anular una cotización que ya tiene un pago o una detracción/retención pendiente.',
-                    'quote_ids' => [],
-                    'ticket_ids' => [],
-                ];
-            }
-
-            DB::table('cotizacion')
-                ->whereIn('nroCotizacion', $quoteIds)
-                ->update(['estado' => self::STATE_ANULADO]);
-
-            $references = $quotes
-                ->map(fn($quote): string => trim((string) ($quote->batch_id ?? '')) ?: (string) $quote->nroCotizacion)
-                ->unique()
-                ->values();
-            $ticketIds = [];
-            $quotationOperationId = DB::table('tipooperacion')
-                ->where('nomenclatura', 'CT')
-                ->orWhere('detalle', 'like', '%Cotizaci%')
-                ->value('idtipoOperacion');
-
-            if ($quotationOperationId) {
-                foreach ($references as $reference) {
-                    $hasActiveQuote = DB::table('cotizacion')
-                        ->where('estado', '<>', self::STATE_ANULADO)
-                        ->where(function ($query) use ($reference): void {
-                            $query->where('nroCotizacion', $reference)
-                                ->orWhere('batch_id', $reference);
-                        })
-                        ->exists();
-
-                    if ($hasActiveQuote) {
-                        continue;
-                    }
-
-                    $tickets = DB::table('ticket')
-                        ->where('pedidoReferencia', $reference)
-                        ->where('tipoOperacion_idtipoOperacion', $quotationOperationId)
-                        ->where('estado', '<>', 'Resuelto')
-                        ->lockForUpdate()
-                        ->get(['idticket']);
-
-                    if ($tickets->isEmpty()) {
-                        continue;
-                    }
-
-                    DB::table('ticket')
-                        ->whereIn('idticket', $tickets->pluck('idticket'))
-                        ->update([
-                            'estado' => 'Resuelto',
-                            'fechaHoraCierre' => now()->format('Y-m-d H:i:s'),
-                        ]);
-
-                    $ticketIds = array_merge($ticketIds, $tickets->pluck('idticket')->map(fn($id): int => (int) $id)->all());
+                if ($quotes->count() !== count($quoteIds)) {
+                    return [
+                        'success' => false,
+                        'message' => 'Una o más cotizaciones seleccionadas ya no existen.',
+                        'quote_ids' => [],
+                        'ticket_ids' => [],
+                    ];
                 }
-            }
 
+                if ($quotes->contains(fn ($quote): bool => ! in_array(
+                    (string) ($quote->estado ?? ''),
+                    [self::STATE_GENERADO, self::STATE_APROBADO_SP, self::STATE_APROBADO],
+                    true
+                ))) {
+                    return [
+                        'success' => false,
+                        'message' => 'Solo se pueden anular cotizaciones en estado Generado, Aprobado(SP) o Aprobado.',
+                        'quote_ids' => [],
+                        'ticket_ids' => [],
+                    ];
+                }
+
+                $cxcRowsByQuote = collect();
+                if (Schema::hasTable('cuentasporcobrar')) {
+                    $paidQuoteMarkers = $quotes
+                        ->pluck('nroCotizacion')
+                        ->map(static fn (string $quoteId): string => 'COTIZACION:'.$quoteId)
+                        ->all();
+                    $cxcRowsByQuote = DB::table('cuentasporcobrar')
+                        ->whereIn('descripcion', $paidQuoteMarkers)
+                        ->orderBy('idcuentasPorCobrar')
+                        ->lockForUpdate()
+                        ->get(['idcuentasPorCobrar', 'descripcion', 'estado', 'fechaRegistro'])
+                        ->keyBy(fn ($cxc): string => substr((string) $cxc->descripcion, strlen('COTIZACION:')));
+                }
+
+                $hasPaidUnapprovedQuote = $quotes->contains(function ($quote) use ($cxcRowsByQuote): bool {
+                    if ((string) $quote->estado === self::STATE_APROBADO) {
+                        return false;
+                    }
+
+                    $cxc = $cxcRowsByQuote->get((string) $quote->nroCotizacion);
+
+                    return $cxc && (string) $cxc->estado !== 'NUEVO';
+                });
+                if ($hasPaidUnapprovedQuote) {
+                    return [
+                        'success' => false,
+                        'message' => 'No se puede anular una cotización en estado Generado o Aprobado(SP) que ya tiene un pago o una detracción/retención pendiente.',
+                        'quote_ids' => [],
+                        'ticket_ids' => [],
+                    ];
+                }
+
+                foreach ($quotes->where('estado', self::STATE_APROBADO) as $quote) {
+                    $cxc = $cxcRowsByQuote->get((string) $quote->nroCotizacion);
+                    $approvalDate = $cxc->fechaRegistro ?? null;
+                    if (! $approvalDate) {
+                        return [
+                            'success' => false,
+                            'message' => 'No se puede anular la cotización porque no se encontró la fecha de aprobación.',
+                            'quote_ids' => [],
+                            'ticket_ids' => [],
+                        ];
+                    }
+
+                    try {
+                        $annulmentDeadline = Carbon::parse($approvalDate)->startOfDay()->addDays(7);
+                    } catch (\Throwable) {
+                        throw new \RuntimeException('No se pudo validar la fecha de aprobación de la cotización '.$quote->nroCotizacion.'.');
+                    }
+                    if (Carbon::now()->startOfDay()->gt($annulmentDeadline)) {
+                        return [
+                            'success' => false,
+                            'message' => 'No se puede anular la cotización porque han pasado más de 7 días desde su aprobación.',
+                            'quote_ids' => [],
+                            'ticket_ids' => [],
+                        ];
+                    }
+
+                    if (! $cxc) {
+                        continue;
+                    }
+
+                    $cxcId = (int) $cxc->idcuentasPorCobrar;
+                    $hasPaymentActivity = Schema::hasTable('detallecxc')
+                        && DB::table('detallecxc')
+                            ->where('cuentasPorCobrar_idcuentasPorCobrar', $cxcId)
+                            ->where('estado', '1')
+                            ->where(function ($query): void {
+                                $query->whereNotNull('fechaPago')
+                                    ->orWhereNotNull('bancos_idbancos');
+                            })
+                            ->exists();
+                    $hasCreditNoteActivity = Schema::hasTable('nota_credito_aplicacion')
+                        && DB::table('nota_credito_aplicacion')
+                            ->where('cuentasPorCobrar_idcuentasPorCobrar', $cxcId)
+                            ->where('estado', '1')
+                            ->exists();
+
+                    if ($hasPaymentActivity || $hasCreditNoteActivity) {
+                        (new CxcService)->revertirPagoCancelado(
+                            $cxcId,
+                            'Sistema',
+                            'Anulación de cotización '.$quote->nroCotizacion
+                        );
+                    }
+
+                    DB::table('cuentasporcobrar')
+                        ->where('idcuentasPorCobrar', $cxcId)
+                        ->update([
+                            'estado' => 'ANULADO',
+                            'montoActual' => 0,
+                        ]);
+                }
+
+                DB::table('cotizacion')
+                    ->whereIn('nroCotizacion', $quoteIds)
+                    ->update(['estado' => self::STATE_ANULADO]);
+
+                $references = $quotes
+                    ->map(fn ($quote): string => trim((string) ($quote->batch_id ?? '')) ?: (string) $quote->nroCotizacion)
+                    ->unique()
+                    ->values();
+                $ticketIds = [];
+                $quotationOperationId = DB::table('tipooperacion')
+                    ->where('nomenclatura', 'CT')
+                    ->orWhere('detalle', 'like', '%Cotizaci%')
+                    ->value('idtipoOperacion');
+
+                if ($quotationOperationId) {
+                    foreach ($references as $reference) {
+                        $hasActiveQuote = DB::table('cotizacion')
+                            ->where('estado', '<>', self::STATE_ANULADO)
+                            ->where(function ($query) use ($reference): void {
+                                $query->where('nroCotizacion', $reference)
+                                    ->orWhere('batch_id', $reference);
+                            })
+                            ->exists();
+
+                        if ($hasActiveQuote) {
+                            continue;
+                        }
+
+                        $tickets = DB::table('ticket')
+                            ->where('pedidoReferencia', $reference)
+                            ->where('tipoOperacion_idtipoOperacion', $quotationOperationId)
+                            ->where('estado', '<>', 'Resuelto')
+                            ->lockForUpdate()
+                            ->get(['idticket']);
+
+                        if ($tickets->isEmpty()) {
+                            continue;
+                        }
+
+                        DB::table('ticket')
+                            ->whereIn('idticket', $tickets->pluck('idticket'))
+                            ->update([
+                                'estado' => 'Resuelto',
+                                'fechaHoraCierre' => now()->format('Y-m-d H:i:s'),
+                            ]);
+
+                        $ticketIds = array_merge($ticketIds, $tickets->pluck('idticket')->map(fn ($id): int => (int) $id)->all());
+                    }
+                }
+
+                return [
+                    'success' => true,
+                    'message' => '',
+                    'quote_ids' => $quoteIds,
+                    'ticket_ids' => array_values(array_unique($ticketIds)),
+                ];
+            });
+        } catch (\RuntimeException $exception) {
             return [
-                'success' => true,
-                'message' => '',
-                'quote_ids' => $quoteIds,
-                'ticket_ids' => array_values(array_unique($ticketIds)),
+                'success' => false,
+                'message' => 'No se pudo anular la selección: '.$exception->getMessage(),
+                'quote_ids' => [],
+                'ticket_ids' => [],
             ];
-        });
+        }
     }
 
     private function wherePersonalMatches(Builder $query, string $search): void
@@ -343,7 +438,7 @@ class CotizacionService
         $terms = preg_split('/\s+/u', trim($search), -1, PREG_SPLIT_NO_EMPTY) ?: [];
 
         foreach ($terms as $term) {
-            $likeTerm = '%' . $term . '%';
+            $likeTerm = '%'.$term.'%';
             $query->where(function ($termQuery) use ($likeTerm) {
                 $termQuery->where('p.dniPersonal', 'like', $likeTerm)
                     ->orWhere('p.nombre', 'like', $likeTerm)
@@ -475,13 +570,13 @@ class CotizacionService
 
     private function applyDefaultTipoDocumento(array $fields, ?object $tipoDefault): array
     {
-        if (!$tipoDefault) {
+        if (! $tipoDefault) {
             return $fields;
         }
 
         $next = ((int) ($tipoDefault->correlativo ?? 0)) + 1;
         $serie = trim((string) ($tipoDefault->serie ?? 'CT'));
-        $previewId = $serie . sprintf('%05d', $next);
+        $previewId = $serie.sprintf('%05d', $next);
 
         array_unshift($fields, [
             'name' => 'nroCotizacion_preview',
@@ -498,6 +593,7 @@ class CotizacionService
                     'type' => 'hidden',
                     'value' => null,
                 ];
+
                 continue;
             }
 
@@ -551,7 +647,7 @@ class CotizacionService
 
         $labelValue = $currentDni;
         if ($personalRow) {
-            $labelValue = trim((string) ($personalRow->dniPersonal ?? '')) . ' - ' . ($personalRow->nombre ?? '') . ' ' . trim((string) ($personalRow->apellido ?? ''));
+            $labelValue = trim((string) ($personalRow->dniPersonal ?? '')).' - '.($personalRow->nombre ?? '').' '.trim((string) ($personalRow->apellido ?? ''));
         }
 
         foreach ($fields as $idx => $f) {
@@ -587,25 +683,26 @@ class CotizacionService
             ->orderBy('p.apellido')
             ->get()
             ->map(function ($r) {
-                $label = trim((string) ($r->dniPersonal ?? '')) . ' - ' . ($r->nombre ?? '') . ' ' . trim((string) ($r->apellido ?? ''));
+                $label = trim((string) ($r->dniPersonal ?? '')).' - '.($r->nombre ?? '').' '.trim((string) ($r->apellido ?? ''));
+
                 return (object) [
                     'dniPersonal' => $r->dniPersonal,
                     'label' => $label,
                 ];
             });
 
-        if ($isAdmin && !empty($currentDni)) {
-            $exists = $personales->first(fn($p) => (($p->dniPersonal ?? '') === $currentDni));
-            if (!$exists) {
+        if ($isAdmin && ! empty($currentDni)) {
+            $exists = $personales->first(fn ($p) => (($p->dniPersonal ?? '') === $currentDni));
+            if (! $exists) {
                 $personalRow = DB::table('personal as p')
                     ->leftJoin('cargopersonal as cp', 'p.cargoPersonal_idcargoPersonal', '=', 'cp.idcargoPersonal')
                     ->select('p.dniPersonal', 'p.nombre', 'p.apellido', 'cp.descripcion as cargo')
                     ->where('p.dniPersonal', $currentDni)
                     ->first();
 
-                $label = $currentDni . ' - admin';
+                $label = $currentDni.' - admin';
                 if ($personalRow) {
-                    $label = trim((string) ($personalRow->dniPersonal ?? '')) . ' - ' . ($personalRow->nombre ?? '') . ' ' . trim((string) ($personalRow->apellido ?? ''));
+                    $label = trim((string) ($personalRow->dniPersonal ?? '')).' - '.($personalRow->nombre ?? '').' '.trim((string) ($personalRow->apellido ?? ''));
                 }
 
                 $personales->push((object) ['dniPersonal' => $currentDni, 'label' => $label]);
@@ -623,6 +720,7 @@ class CotizacionService
             ->get()
             ->map(function ($c) {
                 $label = trim((string) ($c->razonSocial ?? '')) ?: trim((string) ($c->nombreComercial ?? '')) ?: trim((string) ($c->idcliente ?? ''));
+
                 return (object) ['idcliente' => $c->idcliente, 'label' => $label, 'document' => $c->idcliente];
             });
     }
@@ -638,10 +736,11 @@ class CotizacionService
                 $dias = (int) ($r->tiempo ?? 0);
                 if ($includeDays) {
                     $dias = (int) ($r->dias ?? 0);
-                    if ($dias > 0 && !str_contains(mb_strtolower($label), 'contado')) {
-                        $label .= ' (' . $dias . ' días)';
+                    if ($dias > 0 && ! str_contains(mb_strtolower($label), 'contado')) {
+                        $label .= ' ('.$dias.' días)';
                     }
                 }
+
                 return (object) ['idvigenciaOferta' => $r->idvigenciaOferta, 'label' => $label];
             });
     }
@@ -655,9 +754,10 @@ class CotizacionService
             ->map(function ($r) {
                 $label = trim((string) ($r->detalle ?? ''));
                 $tiempo = (int) ($r->tiempo ?? 0);
-                if ($tiempo > 0 && !str_contains(mb_strtolower($label), 'contado')) {
-                    $label .= ' (' . $tiempo . ' días)';
+                if ($tiempo > 0 && ! str_contains(mb_strtolower($label), 'contado')) {
+                    $label .= ' ('.$tiempo.' días)';
                 }
+
                 return (object) ['idformaPago' => $r->idformaPago, 'label' => $label];
             });
     }
@@ -669,7 +769,7 @@ class CotizacionService
             ->where('idmoneda', '!=', 4)
             ->orderBy('detalle')
             ->get()
-            ->map(fn($r) => (object) ['idmoneda' => $r->idmoneda, 'label' => $r->detalle]);
+            ->map(fn ($r) => (object) ['idmoneda' => $r->idmoneda, 'label' => $r->detalle]);
     }
 
     private function formatPeriodoLabel(mixed $value): string
@@ -700,14 +800,14 @@ class CotizacionService
             ->map(function ($row) {
                 $almacenDetalle = trim((string) ($row->detalle ?? ''));
                 $label = trim((($almacenDetalle !== '' ? $almacenDetalle : 'Sin dispositivo')));
-                
+
                 $tipoNombre = mb_strtolower(trim((string) ($row->tipo_nombre ?? '')));
                 $isPlanServicio = str_contains($tipoNombre, 'plan') || str_contains($tipoNombre, 'servicio');
-                
-                if ($isPlanServicio && !empty($row->periodo)) {
+
+                if ($isPlanServicio && ! empty($row->periodo)) {
                     $formattedPeriodo = $this->formatPeriodoLabel($row->periodo);
                     if ($formattedPeriodo !== '') {
-                        $label .= ' - ' . $formattedPeriodo;
+                        $label .= ' - '.$formattedPeriodo;
                     }
                 }
 
@@ -726,9 +826,9 @@ class CotizacionService
         $currentDni = session('erp_auth.personal_dni') ?? null;
         $authPermissions = collect(session('erp_auth.permissions') ?? []);
         $personalActions = collect($authPermissions->get('ventas.personal', []))
-            ->map(fn($v) => \App\Support\ErpPermission::normalizeAction((string) $v))
+            ->map(fn ($v) => ErpPermission::normalizeAction((string) $v))
             ->filter();
-        $userRoles = collect(session('erp_auth.roles') ?? [])->map(fn($r) => mb_strtolower(trim((string) $r)))->filter();
+        $userRoles = collect(session('erp_auth.roles') ?? [])->map(fn ($r) => mb_strtolower(trim((string) $r)))->filter();
         $isAdmin = $userRoles->contains('admin');
         $canListPersonal = $isAdmin || $personalActions->contains('ver');
 
@@ -745,8 +845,7 @@ class CotizacionService
         Collection $vigencias,
         Collection $formasPago,
         Collection $monedas,
-    ): array
-    {
+    ): array {
         foreach ($fields as $idx => $f) {
             if (($f['name'] ?? '') === 'personal_dniPersonal' && (($f['type'] ?? '') !== 'hidden')) {
                 if ($canListPersonal) {
@@ -755,7 +854,7 @@ class CotizacionService
                     $fields[$idx]['optionsData'] = $personales;
                     $fields[$idx]['optionKey'] = 'dniPersonal';
                     $fields[$idx]['optionLabel'] = 'label';
-                    if (!empty($currentDni)) {
+                    if (! empty($currentDni)) {
                         $fields[$idx]['value'] = $currentDni;
                     }
                 }
@@ -788,7 +887,7 @@ class CotizacionService
                 $fields[$idx]['required'] = true;
                 // Default: "Vigencia de 10 dias" (idvigenciaOferta = 1) si no hay valor previo
                 if (empty($fields[$idx]['value'])) {
-                    $fields[$idx]['value'] = '1';
+                    $fields[$idx]['value'] = '4';
                 }
             }
 
@@ -822,7 +921,7 @@ class CotizacionService
         $copyGroupFields = [];
         $copyFrom = $request->input('copy_from');
 
-        if (!$copyFrom) {
+        if (! $copyFrom) {
             return [$record, $copyDetalles, $fields, $copyAsGroup, $copyGroupFields];
         }
 
@@ -832,7 +931,7 @@ class CotizacionService
             ->where('c.nroCotizacion', $copyFrom)
             ->first();
 
-        if (!$record) {
+        if (! $record) {
             return [$record, $copyDetalles, $fields, $copyAsGroup, $copyGroupFields];
         }
 
@@ -874,6 +973,7 @@ class CotizacionService
                     'moneda_idmoneda' => $sourceQuote->moneda_idmoneda,
                     'comentario' => $sourceQuote->comentario,
                 ] : [];
+
                 return (object) [
                     'almacen_idalmacen' => $r->almacen_idalmacen,
                     'precioUnitario' => $r->precioUnitario,
@@ -895,14 +995,14 @@ class CotizacionService
                 $groupKey = 'EQUIPAMIENTO';
             }
             $safeKey = strtolower((string) preg_replace('/[^a-zA-Z0-9]/', '_', $groupKey));
-            if (!isset($copyGroupFields[$safeKey])) {
+            if (! isset($copyGroupFields[$safeKey])) {
                 $copyGroupFields[$safeKey] = $detalle->group_fields ?? [];
             }
         }
 
         foreach ($fields as $idx => $field) {
             $fieldName = $field['name'] ?? null;
-            if (!$fieldName || array_key_exists('value', $field)) {
+            if (! $fieldName || array_key_exists('value', $field)) {
                 continue;
             }
             if (property_exists($record, $fieldName)) {
@@ -940,9 +1040,9 @@ class CotizacionService
 
         return $paquetesRaw->map(function ($row) use ($detallesPaquetes) {
             $detalles = $detallesPaquetes->where('paquetes_idpaquetes', $row->idpaquetes)->map(function ($d) {
-                $tipo = trim((string) ($d->tipo_nombre ?? '')) . ' - ' . trim((string) ($d->tipo_detalle ?? '')) . '-' . trim((string) ($d->nombrePlataforma ?? ''));
+                $tipo = trim((string) ($d->tipo_nombre ?? '')).' - '.trim((string) ($d->tipo_detalle ?? '')).'-'.trim((string) ($d->nombrePlataforma ?? ''));
                 $empresa = trim((string) ($d->razonSocial ?? ''));
-                $label = trim(($tipo !== '' ? $tipo : 'Sin tipo') . ' - ' . ($empresa !== '' ? $empresa : (trim((string) ($d->detalle ?? '')) ?: 'Sin empresa')));
+                $label = trim(($tipo !== '' ? $tipo : 'Sin tipo').' - '.($empresa !== '' ? $empresa : (trim((string) ($d->detalle ?? '')) ?: 'Sin empresa')));
                 $precio = (floatval($d->precioPaquete) > 0) ? $d->precioPaquete : $d->precioAlmacen;
 
                 return (object) [
@@ -981,8 +1081,7 @@ class CotizacionService
         Collection $vigencias,
         Collection $formasPago,
         Collection $monedas,
-    ): array
-    {
+    ): array {
         $newFields = [];
         foreach ($fields as $f) {
             if (($f['name'] ?? '') === 'personal_dniPersonal') {
@@ -992,13 +1091,14 @@ class CotizacionService
                     $f['optionsData'] = $personales;
                     $f['optionKey'] = 'dniPersonal';
                     $f['optionLabel'] = 'label';
-                    if (!empty($currentDni)) {
+                    if (! empty($currentDni)) {
                         $f['value'] = $currentDni;
                     }
                     $newFields[] = $f;
                 } else {
                     $newFields[] = $f;
                 }
+
                 continue;
             }
 
@@ -1049,7 +1149,7 @@ class CotizacionService
 
         foreach ($newFields as $idx => $field) {
             $fieldName = $field['name'] ?? null;
-            if (!$fieldName || array_key_exists('value', $field)) {
+            if (! $fieldName || array_key_exists('value', $field)) {
                 continue;
             }
             if ($record && property_exists($record, $fieldName)) {
@@ -1115,6 +1215,7 @@ class CotizacionService
             ->get()
             ->map(function ($r) use ($sourceQuotesByNumber) {
                 $sourceQuote = $sourceQuotesByNumber->get($r->cotizacion_nroCotizacion);
+
                 return (object) [
                     'almacen_idalmacen' => $r->almacen_idalmacen,
                     'precioUnitario' => $r->precioUnitario,
@@ -1149,7 +1250,7 @@ class CotizacionService
             'formaPago_idformaPago' => ['nullable', 'required_without:cotizaciones', 'integer', 'exists:formapago,idformaPago'],
             'moneda_idmoneda' => ['nullable', 'required_without:cotizaciones', 'integer', 'exists:moneda,idmoneda'],
             'comentario' => ['nullable', 'string', 'max:100'],
-            'nroCotizacion' => ['nullable', 'string', 'max:15', 'regex:' . self::SAFE_TEXT_REGEX],
+            'nroCotizacion' => ['nullable', 'string', 'max:15', 'regex:'.self::SAFE_TEXT_REGEX],
             'cotizaciones' => ['nullable', 'array'],
             'cotizaciones.*.tipo_nombre' => ['required_with:cotizaciones', 'string'],
             'cotizaciones.*.subtotal' => ['required_with:cotizaciones', 'numeric'],
@@ -1275,12 +1376,14 @@ class CotizacionService
     public function nullableString(mixed $value): ?string
     {
         $stringValue = trim((string) ($value ?? ''));
+
         return $stringValue === '' ? null : $stringValue;
     }
 
     public function nullableNumber(mixed $value): ?string
     {
         $stringValue = trim((string) ($value ?? ''));
+
         return $stringValue === '' ? null : $stringValue;
     }
 
@@ -1325,7 +1428,7 @@ class CotizacionService
             default => 'color: #374151;',
         };
 
-        return '<span style="' . $style . ' font-weight: 700;">' . e($name) . '</span>';
+        return '<span style="'.$style.' font-weight: 700;">'.e($name).'</span>';
     }
 
     public function isCotizacionExpired(object $row): bool
@@ -1339,6 +1442,7 @@ class CotizacionService
 
         try {
             $expiration = Carbon::parse($fechaHoraEmision)->addDays($dias)->endOfDay();
+
             return $expiration->isPast();
         } catch (\Throwable $e) {
             return false;
@@ -1351,7 +1455,7 @@ class CotizacionService
             return '-';
         }
 
-        return trim($currencySymbol) . ' ' . number_format((float) $value, 2, '.', ',');
+        return trim($currencySymbol).' '.number_format((float) $value, 2, '.', ',');
     }
 
     public function currencySymbol(?string $moneda): string

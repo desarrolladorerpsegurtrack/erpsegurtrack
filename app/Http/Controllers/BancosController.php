@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Export\ExportableList;
+use App\Http\Controllers\Permission\HandlesResourceLock;
 use App\Services\BancosService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\RedirectResponse;
@@ -13,8 +14,10 @@ use Illuminate\View\View;
 class BancosController extends Controller
 {
     use ExportableList;
+    use HandlesResourceLock;
 
     protected const SAFE_TEXT_REGEX = '/^[^;<>`]+$/u';
+    private const CREDIT_NOTE_LOCK_RESOURCE = 'finanzas.nota_creditos';
 
     public function __construct(private BancosService $bancosService)
     {
@@ -74,6 +77,7 @@ class BancosController extends Controller
                     ['value' => 'C', 'label' => 'Aplicación de saldo a favor'],
                     ['value' => 'T', 'label' => 'Detracción/retención aplicada'],
                     ['value' => 'AUTODETRACCION', 'label' => 'Autodetracción'],
+                    ['value' => 'ANULADO', 'label' => 'Anulado/Revertido'],
                 ]],
             ],
             'createRoute' => route('modules.finanzas.bancos.create'),
@@ -234,6 +238,8 @@ class BancosController extends Controller
                 'A' => 'Aplicada',
                 default => (string) $row->estado,
             };
+            $row->canEdit = (bool) $row->can_modify;
+            $row->canDelete = (bool) $row->can_modify;
             return $row;
         });
         $totals = DB::table('nota_credito as nc')
@@ -281,7 +287,10 @@ class BancosController extends Controller
                 'pdf' => route('modules.finanzas.nota-creditos.export', ['format' => 'pdf']),
                 'xlsx' => route('modules.finanzas.nota-creditos.export', ['format' => 'xlsx']),
             ],
-            'showActionsColumn' => false,
+            'editRoute' => 'modules.finanzas.nota-creditos.edit',
+            'showRoute' => 'modules.finanzas.nota-creditos.edit',
+            'destroyRoute' => 'modules.finanzas.nota-creditos.destroy',
+            'lockResource' => self::CREDIT_NOTE_LOCK_RESOURCE,
             'showResultStat' => true,
             'resultsLabel' => 'Notas de crédito encontradas',
             'identifierKey' => 'idnotacredito',
@@ -402,6 +411,118 @@ class BancosController extends Controller
             ->with('success', 'Nota de crédito creada correctamente.');
     }
 
+    public function editNotaCredito(int $id): View|RedirectResponse
+    {
+        $record = DB::table('nota_credito')->where('idnotacredito', $id)->first();
+        abort_unless($record !== null, 404);
+
+        if (!$this->notaCreditoEsModificable($id, (string) $record->estado)) {
+            return redirect()->route('modules.finanzas.nota-creditos.index')
+                ->with('error', 'No se puede editar una nota de crédito que ya tiene aplicaciones asociadas.');
+        }
+
+        return view('finanzas.bancos-form', $this->formViewData(
+            'Editar Nota de crédito',
+            'edit',
+            $record,
+            $id,
+            null,
+            true
+        ) + $this->prepareLockViewData(self::CREDIT_NOTE_LOCK_RESOURCE, (string) $id));
+    }
+
+    public function updateNotaCredito(Request $request, int $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable(
+            $request,
+            self::CREDIT_NOTE_LOCK_RESOURCE,
+            (string) $id,
+            'nota de crédito',
+            'modules.finanzas.nota-creditos.index'
+        )) {
+            return $redirect;
+        }
+
+        $validated = $this->validateData($request, true);
+        $updated = DB::transaction(function () use ($id, $validated): bool {
+            $record = DB::table('nota_credito')
+                ->where('idnotacredito', $id)
+                ->lockForUpdate()
+                ->first();
+            abort_unless($record !== null, 404);
+
+            if (!$this->notaCreditoEsModificable($id, (string) $record->estado)) {
+                return false;
+            }
+
+            DB::table('nota_credito')->where('idnotacredito', $id)->update([
+                'cliente_idcliente' => $validated['cliente_idcliente'],
+                'moneda_idmoneda' => $validated['moneda_idmoneda'],
+                'docReferencia' => $validated['docReferencia'],
+                'monto' => $validated['monto'],
+                'descripcion' => $validated['descripcion'] ?? null,
+            ]);
+
+            return true;
+        });
+
+        if (!$updated) {
+            return redirect()->route('modules.finanzas.nota-creditos.index')
+                ->with('error', 'No se puede editar una nota de crédito que ya tiene aplicaciones asociadas.');
+        }
+
+        $this->publishResourceEvent(self::CREDIT_NOTE_LOCK_RESOURCE, (string) $id, 'updated');
+        $this->releaseLockIfOwned($request, self::CREDIT_NOTE_LOCK_RESOURCE, (string) $id);
+
+        return redirect()->route('modules.finanzas.nota-creditos.index')
+            ->with('success', 'Nota de crédito actualizada correctamente.');
+    }
+
+    public function destroyNotaCredito(Request $request, int $id): RedirectResponse
+    {
+        if ($redirect = $this->assertLockAvailable(
+            $request,
+            self::CREDIT_NOTE_LOCK_RESOURCE,
+            (string) $id,
+            'nota de crédito',
+            'modules.finanzas.nota-creditos.index'
+        )) {
+            return $redirect;
+        }
+
+        try {
+            $deleted = DB::transaction(function () use ($id): bool {
+                $record = DB::table('nota_credito')
+                    ->where('idnotacredito', $id)
+                    ->lockForUpdate()
+                    ->first();
+                abort_unless($record !== null, 404);
+
+                if (!$this->notaCreditoEsModificable($id, (string) $record->estado)) {
+                    return false;
+                }
+
+                DB::table('nota_credito')->where('idnotacredito', $id)->delete();
+
+                return true;
+            });
+        } catch (QueryException) {
+            return redirect()->route('modules.finanzas.nota-creditos.index')
+                ->with('error', 'No se puede eliminar la nota de crédito porque tiene dependencias asociadas.');
+        }
+
+        if (!$deleted) {
+            return redirect()->route('modules.finanzas.nota-creditos.index')
+                ->with('error', 'No se puede eliminar una nota de crédito que ya tiene aplicaciones asociadas.');
+        }
+
+        $this->publishResourceEvent(self::CREDIT_NOTE_LOCK_RESOURCE, (string) $id, 'deleted');
+        $this->releaseLockIfOwned($request, self::CREDIT_NOTE_LOCK_RESOURCE, (string) $id);
+
+        return redirect()->route('modules.finanzas.nota-creditos.index')
+            ->with('success', 'Nota de crédito eliminada correctamente.');
+    }
+
     public function edit(int $id): View
     {
         $record = DB::table('bancos')->where('idbancos', $id)->first();
@@ -479,6 +600,14 @@ class BancosController extends Controller
         ]);
     }
 
+    private function notaCreditoEsModificable(int $id, string $estado): bool
+    {
+        return $estado === 'E'
+            && !DB::table('nota_credito_aplicacion')
+                ->where('nota_credito_idnotacredito', $id)
+                ->exists();
+    }
+
     private function formViewData(string $title, string $mode, object|array|null $record = null, ?int $id = null, ?string $defaultTipoMov = null, bool $isCreditNote = false): array
     {
         $value = fn(string $key, mixed $default = null): mixed => data_get($record, $key, $default);
@@ -487,6 +616,19 @@ class BancosController extends Controller
             ['name' => 'entidadBancaria_identidadBancaria', 'type' => 'select', 'label' => 'Entidad bancaria', 'required' => true, 'tomSelect' => true, 'optionsData' => $this->bancosService->getBankOptions(), 'optionKey' => 'identidadBancaria', 'optionLabel' => 'label', 'placeholder' => 'Selecciona entidad bancaria'],
         ];
         if ($isCreditNote) {
+            $currencyOptions = DB::table('moneda')
+                ->where('idmoneda', '!=', 4)
+                ->select('idmoneda', 'detalle', 'simbolo')
+                ->orderBy('detalle')
+                ->get()
+                ->map(function ($currency): object {
+                    $symbol = trim((string) $currency->simbolo);
+
+                    return (object) [
+                        'idmoneda' => $currency->idmoneda,
+                        'label' => strtoupper($symbol) === 'S' ? 'S/' : $symbol,
+                    ];
+                });
             $fields[] = [
                 'name' => 'cliente_idcliente',
                 'type' => 'select',
@@ -522,19 +664,8 @@ class BancosController extends Controller
                 'type' => 'select',
                 'label' => 'Tipo de moneda',
                 'required' => true,
-                'optionsData' => DB::table('moneda')
-                    ->where('idmoneda', '!=', 4)
-                    ->select('idmoneda', 'detalle', 'simbolo')
-                    ->orderBy('detalle')
-                    ->get()
-                    ->map(function ($currency): object {
-                        $symbol = trim((string) $currency->simbolo);
-
-                        return (object) [
-                            'idmoneda' => $currency->idmoneda,
-                            'label' => strtoupper($symbol) === 'S' ? 'S/' : $symbol,
-                        ];
-                    }),
+                'value' => $value('moneda_idmoneda', data_get($currencyOptions->firstWhere('label', 'S/'), 'idmoneda')),
+                'optionsData' => $currencyOptions,
                 'optionKey' => 'idmoneda',
                 'optionLabel' => 'label',
                 'placeholder' => 'Selecciona tipo de moneda',
@@ -573,7 +704,9 @@ class BancosController extends Controller
                 ? ($isCreditNote
                     ? route('modules.finanzas.nota-creditos.store')
                     : route('modules.finanzas.bancos.store'))
-                : route('modules.finanzas.bancos.update', ['id' => $id]),
+                : ($isCreditNote
+                    ? route('modules.finanzas.nota-creditos.update', ['id' => $id])
+                    : route('modules.finanzas.bancos.update', ['id' => $id])),
             'backRoute' => $backRoute,
             'record' => $record,
             'fields' => $fields,
@@ -612,6 +745,10 @@ class BancosController extends Controller
                 'nc.monto',
                 'nc.estado',
             ])
+            ->selectRaw("CASE WHEN nc.estado = 'E' AND NOT EXISTS (
+                SELECT 1 FROM nota_credito_aplicacion AS historial
+                WHERE historial.nota_credito_idnotacredito = nc.idnotacredito
+            ) THEN 1 ELSE 0 END AS can_modify")
             ->selectRaw('COALESCE(cli.razonSocial, cli.nombreComercial, cli.idcliente, "-") as cliente_nombre')
             ->selectRaw('COALESCE(NULLIF(TRIM(m.simbolo), ""), "S/") as moneda_simbolo')
             ->selectRaw('ROUND(nc.monto - COALESCE(aplicada.monto_aplicado, 0), 2) as monto_disponible');
@@ -695,6 +832,10 @@ class BancosController extends Controller
 
         if (str_starts_with(mb_strtolower(trim((string) ($information ?? '')), 'UTF-8'), 'autodetracción')) {
             return 'Autodetracción';
+        }
+
+        if (str_starts_with(mb_strtolower(trim((string) ($information ?? '')), 'UTF-8'), 'autoretención')) {
+            return 'Autoretención';
         }
 
         return match ((string) $type) {

@@ -540,7 +540,8 @@
                                                                         && isset($identifierKey) 
                                                                         && !empty($identifierKey)
                                                                         && data_get($row, $identifierKey) !== null
-                                                                        && $canEdit;
+                                                                        && $canEdit
+                                                                        && (!isset($row->canEdit) || $row->canEdit);
                                                                 @endphp
                                                                 @if($canShowLink)
                                                                     <a class="font-medium text-slate-700 hover:text-primary hover:underline {{ $column['valueClass'] ?? '' }} @if(!empty($column['wrap'] ?? false)) whitespace-normal break-words leading-5 @else whitespace-nowrap @endif" href="{{ route($showRoute, data_get($row, $identifierKey)) }}" title="{{ $cellValue }}">
@@ -725,8 +726,8 @@
                                                     <td data-tw-merge="" class="px-5 border-b dark:border-darkmode-300 relative border-dashed py-4 dark:bg-darkmode-600">
                                                         <div class="flex items-center justify-center h-full">
                                                             @php
-                                                                $canEditRoute = $canEdit && !empty($editRoute);
-                                                                $canDeleteRoute = $canDelete && !empty($destroyRoute);
+                                                                $canEditRoute = $canEdit && !empty($editRoute) && (!isset($row->canEdit) || $row->canEdit);
+                                                                $canDeleteRoute = $canDelete && !empty($destroyRoute) && (!isset($row->canDelete) || $row->canDelete);
                                                                 $canApproveRoute = $canApproveAction && isset($row->canApprove) && $row->canApprove && !empty($row->approveRoute);
                                                                 $canAnularRoute = $canAnularAction && isset($row->canAnular) && $row->canAnular && !empty($row->anularRoute);
                                                                 $rowLockBlocked = false;

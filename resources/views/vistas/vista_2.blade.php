@@ -23,7 +23,7 @@
                 <input type="hidden" name="action" value="back_to_previous">
                 <input type="hidden" name="current_vista_id" value="{{ $vista->idvista ?? '' }}">
                 <button type="button" id="rechazar-btn"
-                    class="ml-auto inline-flex items-center justify-center rounded-md border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-600 transition duration-200 hover:bg-slate-100"
+                    class="ml-auto inline-flex items-center justify-center rounded-md border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-600 transition duration-200 hover:bg-slate-100" style="background-color: white;"
                     onclick="abrirModalRechazar()">
                     <i data-lucide="x-circle" class="mr-2 h-4 w-4"></i>
                     Rechazar

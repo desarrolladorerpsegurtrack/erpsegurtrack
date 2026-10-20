@@ -29,6 +29,12 @@ Route::middleware('erp.module:finanzas')->group(function () {
         ->name('modules.finanzas.nota-creditos.create');
     Route::post('/modulos/finanzas/nota-creditos', [BancosController::class, 'storeNotaCredito'])
         ->name('modules.finanzas.nota-creditos.store');
+    Route::get('/modulos/finanzas/nota-creditos/{id}/editar', [BancosController::class, 'editNotaCredito'])
+        ->name('modules.finanzas.nota-creditos.edit');
+    Route::put('/modulos/finanzas/nota-creditos/{id}', [BancosController::class, 'updateNotaCredito'])
+        ->name('modules.finanzas.nota-creditos.update');
+    Route::delete('/modulos/finanzas/nota-creditos/{id}', [BancosController::class, 'destroyNotaCredito'])
+        ->name('modules.finanzas.nota-creditos.destroy');
     Route::get('/modulos/finanzas/bancos/crear', [BancosController::class, 'create'])->name('modules.finanzas.bancos.create');
     Route::post('/modulos/finanzas/bancos', [BancosController::class, 'store'])->name('modules.finanzas.bancos.store');
     Route::get('/modulos/finanzas/bancos/{id}/editar', [BancosController::class, 'edit'])->name('modules.finanzas.bancos.edit');

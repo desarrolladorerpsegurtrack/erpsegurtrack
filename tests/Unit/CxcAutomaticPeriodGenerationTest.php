@@ -366,6 +366,7 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             $table->string('razonSocial')->nullable();
             $table->string('nombreComercial')->nullable();
             $table->string('flag_integrador')->nullable();
+            $table->boolean('detraccion')->default(false);
         });
         Schema::create('vehiculo', function (Blueprint $table): void {
             $table->string('placa')->primary();
@@ -447,6 +448,7 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             $table->string('razonSocial')->nullable();
             $table->string('nombreComercial')->nullable();
             $table->string('flag_integrador')->nullable();
+            $table->boolean('detraccion')->default(false);
         });
         Schema::create('vehiculo', function (Blueprint $table): void {
             $table->string('placa')->primary();
@@ -1276,6 +1278,104 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertSame('2026-11-23', DB::table('serviciocliente')->value('fecheVencimiento'));
     }
 
+    public function test_paying_october_reuses_the_already_generated_november_successor(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        $currentCxcId = $this->createCxc('REN-CXC-0 P 23/09/2026 a 23/10/2026 SC-41', '3');
+        $successorId = $this->createCxc(
+            'REN-CXC-' . $currentCxcId . ' P 23/10/2026 a 23/11/2026 SC-41',
+            '1'
+        );
+        DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $successorId)
+            ->update(['fechaCancelacion' => '2026-11-23']);
+
+        $result = (new CxcService())->renovarServicioVinculado(
+            DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $currentCxcId)->first(),
+            0,
+            Carbon::parse('2026-10-23'),
+            [41],
+            5
+        );
+
+        $this->assertSame($successorId, $result);
+        $this->assertSame(2, DB::table('cuentasporcobrar')->count());
+        $this->assertSame('2026-11-23', DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $successorId)
+            ->value('fechaCancelacion'));
+        $this->assertSame('2026-11-23', DB::table('serviciocliente')
+            ->where('idservicioCliente', 41)
+            ->value('fecheVencimiento'));
+    }
+
+    public function test_same_client_services_with_different_periods_share_one_visual_group(): void
+    {
+        Schema::create('tipocobro', function (Blueprint $table): void {
+            $table->increments('idtipoCobros');
+            $table->string('recurrencia');
+            $table->integer('tiempo');
+        });
+        DB::table('tipocobro')->insert([
+            ['idtipoCobros' => 6, 'recurrencia' => 'M', 'tiempo' => 3],
+            ['idtipoCobros' => 7, 'recurrencia' => 'M', 'tiempo' => 6],
+        ]);
+
+        $threeMonthService = $this->serviceCxcRow(
+            101,
+            'CXC 23/08/2026 a 23/11/2026 SC-41',
+            '2026-11-23',
+            '1',
+            null
+        );
+        $threeMonthService->servicio_detalle = 'Servicio trimestral';
+        $threeMonthService->servicio_periodo = '3 meses';
+        $threeMonthService->cxc_tipoCobro_idtipoCobros = 6;
+        $threeMonthService->tipoCobro_idtipoCobros = 6;
+        $threeMonthService->idservicioCliente = 41;
+        $threeMonthService->fechaInicio = '2026-08-23';
+        $threeMonthService->dias_restantes = 1;
+
+        $sixMonthService = $this->serviceCxcRow(
+            102,
+            'CXC 28/05/2026 a 28/11/2026 SC-42',
+            '2026-11-28',
+            '1',
+            null
+        );
+        $sixMonthService->servicio_detalle = 'Servicio semestral';
+        $sixMonthService->servicio_periodo = '6 meses';
+        $sixMonthService->cxc_tipoCobro_idtipoCobros = 7;
+        $sixMonthService->tipoCobro_idtipoCobros = 7;
+        $sixMonthService->idservicioCliente = 42;
+        $sixMonthService->fechaInicio = '2026-05-28';
+        $sixMonthService->fecheVencimiento = '2026-11-28';
+        $sixMonthService->dias_restantes = 6;
+
+        $groups = (new \ReflectionMethod(CuentasPorCobrarService::class, 'groupServices'))->invoke(
+            new CuentasPorCobrarService(),
+            collect([$threeMonthService, $sixMonthService]),
+            collect(),
+            [],
+            DB::table('tipocobro')->get()->keyBy('idtipoCobros')
+        );
+        $this->assertCount(1, $groups);
+        $this->assertSame(2, $groups[0]['num_tservicios']);
+        $this->assertSame('2027-02-23', $groups[0]['fecha_fin_siguiente_iso']);
+        $this->assertSame(
+            ['Servicio trimestral', 'Servicio semestral'],
+            array_column($groups[0]['tipos_servicios'], 'servicio_nombre')
+        );
+        $this->assertSame([6, 7], array_column($groups[0]['tipos_servicios'], 'tipo_cobro_id'));
+        $this->assertSame(
+            ['2027-02-23', '2027-05-28'],
+            array_column($groups[0]['tipos_servicios'], 'fecha_fin_siguiente_iso')
+        );
+        $this->assertSame('2027-02-23', $groups[0]['tipos_servicios'][0]['vehiculos'][0]['fecha_fin_siguiente_iso']);
+        $this->assertSame('2027-05-28', $groups[0]['tipos_servicios'][1]['vehiculos'][0]['fecha_fin_siguiente_iso']);
+        $this->assertSame('2026-11-28', $groups[0]['fecha_fin_iso']);
+    }
+
     public function test_previous_unpaid_period_is_available_when_managing_its_successor(): void
     {
         $this->createSchema();
@@ -1403,6 +1503,112 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $nextCxc = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', '!=', $currentCxc->idcuentasPorCobrar)->first();
         $this->assertStringContainsString('25/10/2026 a 25/11/2026', $nextCxc->descripcion);
         $this->assertSame('2026-11-25', DB::table('serviciocliente')->value('fecheVencimiento'));
+    }
+
+    public function test_single_service_advance_keeps_service_end_aligned_with_next_cxc(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        $currentCxcId = $this->createCxc('REN-CXC-0 P 23/09/2026 a 23/10/2026 SC-41', '3');
+        $currentCxc = DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $currentCxcId)
+            ->first();
+
+        (new CxcService())->renovarServicioVinculado(
+            $currentCxc,
+            0,
+            Carbon::parse('2026-10-01'),
+            [41],
+            5,
+            '2027-02-23',
+            true
+        );
+
+        $nextCxc = DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', '!=', $currentCxcId)
+            ->first();
+
+        $this->assertSame('2027-03-23', $nextCxc->fechaCancelacion);
+        $this->assertSame('2027-03-23', DB::table('serviciocliente')
+            ->where('idservicioCliente', 41)
+            ->value('fecheVencimiento'));
+    }
+
+    public function test_advance_successor_cxc_remains_visible_before_service_end_is_aligned(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        Schema::table('almacen', function (Blueprint $table): void {
+            $table->string('detalle')->nullable();
+            $table->integer('tipoElemento_idtipoElemento')->nullable();
+        });
+        Schema::create('cliente', function (Blueprint $table): void {
+            $table->string('idcliente')->primary();
+            $table->string('razonSocial')->nullable();
+            $table->string('nombreComercial')->nullable();
+            $table->string('flag_integrador')->nullable();
+            $table->string('detraccion')->nullable();
+        });
+        Schema::create('vehiculo', function (Blueprint $table): void {
+            $table->string('placa')->primary();
+            $table->string('marca')->nullable();
+            $table->string('modelo')->nullable();
+            $table->string('tracto')->nullable();
+            $table->integer('tipoUnidad_idtable1')->nullable();
+        });
+        Schema::create('tipovehiculo', function (Blueprint $table): void {
+            $table->increments('idtipoVehiculo');
+            $table->string('nombre')->nullable();
+        });
+        Schema::create('tipoelemento', function (Blueprint $table): void {
+            $table->increments('idtipoElemento');
+            $table->integer('plataforma_idplataforma')->nullable();
+        });
+        Schema::create('plataforma', function (Blueprint $table): void {
+            $table->increments('idplataforma');
+            $table->string('nombrePlataforma')->nullable();
+        });
+        Schema::create('detallecxc', function (Blueprint $table): void {
+            $table->increments('iddetalleCXC');
+            $table->integer('cuentasPorCobrar_idcuentasPorCobrar');
+            $table->string('estado')->nullable();
+            $table->dateTime('fechaPago')->nullable();
+        });
+        DB::table('cliente')->insert([
+            'idcliente' => 'CLIENTE-1',
+            'razonSocial' => 'Cliente de prueba',
+        ]);
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fecheVencimiento' => '2027-04-20',
+        ]);
+        $successorId = $this->createCxc('REN-CXC-10 P 20/04/2027 a 20/05/2027 SC-41', '1');
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $successorId)->update([
+            'fechaCancelacion' => '2027-05-20',
+        ]);
+
+        if (DB::getDriverName() === 'sqlite') {
+            $pdo = DB::connection()->getPdo();
+            $pdo->sqliteCreateFunction('CONCAT', static fn (...$parts): string => implode('', $parts), -1);
+            $pdo->sqliteCreateFunction('REGEXP', static fn (string $pattern, string $value): int =>
+                preg_match('/' . $pattern . '/', $value) === 1 ? 1 : 0, 2);
+            $pdo->sqliteCreateFunction('SUBSTRING_INDEX', static function (string $value, string $delimiter, int $count): string {
+                $parts = explode($delimiter, $value);
+                return $count < 0
+                    ? implode($delimiter, array_slice($parts, $count))
+                    : implode($delimiter, array_slice($parts, 0, $count));
+            }, 3);
+            $pdo->sqliteCreateFunction('STR_TO_DATE', static function (string $date): ?string {
+                $parsed = \DateTime::createFromFormat('!d/m/Y', $date);
+                return $parsed ? $parsed->format('Y-m-d') : null;
+            }, 2);
+        }
+
+        $service = new CuentasPorCobrarService();
+        $loadServices = new \ReflectionMethod($service, 'loadServices');
+        $services = $loadServices->invoke($service);
+
+        $this->assertSame([$successorId], $services->pluck('idcuentasPorCobrar')->all());
+        $this->assertSame(['2027-05-20'], $services->pluck('cxc_fechaCancelacion')->all());
     }
 
     public function test_group_renewal_creates_one_unit_cxc_per_service_and_is_idempotent(): void
@@ -1637,6 +1843,75 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertSame(80.0, (float) $nextCxc->montoOriginal);
     }
 
+    public function test_vehicle_price_update_reprices_pending_current_and_future_cxc(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('moneda')->insert(['idmoneda' => 1, 'simbolo' => 'S/']);
+        DB::table('serviciocliente')->insert([
+            'idservicioCliente' => 42,
+            'cliente_idcliente' => 'CLIENTE-1',
+            'estado' => 'activo',
+            'fechaInicio' => '2026-09-23',
+            'fecheVencimiento' => '2026-10-23',
+            'moneda_idmoneda' => 1,
+            'tipoCobro_idtipoCobros' => 5,
+            'monto' => 70,
+            'almacen_idalmacen' => null,
+            'vehiculo_placa' => 'XYZ-987',
+            'docReferencia' => null,
+        ]);
+        $currentCxcId = $this->createCxc('REN-CXC-0 P 23/09/2026 a 23/10/2026 SC-41,42', '1');
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $currentCxcId)->update([
+            'montoOriginal' => 115,
+            'montoActual' => 115,
+        ]);
+        $futureCxcId = $this->createCxc('REN-CXC-1 P 23/10/2026 a 23/11/2026 SC-41,42', '1');
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $futureCxcId)->update([
+            'montoOriginal' => 115,
+            'montoActual' => 115,
+            'fechaCancelacion' => '2026-11-23',
+        ]);
+        $historicalCxcId = $this->createCxc('CXC 23/08/2026 a 23/09/2026 SC-41,42', '3');
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $historicalCxcId)->update([
+            'montoOriginal' => 115,
+            'montoActual' => 0,
+            'fechaCancelacion' => '2026-09-23',
+        ]);
+
+        $controller = new CuentasPorCobrarController(new CxcService(), new CuentasPorCobrarService(), new CotizacionService());
+        $response = $controller->updateServicePrice(Request::create('/', 'PATCH', ['monto' => '80.00']), 41);
+
+        $this->assertSame(200, $response->getStatusCode());
+        foreach ([$currentCxcId, $futureCxcId] as $cxcId) {
+            $cxc = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $cxcId)->first();
+            $this->assertSame(150.0, (float) $cxc->montoOriginal);
+            $this->assertSame(150.0, (float) $cxc->montoActual);
+        }
+        $historicalCxc = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $historicalCxcId)->first();
+        $this->assertSame(115.0, (float) $historicalCxc->montoOriginal);
+        $this->assertSame(0.0, (float) $historicalCxc->montoActual);
+    }
+
+    public function test_vehicle_price_update_rejects_a_cancelled_current_cxc(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('moneda')->insert(['idmoneda' => 1, 'simbolo' => 'S/']);
+        $cancelledCxcId = $this->createCxc('REN-CXC-0 P 23/09/2026 a 23/10/2026 SC-41', '3');
+        $controller = new CuentasPorCobrarController(new CxcService(), new CuentasPorCobrarService(), new CotizacionService());
+
+        try {
+            $controller->updateServicePrice(Request::create('/', 'PATCH', ['monto' => '80.00']), 41);
+            $this->fail('Expected price updates to be rejected for a cancelled current CXC.');
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $exception) {
+            $this->assertSame(422, $exception->getStatusCode());
+        }
+
+        $this->assertSame(45.0, (float) DB::table('serviciocliente')->where('idservicioCliente', 41)->value('monto'));
+        $this->assertSame(45.0, (float) DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $cancelledCxcId)->value('montoOriginal'));
+    }
+
     public function test_cancelled_cxc_is_not_renewed_by_monthly_scheduler(): void
     {
         $this->createSchema();
@@ -1858,6 +2133,102 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $states = DB::table('cuentasporcobrar')->orderBy('idcuentasPorCobrar')->pluck('estado')->all();
         $this->assertSame(['3', 'CANCELADO', 'CANCELADO', '1'], $states);
         $this->assertSame(0.0, (float) DB::table('cuentasporcobrar')->where('estado', 'CANCELADO')->sum('montoActual'));
+    }
+
+    public function test_advance_renews_all_services_after_the_last_paid_period(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fechaInicio' => '2026-10-27',
+            'fecheVencimiento' => '2026-11-27',
+        ]);
+
+        $serviceIds = [41];
+        for ($serviceId = 42; $serviceId <= 50; $serviceId++) {
+            $serviceIds[] = $serviceId;
+            DB::table('serviciocliente')->insert([
+                'idservicioCliente' => $serviceId,
+                'cliente_idcliente' => 'CLIENTE-1',
+                'estado' => 'activo',
+                'fechaInicio' => '2026-10-27',
+                'fecheVencimiento' => '2026-11-27',
+                'moneda_idmoneda' => 1,
+                'tipoCobro_idtipoCobros' => 5,
+                'monto' => 45,
+                'almacen_idalmacen' => null,
+                'vehiculo_placa' => 'PLACA-' . $serviceId,
+                'docReferencia' => null,
+            ]);
+        }
+
+        $serviceMarker = 'SC-' . implode(',', $serviceIds);
+        $currentCxcId = $this->createCxc(
+            'REN-CXC-0 P 27/10/2026 a 27/11/2026 ' . $serviceMarker,
+            '3'
+        );
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $currentCxcId)->update([
+            'montoOriginal' => 450,
+            'montoActual' => 0,
+            'fechaCancelacion' => '2026-11-27',
+        ]);
+
+        foreach ($serviceIds as $serviceId) {
+            $futureCxcId = $this->createCxc(
+                'REN-CXC-' . $currentCxcId . ' P 27/11/2026 a 27/12/2026 SC-' . $serviceId,
+                '1'
+            );
+            DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $futureCxcId)->update([
+                'fechaCancelacion' => '2026-12-27',
+            ]);
+        }
+
+        $advanceUntil = CxcService::advancePeriodEnd('2026-11-27', 2)->toDateString();
+        $currentCxc = DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $currentCxcId)
+            ->first();
+        $cancelAdvance = new \ReflectionMethod(CxcService::class, 'cancelarCxcsCubiertasPorAdelanto');
+        $cancelAdvance->invoke(new CxcService(), $currentCxc, $serviceIds, '2026-11-27', $advanceUntil);
+
+        $service = new CxcService();
+        $service->renovarServicioVinculado(
+            $currentCxc,
+            0,
+            Carbon::parse('2026-11-27'),
+            $serviceIds,
+            5,
+            $advanceUntil,
+            true
+        );
+
+        $successors = DB::table('cuentasporcobrar')
+            ->where('descripcion', 'like', 'REN-CXC-' . $currentCxcId . ' P 27/12/2026 a 27/01/2027%')
+            ->orderBy('idcuentasPorCobrar')
+            ->get();
+
+        $this->assertSame('2026-12-27', $advanceUntil);
+        $this->assertSame(10, DB::table('cuentasporcobrar')->where('estado', 'CANCELADO')->count());
+        $this->assertCount(10, $successors);
+        $this->assertSame(
+            array_fill(0, 10, '2027-01-27'),
+            $successors->pluck('fechaCancelacion')->all()
+        );
+        $this->assertSame(
+            array_fill(0, 10, '2027-01-27'),
+            DB::table('serviciocliente')->orderBy('idservicioCliente')->pluck('fecheVencimiento')->all()
+        );
+
+        $service->renovarServicioVinculado(
+            $currentCxc,
+            0,
+            Carbon::parse('2026-11-27'),
+            $serviceIds,
+            5,
+            $advanceUntil,
+            true
+        );
+
+        $this->assertSame(21, DB::table('cuentasporcobrar')->count());
     }
 
     public function test_editing_service_dates_updates_only_its_unpaid_cxc(): void

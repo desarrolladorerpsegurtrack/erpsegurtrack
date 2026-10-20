@@ -45,6 +45,43 @@ class CxcPaymentReversalTest extends TestCase
         }
     }
 
+    public function test_individual_vehicle_reversal_only_accepts_a_single_service_cxc(): void
+    {
+        Carbon::setTestNow('2026-10-16 12:00:00');
+        try {
+            $this->createSchema();
+            $this->createPaidCxc();
+
+            try {
+                (new CxcService())->revertirPagoCancelado(10, 'tester', 'Anular un vehículo', 41);
+                $this->fail('Expected grouped CXC reversal to be rejected for an individual vehicle.');
+            } catch (\RuntimeException $exception) {
+                $this->assertStringContainsString('no se puede anular como pago individual', $exception->getMessage());
+            }
+
+            $this->assertSame('3', DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', 10)->value('estado'));
+            $this->assertSame('1', DB::table('detallecxc')->where('cuentasPorCobrar_idcuentasPorCobrar', 10)->value('estado'));
+
+            DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', 10)->update([
+                'descripcion' => 'CXC 01/10/2026 a 31/10/2026 SC-41',
+            ]);
+            DB::table('cuentasporcobrar_serviciocliente')
+                ->where('cuentasPorCobrar_idcuentasPorCobrar', 10)
+                ->where('servicioCliente_idservicioCliente', 42)
+                ->delete();
+            $this->createSuccessor();
+
+            $result = (new CxcService())->revertirPagoCancelado(10, 'tester', 'Anular un vehículo', 41);
+
+            $this->assertSame([11], $result['cxcSiguientesEliminados']);
+            $this->assertSame(1, DB::table('cuentasporcobrar')->count());
+            $this->assertNull(DB::table('serviciocliente')->where('idservicioCliente', 41)->value('docReferencia'));
+            $this->assertSame('F001-10', DB::table('serviciocliente')->where('idservicioCliente', 42)->value('docReferencia'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_reversal_is_blocked_when_successor_has_a_bank_movement(): void
     {
         Carbon::setTestNow('2026-10-16 12:00:00');

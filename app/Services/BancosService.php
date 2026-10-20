@@ -22,21 +22,33 @@ class BancosService
 
     public function getStats(Request $request): array
     {
+        $pairedPaymentQuery = $this->annulledPairedPaymentQuery($request);
         $balanceQuery = $this->applyOperationalMovementFilter(
             $this->applyFilters($this->joinedQuery(), $request)
         );
         $rows = (clone $balanceQuery)
             ->selectRaw("COALESCE(NULLIF(TRIM(m.simbolo), ''), 'S/') as moneda_simbolo")
             ->selectRaw("SUM(CASE WHEN b.tipoMov = 'I' THEN b.monto ELSE 0 END) as balance_positivo")
-            ->selectRaw("SUM(CASE WHEN b.tipoMov = 'S' OR (b.tipoMov = 'T' AND LTRIM(b.informacion) LIKE 'Autodetracción%') THEN b.monto ELSE 0 END) as balance_negativo")
+            ->selectRaw("SUM(CASE WHEN b.tipoMov = 'S' OR (b.tipoMov = 'T' AND (LTRIM(b.informacion) LIKE 'Autodetracción%' OR LTRIM(b.informacion) LIKE 'Autoretención%' OR LTRIM(b.informacion) LIKE 'Detracción pagada%' OR LTRIM(b.informacion) LIKE 'Retención pagada%')) THEN b.monto ELSE 0 END) as balance_negativo")
             ->groupBy('m.simbolo')
             ->get();
         $annulledRows = $this->applyFilters($this->joinedQuery(), $request)
             ->whereRaw('LTRIM(b.informacion) LIKE ?', ['[ANULADO]%'])
             ->selectRaw("COALESCE(NULLIF(TRIM(m.simbolo), ''), 'S/') as moneda_simbolo")
-            ->selectRaw('SUM(b.monto) as anulado_revertido')
-            ->selectRaw("SUM(CASE WHEN b.tipoMov = 'S' OR (b.tipoMov = 'T' AND b.informacion LIKE '%Autodetracción pagada de%') THEN b.monto ELSE 0 END) as anuladas_salidas")
-            ->selectRaw("SUM(CASE WHEN b.tipoMov != 'S' AND NOT (b.tipoMov = 'T' AND b.informacion LIKE '%Autodetracción pagada de%') THEN b.monto ELSE 0 END) as anulados_otros")
+            ->selectRaw("SUM(CASE
+                WHEN b.tipoMov = 'T'
+                    AND (
+                        b.informacion LIKE '%Autodetracción pagada de%'
+                        OR b.informacion LIKE '%Autoretención pagada de%'
+                        OR b.informacion LIKE '%Detracción pagada de%'
+                        OR b.informacion LIKE '%Retención pagada de%'
+                    )
+                    AND EXISTS (
+                        ".$pairedPaymentQuery->toSql()."
+                    )
+                THEN 0
+                ELSE b.monto
+            END) as anulado_revertido", $pairedPaymentQuery->getBindings())
             ->groupBy('m.simbolo')
             ->get();
 
@@ -51,8 +63,6 @@ class BancosService
             $symbol = $this->normalizeCurrencySymbol($row->moneda_simbolo);
             $amount = (float) $row->anulado_revertido;
             $balances[$symbol] ??= ['balance_positivo' => 0.0, 'balance_negativo' => 0.0, 'anulado_revertido' => 0.0];
-            $balances[$symbol]['balance_positivo'] += (float) $row->anuladas_salidas;
-            $balances[$symbol]['balance_negativo'] += (float) $row->anulados_otros;
             $balances[$symbol]['anulado_revertido'] += $amount;
         }
 
@@ -645,6 +655,88 @@ class BancosService
             });
     }
 
+    private function annulledPairedPaymentQuery(Request $request)
+    {
+        $query = DB::table('detallecxc as paired_detail')
+            ->join('bancos as paired_bank', 'paired_bank.idbancos', '=', 'paired_detail.bancos_idbancos')
+            ->leftJoin('entidadbancaria as paired_entity', 'paired_entity.identidadBancaria', '=', 'paired_bank.entidadBancaria_identidadBancaria')
+            ->leftJoin('cuentasporcobrar as paired_cxc', 'paired_cxc.idcuentasPorCobrar', '=', 'paired_detail.cuentasPorCobrar_idcuentasPorCobrar')
+            ->leftJoin('cliente as paired_client', 'paired_client.idcliente', '=', 'paired_cxc.cliente_idcliente')
+            ->leftJoin('moneda as paired_currency', 'paired_currency.idmoneda', '=', 'paired_detail.moneda_idmoneda')
+            ->whereColumn('paired_detail.cuentasPorCobrar_idcuentasPorCobrar', 'dc.cuentasPorCobrar_idcuentasPorCobrar')
+            ->where('paired_bank.tipoMov', 'I')
+            ->where('paired_bank.informacion', 'like', '[ANULADO]%');
+
+        $search = trim((string) $request->query('q', ''));
+        if ($search !== '') {
+            $term = '%'.$search.'%';
+            $query->where(function ($builder) use ($term): void {
+                $builder
+                    ->where('paired_bank.idbancos', 'like', $term)
+                    ->orWhere('paired_bank.informacion', 'like', $term)
+                    ->orWhere('paired_bank.tipoMov', 'like', $term)
+                    ->orWhere('paired_entity.razonSocial', 'like', $term)
+                    ->orWhere('paired_entity.descripcion', 'like', $term)
+                    ->orWhere('paired_client.idcliente', 'like', $term)
+                    ->orWhere('paired_client.razonSocial', 'like', $term)
+                    ->orWhere('paired_client.nombreComercial', 'like', $term);
+            });
+        }
+
+        $entityId = trim((string) $request->query('entidadBancaria_identidadBancaria', ''));
+        if ($entityId !== '') {
+            $query->where('paired_bank.entidadBancaria_identidadBancaria', $entityId);
+        }
+
+        $clientSearch = trim((string) $request->query('cliente', ''));
+        if ($clientSearch !== '') {
+            $term = '%'.$clientSearch.'%';
+            $query->where(function ($builder) use ($term): void {
+                $builder
+                    ->where('paired_client.idcliente', 'like', $term)
+                    ->orWhere('paired_client.razonSocial', 'like', $term)
+                    ->orWhere('paired_client.nombreComercial', 'like', $term);
+            });
+        }
+
+        $filters = $request->validate([
+            'fechaDesde' => ['nullable', 'date_format:Y-m-d'],
+            'fechaHasta' => ['nullable', 'date_format:Y-m-d'],
+            'montoDesde' => ['nullable', 'numeric', 'min:0'],
+            'montoHasta' => ['nullable', 'numeric', 'min:0'],
+            'moneda' => ['nullable', 'in:S/,$'],
+        ]);
+        if (!empty($filters['fechaDesde'])) {
+            $query->whereDate('paired_bank.fechaRegistro', '>=', $filters['fechaDesde']);
+        }
+        if (!empty($filters['fechaHasta'])) {
+            $query->whereDate('paired_bank.fechaRegistro', '<=', $filters['fechaHasta']);
+        }
+        if (isset($filters['montoDesde'])) {
+            $query->where('paired_bank.monto', '>=', round((float) $filters['montoDesde'], 2));
+        }
+        if (isset($filters['montoHasta'])) {
+            $query->where('paired_bank.monto', '<=', round((float) $filters['montoHasta'], 2));
+        }
+        if (isset($filters['moneda'])) {
+            $query->whereRaw(
+                "COALESCE(NULLIF(TRIM(paired_currency.simbolo), ''), 'S/') = ?",
+                [$filters['moneda']]
+            );
+        }
+
+        $movementType = strtoupper(trim((string) $request->query('tipoMov', '')));
+        if ($movementType === 'ANULADO') {
+            $query->where('paired_bank.informacion', 'like', '[ANULADO]%');
+        } elseif ($movementType === 'AUTODETRACCION') {
+            $query->whereRaw('1 = 0');
+        } elseif (in_array($movementType, ['I', 'S', 'A', 'C', 'T'], true)) {
+            $query->where('paired_bank.tipoMov', $movementType);
+        }
+
+        return $query->selectRaw('1');
+    }
+
     private function applyFilters($query, Request $request)
     {
         $currencyFilters = $request->validate([
@@ -704,7 +796,19 @@ class BancosService
         $movementType = strtoupper(trim((string) $request->query('tipoMov', '')));
         if ($movementType === 'AUTODETRACCION') {
             $query->where('b.tipoMov', 'T')
-                ->where('b.informacion', 'like', 'Autodetracción%');
+                ->where(function ($builder): void {
+                    $builder->where('b.informacion', 'like', 'Autodetracción%')
+                        ->orWhere('b.informacion', 'like', 'Autoretención%')
+                        ->orWhere(function ($annulled): void {
+                            $annulled->where('b.informacion', 'like', '[ANULADO]%')
+                                ->where(function ($original): void {
+                                    $original->where('b.informacion', 'like', '%Autodetracción pagada%')
+                                        ->orWhere('b.informacion', 'like', '%Autoretención pagada%');
+                                });
+                        });
+                });
+        } elseif ($movementType === 'ANULADO') {
+            $query->where('b.informacion', 'like', '[ANULADO]%');
         } elseif (in_array($movementType, ['I', 'S', 'A', 'C', 'T'], true)) {
             $query->where('b.tipoMov', $movementType);
         }

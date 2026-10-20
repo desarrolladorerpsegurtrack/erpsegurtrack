@@ -4,19 +4,17 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Export\ExportableList;
 use App\Http\Controllers\Permission\HandlesResourceLock;
-use Illuminate\Database\QueryException;
-use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use App\Services\CorrelativoService;
-use App\Services\CxcService;
 use App\Services\CotizacionService;
+use App\Services\CxcService;
 use App\Services\TicketsService;
 use Barryvdh\DomPDF\Facade\Pdf;
-use Illuminate\Validation\Rule;
+use Illuminate\Database\QueryException;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
 class CotizacionController extends Controller
@@ -29,7 +27,9 @@ class CotizacionController extends Controller
     private const LOCK_RESOURCE = 'ventas.cotizaciones';
 
     private CotizacionService $cotizacionService;
+
     private TicketsService $ticketsService;
+
     private CxcService $cxcService;
 
     public function __construct(CotizacionService $cotizacionService, TicketsService $ticketsService, CxcService $cxcService)
@@ -49,7 +49,24 @@ class CotizacionController extends Controller
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
 
-        $items->through(function ($row) {
+        $approvedQuoteIds = $items->getCollection()
+            ->filter(fn ($row): bool => (string) ($row->estado ?? '') === CotizacionService::STATE_APROBADO)
+            ->pluck('nroCotizacion')
+            ->map(fn ($quoteId): string => (string) $quoteId)
+            ->all();
+        $approvalDatesByQuote = $approvedQuoteIds === []
+            ? collect()
+            : DB::table('cuentasporcobrar')
+                ->whereIn('descripcion', array_map(
+                    static fn (string $quoteId): string => 'COTIZACION:'.$quoteId,
+                    $approvedQuoteIds
+                ))
+                ->orderByDesc('idcuentasPorCobrar')
+                ->get(['descripcion', 'fechaRegistro'])
+                ->keyBy(fn ($cxc): string => substr((string) $cxc->descripcion, strlen('COTIZACION:')))
+                ->map(fn ($cxc): ?string => $cxc->fechaRegistro);
+
+        $items->through(function ($row) use ($approvalDatesByQuote) {
             $row->moneda_simbolo = $this->currencySymbol($row->moneda_detalle ?? null);
             $row->total_label = $this->formatMoney(round((float) ($row->total ?? 0), 2), $row->moneda_simbolo);
             $row->subtotal_label = $this->formatMoney($row->subtotal ?? null, $row->moneda_simbolo);
@@ -61,7 +78,7 @@ class CotizacionController extends Controller
             $formaPago = trim((string) ($row->formaPago_detalle ?? ''));
             $tiempo = (int) ($row->formaPago_tiempo ?? 0);
             if (mb_strtolower($formaPago, 'UTF-8') === 'credito' && $tiempo > 0) {
-                $row->formaPago_label = 'Credito (' . $tiempo . ' DÍAS)';
+                $row->formaPago_label = 'Credito ('.$tiempo.' DÍAS)';
             } elseif ($formaPago !== '') {
                 $row->formaPago_label = $formaPago;
             } else {
@@ -71,14 +88,14 @@ class CotizacionController extends Controller
             $nombreVendedor = trim((string) ($row->personal_nombre ?? ''));
             $apellidoVendedor = trim((string) ($row->personal_apellido ?? ''));
             if ($nombreVendedor !== '' || $apellidoVendedor !== '') {
-                $row->personal_label = trim($nombreVendedor . ' ' . $apellidoVendedor);
+                $row->personal_label = trim($nombreVendedor.' '.$apellidoVendedor);
             } elseif (trim((string) ($row->personal_dniPersonal ?? '')) !== '') {
                 $row->personal_label = trim((string) $row->personal_dniPersonal);
             } else {
                 $row->personal_label = '-';
             }
 
-            if (!isset($row->estado) || $row->estado === null || $row->estado === '') {
+            if (! isset($row->estado) || $row->estado === null || $row->estado === '') {
                 $row->estado_label = '-';
             } else {
                 $row->estado_label = $this->formatCotizacionEstadoHtmlLabel($row->estado);
@@ -93,16 +110,21 @@ class CotizacionController extends Controller
                 CotizacionService::STATE_FINALIZADO,
                 CotizacionService::STATE_ANULADO,
             ];
-            $row->canEdit = ($estado === CotizacionService::STATE_GENERADO) && !$row->is_vigencia_expired;
-            $row->canApprove = ($estado === CotizacionService::STATE_GENERADO) && !$row->is_vigencia_expired && $row->canEdit;
+            $row->canEdit = ($estado === CotizacionService::STATE_GENERADO) && ! $row->is_vigencia_expired;
+            $row->canApprove = ($estado === CotizacionService::STATE_GENERADO) && ! $row->is_vigencia_expired && $row->canEdit;
             $row->approveRoute = $row->canApprove ? route('modules.ventas.cotizaciones.approve', ['id' => $row->nroCotizacion]) : null;
-            $row->canDelete = !in_array($estado, [CotizacionService::STATE_FINALIZADO, CotizacionService::STATE_EJECUTADO_SP, CotizacionService::STATE_ANULADO], true);
+            $row->canDelete = ! in_array($estado, [CotizacionService::STATE_FINALIZADO, CotizacionService::STATE_EJECUTADO_SP, CotizacionService::STATE_ANULADO], true);
+            $approvalDate = $approvalDatesByQuote->get((string) $row->nroCotizacion);
             $row->canAnular = in_array($estado, [
                 CotizacionService::STATE_GENERADO,
                 CotizacionService::STATE_APROBADO_SP,
-            ], true);
+            ], true) || (
+                $estado === CotizacionService::STATE_APROBADO
+                && $approvalDate
+                && ! Carbon::now()->startOfDay()->gt(Carbon::parse($approvalDate)->startOfDay()->addDays(7))
+            );
             $row->anularRoute = $row->canAnular ? route('modules.ventas.cotizaciones.anular', ['id' => $row->nroCotizacion]) : null;
-            $row->download_link = '<a href="' . route('modules.ventas.cotizaciones.pdf', ['id' => $row->nroCotizacion]) . '" data-download-cotizacion="' . e($row->nroCotizacion) . '" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item text-slate-600 w-full text-left" title="Descargar PDF"><i data-lucide="download" class="mr-1 h-4 w-4 stroke-[1.3]"></i>Descargar</a>';
+            $row->download_link = '<a href="'.route('modules.ventas.cotizaciones.pdf', ['id' => $row->nroCotizacion]).'" data-download-cotizacion="'.e($row->nroCotizacion).'" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item text-slate-600 w-full text-left" title="Descargar PDF"><i data-lucide="download" class="mr-1 h-4 w-4 stroke-[1.3]"></i>Descargar</a>';
             $batchId = $row->batch_id ?? null;
             $previewUrl = $batchId !== null
                 ? route('modules.ventas.cotizaciones.pdf-grupo', [
@@ -115,12 +137,12 @@ class CotizacionController extends Controller
                     'include_image' => '1',
                     'preview' => '1',
                 ]);
-            $row->nroCotizacion_preview = '<button type="button" class="font-medium text-slate-700 hover:text-primary hover:underline whitespace-nowrap" data-cotizacion-pdf-preview="' . e($previewUrl) . '" data-cotizacion-number="' . e($row->nroCotizacion) . '" title="Ver PDF">' . e($row->nroCotizacion) . '</button>';
+            $row->nroCotizacion_preview = '<button type="button" class="font-medium text-slate-700 hover:text-primary hover:underline whitespace-nowrap" data-cotizacion-pdf-preview="'.e($previewUrl).'" data-cotizacion-number="'.e($row->nroCotizacion).'" title="Ver PDF">'.e($row->nroCotizacion).'</button>';
             $row->copyRoute = route('modules.ventas.cotizaciones.create', ['copy_from' => $row->nroCotizacion]);
             $groupText = $this->formatCotizacionGroupLabel($batchId);
             if ($batchId) {
                 $groupDownloadUrl = route('modules.ventas.cotizaciones.pdf-grupo', ['batch_id' => $batchId]);
-                $row->group_label = '<a href="' . $groupDownloadUrl . '" class="font-medium text-slate-700 hover:text-primary hover:underline  whitespace-nowrap " title="Descargar PDF Grupal" target="_blank">' . e($groupText) . '</a>';
+                $row->group_label = '<a href="'.$groupDownloadUrl.'" class="font-medium text-slate-700 hover:text-primary hover:underline  whitespace-nowrap " title="Descargar PDF Grupal" target="_blank">'.e($groupText).'</a>';
             } else {
                 $row->group_label = e($groupText);
             }
@@ -223,7 +245,7 @@ class CotizacionController extends Controller
     public function export(Request $request, string $format)
     {
         $format = strtolower($format);
-        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+        if (! in_array($format, ['pdf', 'xlsx'], true)) {
             abort(404);
         }
 
@@ -238,12 +260,13 @@ class CotizacionController extends Controller
             $row->cliente_label = isset($row->cliente_label) && trim((string) ($row->cliente_label ?? '')) !== ''
                 ? $row->cliente_label
                 : ($row->razonSocial ?? $row->nombreComercial ?? '-');
-            if (!isset($row->estado) || $row->estado === null || $row->estado === '') {
+            if (! isset($row->estado) || $row->estado === null || $row->estado === '') {
                 $row->estado_label = '-';
             } else {
                 $row->estado_label = $this->formatCotizacionEstadoName($row->estado);
             }
             $row->group_label = $this->formatCotizacionGroupLabel($row->batch_id ?? null);
+
             return $row;
         });
 
@@ -258,9 +281,9 @@ class CotizacionController extends Controller
             ['key' => 'total_label', 'label' => 'Total'],
         ];
 
-        $filename = 'cotizaciones_export_' . now()->format('Ymd_His') . '.' . $format;
+        $filename = 'cotizaciones_export_'.now()->format('Ymd_His').'.'.$format;
 
-        if (!empty($selectedIds) && is_array($selectedIds)) {
+        if (! empty($selectedIds) && is_array($selectedIds)) {
             $rows = $this->baseQuery($request)->whereIn('c.nroCotizacion', array_values($selectedIds))->orderBy('c.fechaHoraEmision')->get();
 
             $rows->transform(function ($row) {
@@ -270,12 +293,13 @@ class CotizacionController extends Controller
                 $row->cliente_label = isset($row->cliente_label) && trim((string) ($row->cliente_label ?? '')) !== ''
                     ? $row->cliente_label
                     : ($row->razonSocial ?? $row->nombreComercial ?? '-');
-                if (!isset($row->estado) || $row->estado === null || $row->estado === '') {
+                if (! isset($row->estado) || $row->estado === null || $row->estado === '') {
                     $row->estado_label = '-';
                 } else {
                     $row->estado_label = $this->formatCotizacionEstadoName($row->estado);
                 }
                 $row->group_label = $this->formatCotizacionGroupLabel($row->batch_id ?? null);
+
                 return $row;
             });
 
@@ -337,7 +361,7 @@ class CotizacionController extends Controller
                         $payload['entidadCotizadora'] = trim((string) $request->input('entidadCotizadora'));
                     } else {
                         $tipoForEntity = $payload['tipoDocumento_idtipoDocumento'] ?? null;
-                        if (!empty($tipoForEntity)) {
+                        if (! empty($tipoForEntity)) {
                             $detalle = DB::table('tipodocumento')->where('idtipoDocumento', $tipoForEntity)->value('detalle');
                             $payload['entidadCotizadora'] = $detalle ? trim((string) $detalle) : 'Cotización';
                         } else {
@@ -413,7 +437,7 @@ class CotizacionController extends Controller
                         ];
                     }
 
-                    if (!empty($rows)) {
+                    if (! empty($rows)) {
                         DB::table('detallecotizacion')->insert($rows);
                     }
 
@@ -421,8 +445,8 @@ class CotizacionController extends Controller
                 }
             });
 
-            if ($downloadAfterSave && !empty($createdIds)) {
-                if ($groupConfirm && is_array($cotizaciones) && count($cotizaciones) >= 2 && !empty($batchId)) {
+            if ($downloadAfterSave && ! empty($createdIds)) {
+                if ($groupConfirm && is_array($cotizaciones) && count($cotizaciones) >= 2 && ! empty($batchId)) {
                     $downloadUrls = [route('modules.ventas.cotizaciones.pdf-grupo', [
                         'batch_id' => $batchId,
                         'include_image' => $includeImage,
@@ -447,7 +471,7 @@ class CotizacionController extends Controller
             $payload['entidadCotizadora'] = trim((string) $request->input('entidadCotizadora'));
         } else {
             $tipoForEntity = $payload['tipoDocumento_idtipoDocumento'] ?? null;
-            if (!empty($tipoForEntity)) {
+            if (! empty($tipoForEntity)) {
                 $detalle = DB::table('tipodocumento')->where('idtipoDocumento', $tipoForEntity)->value('detalle');
                 $payload['entidadCotizadora'] = $detalle ? trim((string) $detalle) : 'Cotización';
             } else {
@@ -498,7 +522,7 @@ class CotizacionController extends Controller
                 ];
             }
 
-            if (!empty($rows)) {
+            if (! empty($rows)) {
                 DB::table('detallecotizacion')->insert($rows);
             }
 
@@ -537,7 +561,7 @@ class CotizacionController extends Controller
                 'c.*',
                 'td.detalle as tipoDocumento_nombre',
                 DB::raw("COALESCE(cli.razonSocial, cli.nombreComercial, c.cliente_idcliente, 'Cliente sin nombre') as cliente_label"),
-                DB::raw("(select ct.nombreApellido from contacto as ct where ct.cliente_idcliente = c.cliente_idcliente order by ct.default desc, ct.idcontacto desc limit 1) as nombreApellido"),
+                DB::raw('(select ct.nombreApellido from contacto as ct where ct.cliente_idcliente = c.cliente_idcliente order by ct.default desc, ct.idcontacto desc limit 1) as nombreApellido'),
                 'v.detalle as vigencia_detalle',
                 'fp.detalle as formaPago_detalle',
                 'fp.tiempo as formaPago_tiempo',
@@ -548,14 +572,14 @@ class CotizacionController extends Controller
             ->where('c.nroCotizacion', $id)
             ->first();
 
-        if (!$quote) {
+        if (! $quote) {
             abort(404);
         }
 
         $formaPagoDetalle = trim((string) ($quote->formaPago_detalle ?? ''));
         $formaPagoTiempo = (int) ($quote->formaPago_tiempo ?? 0);
-        if ($formaPagoTiempo > 0 && !str_contains(mb_strtolower($formaPagoDetalle), 'contado')) {
-            $formaPagoDetalle .= ' (' . $formaPagoTiempo . ' días)';
+        if ($formaPagoTiempo > 0 && ! str_contains(mb_strtolower($formaPagoDetalle), 'contado')) {
+            $formaPagoDetalle .= ' ('.$formaPagoTiempo.' días)';
         }
         $quote->formaPago_detalle = $formaPagoDetalle;
         $quote->moneda_simbolo = $this->currencySymbol($quote->moneda_detalle ?? null);
@@ -581,7 +605,8 @@ class CotizacionController extends Controller
                 $item->precio_label = $this->formatMoney($item->precioUnitario, $quote->moneda_simbolo);
                 $item->igv_label = $this->formatMoney($this->calculateIgvFromIncludedTotal($item->total ?? 0), $quote->moneda_simbolo);
                 $item->total_label = $this->formatMoney($item->total, $quote->moneda_simbolo);
-                $item->descuento_label = is_numeric($item->descuento) ? number_format($item->descuento, 2, '.', ',') . '%' : '-';
+                $item->descuento_label = is_numeric($item->descuento) ? number_format($item->descuento, 2, '.', ',').'%' : '-';
+
                 return $item;
             });
 
@@ -650,7 +675,7 @@ class CotizacionController extends Controller
                 'c.*',
                 'td.detalle as tipoDocumento_nombre',
                 DB::raw("COALESCE(cli.razonSocial, cli.nombreComercial, c.cliente_idcliente, 'Cliente sin nombre') as cliente_label"),
-                DB::raw("(select ct.nombreApellido from contacto as ct where ct.cliente_idcliente = c.cliente_idcliente order by ct.default desc, ct.idcontacto desc limit 1) as nombreApellido"),
+                DB::raw('(select ct.nombreApellido from contacto as ct where ct.cliente_idcliente = c.cliente_idcliente order by ct.default desc, ct.idcontacto desc limit 1) as nombreApellido'),
                 'v.detalle as vigencia_detalle',
                 'fp.detalle as formaPago_detalle',
                 'fp.tiempo as formaPago_tiempo',
@@ -661,14 +686,14 @@ class CotizacionController extends Controller
             ->where('c.nroCotizacion', $id)
             ->first();
 
-        if (!$quote) {
+        if (! $quote) {
             abort(404);
         }
 
         $formaPagoDetalle = trim((string) ($quote->formaPago_detalle ?? ''));
         $formaPagoTiempo = (int) ($quote->formaPago_tiempo ?? 0);
-        if ($formaPagoTiempo > 0 && !str_contains(mb_strtolower($formaPagoDetalle), 'contado')) {
-            $formaPagoDetalle .= ' (' . $formaPagoTiempo . ' días)';
+        if ($formaPagoTiempo > 0 && ! str_contains(mb_strtolower($formaPagoDetalle), 'contado')) {
+            $formaPagoDetalle .= ' ('.$formaPagoTiempo.' días)';
         }
         $quote->formaPago_detalle = $formaPagoDetalle;
         $quote->moneda_simbolo = $this->currencySymbol($quote->moneda_detalle ?? null);
@@ -694,7 +719,8 @@ class CotizacionController extends Controller
                 $item->precio_label = $this->formatMoney($item->precioUnitario, $quote->moneda_simbolo);
                 $item->igv_label = $this->formatMoney($this->calculateIgvFromIncludedTotal($item->total ?? 0), $quote->moneda_simbolo);
                 $item->total_label = $this->formatMoney($item->total, $quote->moneda_simbolo);
-                $item->descuento_label = is_numeric($item->descuento) ? number_format($item->descuento, 2, '.', ',') . '%' : '-';
+                $item->descuento_label = is_numeric($item->descuento) ? number_format($item->descuento, 2, '.', ',').'%' : '-';
+
                 return $item;
             });
 
@@ -766,7 +792,7 @@ class CotizacionController extends Controller
                 'c.*',
                 'td.detalle as tipoDocumento_nombre',
                 DB::raw("COALESCE(cli.razonSocial, cli.nombreComercial, c.cliente_idcliente, 'Cliente sin nombre') as cliente_label"),
-                DB::raw("(select ct.nombreApellido from contacto as ct where ct.cliente_idcliente = c.cliente_idcliente order by ct.default desc, ct.idcontacto desc limit 1) as nombreApellido"),
+                DB::raw('(select ct.nombreApellido from contacto as ct where ct.cliente_idcliente = c.cliente_idcliente order by ct.default desc, ct.idcontacto desc limit 1) as nombreApellido'),
                 'v.detalle as vigencia_detalle',
                 'fp.detalle as formaPago_detalle',
                 'fp.tiempo as formaPago_tiempo',
@@ -787,8 +813,8 @@ class CotizacionController extends Controller
         foreach ($quotes as $quote) {
             $formaPagoDetalle = trim((string) ($quote->formaPago_detalle ?? ''));
             $formaPagoTiempo = (int) ($quote->formaPago_tiempo ?? 0);
-            if ($formaPagoTiempo > 0 && !str_contains(mb_strtolower($formaPagoDetalle), 'contado')) {
-                $formaPagoDetalle .= ' (' . $formaPagoTiempo . ' días)';
+            if ($formaPagoTiempo > 0 && ! str_contains(mb_strtolower($formaPagoDetalle), 'contado')) {
+                $formaPagoDetalle .= ' ('.$formaPagoTiempo.' días)';
             }
             $quote->formaPago_detalle = $formaPagoDetalle;
 
@@ -817,7 +843,8 @@ class CotizacionController extends Controller
                     $itemIgv = $this->calculateIgvFromIncludedTotal($itemSubtotal);
                     $item->igv_label = $this->formatMoney($itemIgv, $quote->moneda_simbolo);
                     $item->total_label = $this->formatMoney($itemSubtotal, $quote->moneda_simbolo);
-                    $item->descuento_label = is_numeric($item->descuento) ? number_format($item->descuento, 2, '.', ',') . '%' : '-';
+                    $item->descuento_label = is_numeric($item->descuento) ? number_format($item->descuento, 2, '.', ',').'%' : '-';
+
                     return $item;
                 });
 
@@ -936,10 +963,10 @@ class CotizacionController extends Controller
             $formaPagoId = $request->input('formaPago_idformaPago');
             $monedaId = $request->input('moneda_idmoneda');
             $comentario = $request->input('comentario');
-            $subtotal = (float)$request->input('subtotal', 0);
-            $descuento = (float)$request->input('descuento', 0);
-            $igv = (float)$request->input('igv', 0);
-            $total = (float)$request->input('total', 0);
+            $subtotal = (float) $request->input('subtotal', 0);
+            $descuento = (float) $request->input('descuento', 0);
+            $igv = (float) $request->input('igv', 0);
+            $total = (float) $request->input('total', 0);
             $detalle = $request->input('detalle', []);
 
             $cotizaciones = [
@@ -953,8 +980,8 @@ class CotizacionController extends Controller
                     'descuento' => $descuento,
                     'igv' => $igv,
                     'total' => $total,
-                    'detalle' => $detalle
-                ]
+                    'detalle' => $detalle,
+                ],
             ];
         }
 
@@ -967,13 +994,21 @@ class CotizacionController extends Controller
         $almacenIds = [];
 
         foreach ($cotizaciones as $tipo => $datos) {
-            if (isset($datos['vigenciaOferta_idvigenciaOferta'])) $vigenciaIds[] = $datos['vigenciaOferta_idvigenciaOferta'];
-            if (isset($datos['formaPago_idformaPago'])) $formaPagoIds[] = $datos['formaPago_idformaPago'];
-            if (isset($datos['moneda_idmoneda'])) $monedaIds[] = $datos['moneda_idmoneda'];
-            
+            if (isset($datos['vigenciaOferta_idvigenciaOferta'])) {
+                $vigenciaIds[] = $datos['vigenciaOferta_idvigenciaOferta'];
+            }
+            if (isset($datos['formaPago_idformaPago'])) {
+                $formaPagoIds[] = $datos['formaPago_idformaPago'];
+            }
+            if (isset($datos['moneda_idmoneda'])) {
+                $monedaIds[] = $datos['moneda_idmoneda'];
+            }
+
             $detalles = $datos['detalle'] ?? [];
             foreach ($detalles as $d) {
-                if (isset($d['almacen_idalmacen'])) $almacenIds[] = $d['almacen_idalmacen'];
+                if (isset($d['almacen_idalmacen'])) {
+                    $almacenIds[] = $d['almacen_idalmacen'];
+                }
             }
         }
 
@@ -1012,14 +1047,14 @@ class CotizacionController extends Controller
                 $computedSubtotal += round($cantidad * $precio * (1 - ($descuentoLinea / 100)), 2);
             }
 
-            $formaPagoDetalle = $fp ? trim((string)$fp->detalle) : '';
-            $formaPagoTiempo = $fp ? (int)$fp->tiempo : 0;
-            if ($formaPagoTiempo > 0 && !str_contains(mb_strtolower($formaPagoDetalle), 'contado')) {
-                $formaPagoDetalle .= ' (' . $formaPagoTiempo . ' días)';
+            $formaPagoDetalle = $fp ? trim((string) $fp->detalle) : '';
+            $formaPagoTiempo = $fp ? (int) $fp->tiempo : 0;
+            if ($formaPagoTiempo > 0 && ! str_contains(mb_strtolower($formaPagoDetalle), 'contado')) {
+                $formaPagoDetalle .= ' ('.$formaPagoTiempo.' días)';
             }
 
-            $quote = new \stdClass();
-            $quote->nroCotizacion = 'TEMP-' . str_pad($tempNroIndex++, 3, '0', STR_PAD_LEFT);
+            $quote = new \stdClass;
+            $quote->nroCotizacion = 'TEMP-'.str_pad($tempNroIndex++, 3, '0', STR_PAD_LEFT);
             $quote->fechaHoraEmision = $parsedDate;
             $quote->cliente_idcliente = $clienteId;
             $quote->cliente_label = $clienteLabel;
@@ -1035,9 +1070,9 @@ class CotizacionController extends Controller
             $quote->moneda_detalle = $monedaDetalle;
             $quote->moneda_simbolo = $monedaSimbolo;
             $quote->subtotal = round($computedSubtotal, 2);
-            $quote->descuento = (float)($datos['descuento'] ?? 0);
-            $quote->igv = (float)($datos['igv'] ?? 0);
-            $quote->total = (float)($datos['total'] ?? 0);
+            $quote->descuento = (float) ($datos['descuento'] ?? 0);
+            $quote->igv = (float) ($datos['igv'] ?? 0);
+            $quote->total = (float) ($datos['total'] ?? 0);
             $quote->comentario = $datos['comentario'] ?? '';
             $quote->batch_id = 'PREVIEW';
 
@@ -1047,14 +1082,14 @@ class CotizacionController extends Controller
                 $idalmacen = $d['almacen_idalmacen'] ?? null;
                 $prod = $productos->get($idalmacen);
 
-                $precio = (float)($d['precioUnitario'] ?? 0);
-                $cantidad = (float)($d['cantidad'] ?? 0);
-                $desc = (float)($d['descuento'] ?? 0);
-                $totalItem = (float)($d['total'] ?? round($cantidad * $precio * (1 - ($desc / 100)), 2));
+                $precio = (float) ($d['precioUnitario'] ?? 0);
+                $cantidad = (float) ($d['cantidad'] ?? 0);
+                $desc = (float) ($d['descuento'] ?? 0);
+                $totalItem = (float) ($d['total'] ?? round($cantidad * $precio * (1 - ($desc / 100)), 2));
 
                 $itemIgv = $this->calculateIgvFromIncludedTotal($totalItem);
 
-                $item = new \stdClass();
+                $item = new \stdClass;
                 $item->producto = $prod ? $prod->detalle : 'Producto desconocido';
                 $item->producto_imagen = $prod ? $prod->imagen : null;
                 $item->periodo = $prod ? $prod->periodo : null;
@@ -1063,11 +1098,11 @@ class CotizacionController extends Controller
                 $item->cantidad = $cantidad;
                 $item->descuento = $desc;
                 $item->total = $totalItem;
-                
+
                 $item->precio_label = $this->formatMoney($precio, $monedaSimbolo);
                 $item->igv_label = $this->formatMoney($itemIgv, $monedaSimbolo);
                 $item->total_label = $this->formatMoney($totalItem, $monedaSimbolo);
-                $item->descuento_label = $desc > 0 ? number_format($desc, 2, '.', ',') . '%' : '-';
+                $item->descuento_label = $desc > 0 ? number_format($desc, 2, '.', ',').'%' : '-';
 
                 $items->push($item);
             }
@@ -1136,7 +1171,7 @@ class CotizacionController extends Controller
             ->where('c.nroCotizacion', $id)
             ->first();
 
-        if (!$previous) {
+        if (! $previous) {
             return redirect()
                 ->route('modules.ventas.cotizaciones.index')
                 ->with('error', 'No se encontró el registro solicitado.');
@@ -1167,7 +1202,7 @@ class CotizacionController extends Controller
     {
         $exists = DB::table('cotizacion')->where('nroCotizacion', $id)->exists();
 
-        if (!$exists) {
+        if (! $exists) {
             return redirect()
                 ->route('modules.ventas.cotizaciones.index')
                 ->with('error', 'No se encontró el registro solicitado.');
@@ -1185,7 +1220,7 @@ class CotizacionController extends Controller
             ->where('c.nroCotizacion', $id)
             ->first();
 
-        if (!$previous) {
+        if (! $previous) {
             return redirect()
                 ->route('modules.ventas.cotizaciones.index')
                 ->with('error', 'No se encontró el registro solicitado.');
@@ -1207,7 +1242,7 @@ class CotizacionController extends Controller
         // Preservar campos que pudieran no enviarse por estar disabled en el form
         $preserveIfMissing = ['formaPago_idformaPago', 'moneda_idmoneda', 'comentario'];
         foreach ($preserveIfMissing as $fieldKey) {
-            if (!$request->has($fieldKey) && isset($previous->$fieldKey)) {
+            if (! $request->has($fieldKey) && isset($previous->$fieldKey)) {
                 $payload[$fieldKey] = $previous->$fieldKey;
             }
         }
@@ -1218,11 +1253,11 @@ class CotizacionController extends Controller
         // Validar y resolver correlativo si se solicitó cambiar el nro de cotización
         $requestedNro = $payload['nroCotizacion'] ?? null;
         $tipoId = (int) ($payload['tipoDocumento_idtipoDocumento'] ?? $previous->tipoDocumento_idtipoDocumento ?? 0);
-        if (!empty($requestedNro) && $requestedNro !== $id && $tipoId > 0) {
+        if (! empty($requestedNro) && $requestedNro !== $id && $tipoId > 0) {
             $requestedCorrelativo = $this->extractCorrelativoFromFormattedNro($requestedNro, $tipoId);
             $result = CorrelativoService::resolveCorrelativo($tipoId, $requestedCorrelativo, 'cotizacion', 'nroCotizacion');
-            if (!$result['accepted']) {
-                return redirect()->back()->withInput()->with('error', 'Correlativo de cotización inválido: ' . ($result['reason'] ?? 'rechazado'));
+            if (! $result['accepted']) {
+                return redirect()->back()->withInput()->with('error', 'Correlativo de cotización inválido: '.($result['reason'] ?? 'rechazado'));
             }
 
             if (isset($result['final'])) {
@@ -1240,7 +1275,7 @@ class CotizacionController extends Controller
         $detalles = $request->input('detalle', []);
         $detalleRows = [];
         $rawSubtotal = 0.0;
-        if (!empty($detalles) && is_array($detalles)) {
+        if (! empty($detalles) && is_array($detalles)) {
             foreach ($detalles as $d) {
                 $precio = isset($d['precioUnitario']) ? (float) $d['precioUnitario'] : 0.0;
                 $cantidad = isset($d['cantidad']) ? (float) $d['cantidad'] : 0.0;
@@ -1269,7 +1304,7 @@ class CotizacionController extends Controller
                 throw $e;
             }
 
-            if (!empty($detalleRows)) {
+            if (! empty($detalleRows)) {
                 DB::table('detallecotizacion')->insert($detalleRows);
             }
         });
@@ -1284,7 +1319,7 @@ class CotizacionController extends Controller
     private function updateGroupedCotizaciones(Request $request, array $validated, object $previous, string $id): RedirectResponse
     {
         $cotizaciones = $request->input('cotizaciones', []);
-        if (!is_array($cotizaciones) || count($cotizaciones) === 0) {
+        if (! is_array($cotizaciones) || count($cotizaciones) === 0) {
             return redirect()->back()->withInput()->with('error', 'Debe existir al menos un bloque de cotización.');
         }
 
@@ -1303,13 +1338,13 @@ class CotizacionController extends Controller
 
         DB::transaction(function () use ($cotizaciones, $validated, $previous, $existingById, $targetBatchId, &$updatedIds, &$usedExistingIds): void {
             foreach ($cotizaciones as $group) {
-                if (!is_array($group)) {
+                if (! is_array($group)) {
                     continue;
                 }
 
                 $sourceId = trim((string) ($group['source_nroCotizacion'] ?? ''));
                 $sourceQuote = $sourceId !== '' ? $existingById->get($sourceId) : null;
-                if (!$sourceQuote && count($usedExistingIds) === 0) {
+                if (! $sourceQuote && count($usedExistingIds) === 0) {
                     $sourceQuote = $previous;
                 }
 
@@ -1403,7 +1438,7 @@ class CotizacionController extends Controller
         }
 
         $result = $this->cotizacionService->anularCotizaciones([$id]);
-        if (!$result['success']) {
+        if (! $result['success']) {
             return redirect()
                 ->route('modules.ventas.cotizaciones.index')
                 ->with('error', $result['message']);
@@ -1467,7 +1502,7 @@ class CotizacionController extends Controller
         }
 
         $exists = DB::table('cliente')->where('idcliente', $cliente)->exists();
-        if (!$exists) {
+        if (! $exists) {
             return response()->json(['ok' => false, 'message' => 'No se encontró el cliente.'], 404);
         }
 
@@ -1539,7 +1574,7 @@ class CotizacionController extends Controller
             ->orWhere('detalle', 'like', '%Cotizaci%')
             ->value('idtipoOperacion');
 
-        if (!$tipoOperacionId) {
+        if (! $tipoOperacionId) {
             return null;
         }
 
@@ -1561,7 +1596,7 @@ class CotizacionController extends Controller
             'usuarioReceptor' => null,
             'fechaHoraRegistro' => now()->format('Y-m-d H:i:s'),
             'fechaHoraCierre' => null,
-            'detalle' => 'Nueva cotización ' . $nroCotizacion,
+            'detalle' => 'Nueva cotización '.$nroCotizacion,
             'ImagenEvidencia' => null,
             'respuesta' => null,
             'estado' => 'Activo',
@@ -1579,7 +1614,7 @@ class CotizacionController extends Controller
         }
 
         $record = DB::table('cotizacion')->where('nroCotizacion', $id)->first();
-        if (!$record) {
+        if (! $record) {
             return redirect()
                 ->route('modules.ventas.cotizaciones.index')
                 ->with('error', 'No se encontró la cotización solicitada.');
@@ -1604,7 +1639,7 @@ class CotizacionController extends Controller
         // Aprobación desde la vista de Cotizaciones debe guardar Aprobado(SP) por defecto.
         // Solo se usa Aprobado cuando el origen es explícito desde otro módulo.
         $newEstado = CotizacionService::STATE_APROBADO_SP;
-        if ($originLower !== '' && !str_contains($originLower, 'cotiz') && !str_contains($originLower, 'coti')) {
+        if ($originLower !== '' && ! str_contains($originLower, 'cotiz') && ! str_contains($originLower, 'coti')) {
             $newEstado = CotizacionService::STATE_APROBADO;
         }
 
@@ -1621,7 +1656,7 @@ class CotizacionController extends Controller
             $lockedQuotes = $lockedQuotesQuery->get(['nroCotizacion', 'estado']);
 
             if ($lockedQuotes->isEmpty() || $lockedQuotes->contains(
-                fn($quote): bool => (string) ($quote->estado ?? '') !== CotizacionService::STATE_GENERADO
+                fn ($quote): bool => (string) ($quote->estado ?? '') !== CotizacionService::STATE_GENERADO
             )) {
                 abort(422, 'Solo se puede aprobar una cotización en estado Generado.');
             }
@@ -1637,11 +1672,18 @@ class CotizacionController extends Controller
             }
 
             if ($newEstado === CotizacionService::STATE_APROBADO_SP) {
-                DB::table('cotizacion')
+                $approvedQuoteIds = DB::table('cotizacion')
                     ->where($isGroup ? 'batch_id' : 'nroCotizacion', $isGroup ? $record->batch_id : $id)
                     ->orderBy('nroCotizacion')
-                    ->pluck('nroCotizacion')
-                    ->each(fn ($quoteId) => $this->cxcService->ensureQuotationReceivable((string) $quoteId));
+                    ->pluck('nroCotizacion');
+                foreach ($approvedQuoteIds as $quoteId) {
+                    $this->cxcService->ensureQuotationReceivable((string) $quoteId);
+                }
+                DB::table('cuentasporcobrar')
+                    ->whereIn('descripcion', $approvedQuoteIds->map(
+                        static fn ($quoteId): string => 'COTIZACION:'.$quoteId
+                    ))
+                    ->update(['fechaRegistro' => now()->format('Y-m-d H:i:s')]);
             }
 
             $ticketId = $this->createTicketForApprovedCotizacion($referenciaToUse, $currentUser);
@@ -1673,7 +1715,7 @@ class CotizacionController extends Controller
 
     private function isCotizacionGroup(?object $record): bool
     {
-        if (!$record) {
+        if (! $record) {
             return false;
         }
 
@@ -1714,29 +1756,29 @@ class CotizacionController extends Controller
     {
         $prefix = $type === 'GRP' ? 'GRP-' : 'IND-';
         $existingIds = DB::table('cotizacion')
-            ->where('batch_id', 'like', $prefix . '%')
+            ->where('batch_id', 'like', $prefix.'%')
             ->pluck('batch_id');
 
         $maxIndex = 0;
         foreach ($existingIds as $id) {
             $id = trim((string) $id);
-            if (!str_starts_with($id, $prefix)) {
+            if (! str_starts_with($id, $prefix)) {
                 continue;
             }
             $number = (int) substr($id, strlen($prefix));
             $maxIndex = max($maxIndex, $number);
         }
 
-        return $prefix . ($maxIndex + 1);
+        return $prefix.($maxIndex + 1);
     }
 
     private function incrementBatchId(string $batchId): string
     {
         if (preg_match('/^(IND|GRP)-(\d+)$/', $batchId, $matches)) {
-            return $matches[1] . '-' . ((int) $matches[2] + 1);
+            return $matches[1].'-'.((int) $matches[2] + 1);
         }
 
-        return $batchId . '-1';
+        return $batchId.'-1';
     }
 
     private function formatCotizacionGroupLabel(mixed $batchId): string
@@ -1756,9 +1798,9 @@ class CotizacionController extends Controller
         $identifierValue = trim((string) $identifier);
 
         $safeClient = preg_replace('/[^\pL\pN._-]+/u', '_', $clientLabel);
-        $safeClient = trim($safeClient, "._-");
+        $safeClient = trim($safeClient, '._-');
         $safeIdentifier = preg_replace('/[^\pL\pN._-]+/u', '_', $identifierValue);
-        $safeIdentifier = trim($safeIdentifier, "._-");
+        $safeIdentifier = trim($safeIdentifier, '._-');
 
         if ($safeClient === '') {
             $safeClient = 'cliente';
@@ -1768,7 +1810,7 @@ class CotizacionController extends Controller
             $safeIdentifier = 'sin-identificador';
         }
 
-        return $safeClient . '_' . $safeIdentifier . '.pdf';
+        return $safeClient.'_'.$safeIdentifier.'.pdf';
     }
 
     private function formatCotizacionEstadoName(?string $estado): string

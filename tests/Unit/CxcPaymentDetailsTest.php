@@ -111,6 +111,46 @@ class CxcPaymentDetailsTest extends TestCase
         $this->assertNotEmpty($data['withholding_comprobante_url']);
     }
 
+    public function test_payment_details_identify_autodetraccion_and_return_its_comment_and_receipt(): void
+    {
+        Storage::fake('public');
+        $this->createSchema();
+        $this->createPaymentFixture();
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', 1)->update(['montoOriginal' => 800]);
+        DB::table('bancos')->insert([
+            'idbancos' => 3,
+            'entidadBancaria_identidadBancaria' => 1,
+            'informacion' => 'Autodetracción pagada de CXC #1 | Ya se hizo la autodetracción',
+            'tipoMov' => 'T',
+            'monto' => 96,
+        ]);
+        DB::table('detallecxc')->insert([
+            'iddetalleCXC' => 3,
+            'formaPago_idformaPago' => 2,
+            'cuentasPorCobrar_idcuentasPorCobrar' => 1,
+            'fechaPago' => '2026-10-08 10:15:00',
+            'bancos_idbancos' => 3,
+            'estado' => '1',
+            'descripcion' => 'Detracción aplicada: 96.00',
+        ]);
+        Storage::disk('public')->put('comprobantes-pago/cxc/autodetraccion.png', 'proof');
+        DB::table('evidenciapago')->insert([
+            'fechaCarga' => '2026-10-08 10:15:00',
+            'archivo' => 'comprobantes-pago/cxc/autodetraccion.png',
+            'bancos_idbancos' => 3,
+        ]);
+
+        $response = $this->controller()->getPaymentDetails('1');
+        $data = $response->getData(true)['data'];
+
+        $this->assertTrue($data['withholding_applies']);
+        $this->assertSame('autodetracción', $data['withholding_type']);
+        $this->assertSame('2026-10-08', $data['withholding_fecha']);
+        $this->assertSame('S/ 96.00', $data['withholding_monto_display']);
+        $this->assertSame('Ya se hizo la autodetracción', $data['withholding_comment']);
+        $this->assertNotEmpty($data['withholding_comprobante_url']);
+    }
+
     public function test_payment_comment_and_proof_can_be_updated_or_removed_without_creating_a_payment(): void
     {
         Storage::fake('public');

@@ -30,6 +30,7 @@ class BancosService
             ->selectRaw("COALESCE(NULLIF(TRIM(m.simbolo), ''), 'S/') as moneda_simbolo")
             ->selectRaw("SUM(CASE WHEN b.tipoMov = 'I' THEN b.monto ELSE 0 END) as balance_positivo")
             ->selectRaw("SUM(CASE WHEN b.tipoMov = 'S' OR (b.tipoMov = 'T' AND (LTRIM(b.informacion) LIKE 'Autodetracción%' OR LTRIM(b.informacion) LIKE 'Autoretención%' OR LTRIM(b.informacion) LIKE 'Detracción pagada%' OR LTRIM(b.informacion) LIKE 'Retención pagada%')) THEN b.monto ELSE 0 END) as balance_negativo")
+            ->selectRaw("SUM(CASE WHEN b.tipoMov = 'A' THEN b.monto WHEN b.tipoMov = 'C' THEN -b.monto ELSE 0 END) as saldo_a_favor")
             ->groupBy('m.simbolo')
             ->get();
         $annulledRows = $this->applyFilters($this->joinedQuery(), $request)
@@ -44,7 +45,7 @@ class BancosService
                         OR b.informacion LIKE '%Retención pagada de%'
                     )
                     AND EXISTS (
-                        ".$pairedPaymentQuery->toSql()."
+                        " . $pairedPaymentQuery->toSql() . "
                     )
                 THEN 0
                 ELSE b.monto
@@ -55,14 +56,15 @@ class BancosService
         $balances = [];
         foreach ($rows as $row) {
             $symbol = $this->normalizeCurrencySymbol($row->moneda_simbolo);
-            $balances[$symbol] ??= ['balance_positivo' => 0.0, 'balance_negativo' => 0.0, 'anulado_revertido' => 0.0];
+            $balances[$symbol] ??= ['balance_positivo' => 0.0, 'balance_negativo' => 0.0, 'anulado_revertido' => 0.0, 'saldo_a_favor' => 0.0];
             $balances[$symbol]['balance_positivo'] += (float) $row->balance_positivo;
             $balances[$symbol]['balance_negativo'] += (float) $row->balance_negativo;
+            $balances[$symbol]['saldo_a_favor'] += (float) $row->saldo_a_favor;
         }
         foreach ($annulledRows as $row) {
             $symbol = $this->normalizeCurrencySymbol($row->moneda_simbolo);
             $amount = (float) $row->anulado_revertido;
-            $balances[$symbol] ??= ['balance_positivo' => 0.0, 'balance_negativo' => 0.0, 'anulado_revertido' => 0.0];
+            $balances[$symbol] ??= ['balance_positivo' => 0.0, 'balance_negativo' => 0.0, 'anulado_revertido' => 0.0, 'saldo_a_favor' => 0.0];
             $balances[$symbol]['anulado_revertido'] += $amount;
         }
 
@@ -142,7 +144,7 @@ class BancosService
         $charges = DB::table('cuentasporcobrar as c')
             ->leftJoin('moneda as m', 'm.idmoneda', '=', 'c.moneda_idmoneda')
             ->whereIn('c.cliente_idcliente', $clientIds)
-            ->whereIn('c.estado', ['1', '2', '4', 'NUEVO', 'PagoCredito', 'PENDIENTE', 'FACTURADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito'])
+            ->whereIn('c.estado', ['1', '2', '4', 'NUEVO', 'PagoCredito', 'Pendiente cuota crédito', 'PENDIENTE', 'FACTURADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito'])
             ->where('c.montoActual', '>', 0)
             ->orderBy('c.cliente_idcliente')
             ->orderByDesc('c.idcuentasPorCobrar')
@@ -184,8 +186,10 @@ class BancosService
                 $matchedServices = $clientServices->whereIn('idservicioCliente', $serviceIds)->unique('idservicioCliente')->values();
             }
 
-            if ($matchedServices->isEmpty()
-                && preg_match('/(\d{2}\/\d{2}\/\d{4})\s+a\s+(\d{2}\/\d{2}\/\d{4})/', $description, $period) === 1) {
+            if (
+                $matchedServices->isEmpty()
+                && preg_match('/(\d{2}\/\d{2}\/\d{4})\s+a\s+(\d{2}\/\d{2}\/\d{4})/', $description, $period) === 1
+            ) {
                 $periodServices = $clientServices->filter(function (object $service) use ($period): bool {
                     return !empty($service->fechaInicio)
                         && !empty($service->fecheVencimiento)
@@ -197,11 +201,13 @@ class BancosService
                 }
             }
 
-            if (!$hasServiceMarker && $matchedServices->isEmpty()
-                && preg_match('/Cobro por servicio\s+(.+)$/i', $description, $plateMatch) === 1) {
+            if (
+                !$hasServiceMarker && $matchedServices->isEmpty()
+                && preg_match('/Cobro por servicio\s+(.+)$/i', $description, $plateMatch) === 1
+            ) {
                 $plate = trim($plateMatch[1]);
                 $plateServices = $clientServices
-                    ->filter(fn (object $service): bool => strcasecmp(trim((string) $service->vehiculo_placa), $plate) === 0)
+                    ->filter(fn(object $service): bool => strcasecmp(trim((string) $service->vehiculo_placa), $plate) === 0)
                     ->unique('idservicioCliente')
                     ->take(1)
                     ->values();
@@ -212,7 +218,7 @@ class BancosService
 
             if (!$hasServiceMarker && $matchedServices->isEmpty() && trim((string) ($charge->docReferencia ?? '')) !== '') {
                 $documentServices = $clientServices
-                    ->filter(fn (object $service): bool => trim((string) ($service->docReferencia ?? '')) === trim((string) $charge->docReferencia))
+                    ->filter(fn(object $service): bool => trim((string) ($service->docReferencia ?? '')) === trim((string) $charge->docReferencia))
                     ->unique('idservicioCliente')
                     ->values();
                 if ($documentServices->count() === 1) {
@@ -224,14 +230,16 @@ class BancosService
             }
 
             if ($matchedServices->isEmpty()) {
-                $matchedServices = collect([(object) [
-                    'idservicioCliente' => null,
-                    'vehiculo' => 'Sin servicio vinculado',
-                    'monto' => (float) ($charge->montoOriginal ?? 0),
-                ]]);
+                $matchedServices = collect([
+                    (object) [
+                        'idservicioCliente' => null,
+                        'vehiculo' => 'Sin servicio vinculado',
+                        'monto' => (float) ($charge->montoOriginal ?? 0),
+                    ]
+                ]);
             }
 
-            $totalServiceAmount = (float) $matchedServices->sum(fn (object $service): float => (float) ($service->monto ?? 0));
+            $totalServiceAmount = (float) $matchedServices->sum(fn(object $service): float => (float) ($service->monto ?? 0));
             $remainingOriginal = round((float) ($charge->montoOriginal ?? 0), 2);
             $remainingDebt = round((float) ($charge->deuda_pendiente ?? 0), 2);
             $serviceCount = $matchedServices->count();
@@ -279,7 +287,7 @@ class BancosService
             ->where('b.informacion', 'not like', '[ANULADO]%')
             ->where('dc.estado', '!=', '0')
             ->whereIn('cxc.cliente_idcliente', $clientIds)
-            ->when($currency !== null && trim($currency) !== '', fn ($query) => $this->applyCurrencySymbolFilter($query, $currency))
+            ->when($currency !== null && trim($currency) !== '', fn($query) => $this->applyCurrencySymbolFilter($query, $currency))
             ->select('cxc.cliente_idcliente', DB::raw('COALESCE(NULLIF(TRIM(m.simbolo), ""), "S/") as moneda_simbolo'))
             ->selectRaw('SUM(b.monto) as total_favor')
             ->groupBy('cxc.cliente_idcliente', 'm.simbolo')
@@ -294,7 +302,7 @@ class BancosService
             ->where('b.informacion', 'not like', '[ANULADO]%')
             ->where('dc.estado', '!=', '0')
             ->whereIn('cxc.cliente_idcliente', $clientIds)
-            ->when($currency !== null && trim($currency) !== '', fn ($query) => $this->applyCurrencySymbolFilter($query, $currency))
+            ->when($currency !== null && trim($currency) !== '', fn($query) => $this->applyCurrencySymbolFilter($query, $currency))
             ->select('cxc.cliente_idcliente', DB::raw('COALESCE(NULLIF(TRIM(m.simbolo), ""), "S/") as moneda_simbolo'))
             ->selectRaw('SUM(b.monto) as total_aplicado')
             ->groupBy('cxc.cliente_idcliente', 'm.simbolo')
@@ -312,7 +320,7 @@ class BancosService
             })
             ->where('nc.estado', 'E')
             ->whereIn('nc.cliente_idcliente', $clientIds)
-            ->when($currency !== null && trim($currency) !== '', fn ($query) => $this->applyCurrencySymbolFilter($query, $currency))
+            ->when($currency !== null && trim($currency) !== '', fn($query) => $this->applyCurrencySymbolFilter($query, $currency))
             ->select('nc.cliente_idcliente', DB::raw('COALESCE(NULLIF(TRIM(m.simbolo), ""), "S/") as moneda_simbolo'))
             ->selectRaw('SUM(GREATEST(0, nc.monto - COALESCE(aplicada.monto_aplicado, 0))) as total_favor')
             ->groupBy('nc.cliente_idcliente', 'm.simbolo')
@@ -393,7 +401,7 @@ class BancosService
             ->whereNotNull('c.cliente_idcliente')
             ->distinct()
             ->pluck('c.cliente_idcliente')
-            ->map(fn ($id): string => (string) $id)
+            ->map(fn($id): string => (string) $id)
             ->all();
         $creditClientIds = $clients->pluck('ruc_cliente')
             ->merge($allCxcClientIds)
@@ -545,11 +553,11 @@ class BancosService
                     END) as monto_deuda'),
                 DB::raw('
                     SUM(CASE
-                        WHEN c.estado IN ("1", "2", "NUEVO", "PagoCredito", "PENDIENTE", "FACTURADO", "Pendiente Pago parcial", "Pendiente a credito") AND c.montoActual > 0
+                        WHEN c.estado IN ("1", "2", "NUEVO", "PagoCredito", "Pendiente cuota crédito", "PENDIENTE", "FACTURADO", "Pendiente Pago parcial", "Pendiente a credito") AND c.montoActual > 0
                         THEN c.montoActual ELSE 0
                     END) as monto_pagar'),
             ])
-            ->whereIn('c.estado', ['1', '2', '4', 'NUEVO', 'PagoCredito', 'PENDIENTE', 'FACTURADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito'])
+            ->whereIn('c.estado', ['1', '2', '4', 'NUEVO', 'PagoCredito', 'Pendiente cuota crédito', 'PENDIENTE', 'FACTURADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito'])
             ->where('c.montoActual', '>', 0)
             ->groupBy('cli.idcliente', 'cli.razonSocial', 'cli.nombreComercial', 'm.simbolo');
     }
@@ -587,7 +595,7 @@ class BancosService
         if ($filterAmount && $debtAmount !== '' && is_numeric($debtAmount) && (float) $debtAmount >= 0) {
             $operator = $this->amountComparisonOperator($request);
             $query->havingRaw('
-                SUM(CASE WHEN c.estado IN ("4", "VENCIDO", "1", "2", "NUEVO", "PagoCredito", "PENDIENTE", "FACTURADO", "Pendiente Pago parcial", "Pendiente a credito") AND c.montoActual > 0 THEN c.montoActual ELSE 0 END) ' . $operator . ' ?
+                SUM(CASE WHEN c.estado IN ("4", "VENCIDO", "1", "2", "NUEVO", "PagoCredito", "Pendiente cuota crédito", "PENDIENTE", "FACTURADO", "Pendiente Pago parcial", "Pendiente a credito") AND c.montoActual > 0 THEN c.montoActual ELSE 0 END) ' . $operator . ' ?
             ', [round((float) $debtAmount, 2)]);
         }
 
@@ -635,9 +643,20 @@ class BancosService
 
     private function joinedQuery()
     {
+        $detailByMovement = DB::table('detallecxc as detail')
+            ->select('detail.bancos_idbancos')
+            ->selectRaw("COALESCE(
+                MIN(CASE WHEN detail.estado = '1' THEN detail.iddetalleCXC END),
+                MIN(detail.iddetalleCXC)
+            ) as iddetalleCXC")
+            ->groupBy('detail.bancos_idbancos');
+
         return DB::table('bancos as b')
             ->leftJoin('entidadbancaria as eb', 'eb.identidadBancaria', '=', 'b.entidadBancaria_identidadBancaria')
-            ->leftJoin('detallecxc as dc', 'dc.bancos_idbancos', '=', 'b.idbancos')
+            ->leftJoinSub($detailByMovement, 'movement_detail', function ($join): void {
+                $join->on('movement_detail.bancos_idbancos', '=', 'b.idbancos');
+            })
+            ->leftJoin('detallecxc as dc', 'dc.iddetalleCXC', '=', 'movement_detail.iddetalleCXC')
             ->leftJoin('cuentasporcobrar as cxc', 'cxc.idcuentasPorCobrar', '=', 'dc.cuentasPorCobrar_idcuentasPorCobrar')
             ->leftJoin('cliente as cli', 'cli.idcliente', '=', 'cxc.cliente_idcliente')
             ->leftJoin('moneda as m', 'm.idmoneda', '=', 'dc.moneda_idmoneda')
@@ -669,7 +688,7 @@ class BancosService
 
         $search = trim((string) $request->query('q', ''));
         if ($search !== '') {
-            $term = '%'.$search.'%';
+            $term = '%' . $search . '%';
             $query->where(function ($builder) use ($term): void {
                 $builder
                     ->where('paired_bank.idbancos', 'like', $term)
@@ -690,7 +709,7 @@ class BancosService
 
         $clientSearch = trim((string) $request->query('cliente', ''));
         if ($clientSearch !== '') {
-            $term = '%'.$clientSearch.'%';
+            $term = '%' . $clientSearch . '%';
             $query->where(function ($builder) use ($term): void {
                 $builder
                     ->where('paired_client.idcliente', 'like', $term)
@@ -796,21 +815,16 @@ class BancosService
         $movementType = strtoupper(trim((string) $request->query('tipoMov', '')));
         if ($movementType === 'AUTODETRACCION') {
             $query->where('b.tipoMov', 'T')
+                ->where('b.informacion', 'not like', '[ANULADO]%')
                 ->where(function ($builder): void {
                     $builder->where('b.informacion', 'like', 'Autodetracción%')
-                        ->orWhere('b.informacion', 'like', 'Autoretención%')
-                        ->orWhere(function ($annulled): void {
-                            $annulled->where('b.informacion', 'like', '[ANULADO]%')
-                                ->where(function ($original): void {
-                                    $original->where('b.informacion', 'like', '%Autodetracción pagada%')
-                                        ->orWhere('b.informacion', 'like', '%Autoretención pagada%');
-                                });
-                        });
+                        ->orWhere('b.informacion', 'like', 'Autoretención%');
                 });
         } elseif ($movementType === 'ANULADO') {
             $query->where('b.informacion', 'like', '[ANULADO]%');
         } elseif (in_array($movementType, ['I', 'S', 'A', 'C', 'T'], true)) {
-            $query->where('b.tipoMov', $movementType);
+            $query->where('b.tipoMov', $movementType)
+                ->where('b.informacion', 'not like', '[ANULADO]%');
         }
 
         $amountFrom = trim((string) ($rangeFilters['montoDesde'] ?? ''));
@@ -862,11 +876,11 @@ class BancosService
     {
         return match (trim((string) $currency)) {
             'S/' => $query->where(function ($builder): void {
-                $builder
+                    $builder
                     ->whereNull('m.simbolo')
                     ->orWhereRaw('TRIM(COALESCE(m.simbolo, "")) = ""')
                     ->orWhereRaw('UPPER(TRIM(m.simbolo)) IN (?, ?, ?, ?)', ['S', 'S/', 'SOL', 'SOLES']);
-            }),
+                }),
             '$' => $query->whereRaw('UPPER(TRIM(m.simbolo)) IN (?, ?, ?)', ['$', 'US$', 'USD']),
             default => $query,
         };

@@ -29,7 +29,8 @@ class LineasChipsController extends Controller
     public function numerosTelefonicoIndex(Request $request): View
     {
         $baseQuery = DB::table('numerotelefonico as n')
-            ->select('n.numeroTelefonico', 'n.plan', 'n.estado')
+            ->leftJoin('plantelef as p', 'p.idplantelef', '=', 'n.plantelef_idplantelef')
+            ->select('n.numeroTelefonico', 'p.nombre as plan', 'p.megas as plan_megas', 'p.sms as plan_sms', 'n.estado')
             ->addSelect([
                 'precio_numero' => DB::table('detalle_precionumero as dp')
                     ->select('dp.precio')
@@ -83,6 +84,16 @@ class LineasChipsController extends Controller
             });
         }
 
+        $planFilter = trim((string) $request->input('plan', ''));
+        if ($planFilter !== '') {
+            $baseQuery->where(function ($query) use ($planFilter) {
+                $term = '%' . $planFilter . '%';
+                $query->where('p.nombre', 'like', $term)
+                    ->orWhere('p.megas', 'like', $term)
+                    ->orWhere('p.sms', 'like', $term);
+            });
+        }
+
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
             $term = '%' . $search . '%';
@@ -90,6 +101,9 @@ class LineasChipsController extends Controller
                 $query
                     ->where('n.numeroTelefonico', 'like', $term)
                     ->orWhere('n.estado', 'like', $term)
+                    ->orWhere('p.nombre', 'like', $term)
+                    ->orWhere('p.megas', 'like', $term)
+                    ->orWhere('p.sms', 'like', $term)
                     ->orWhereExists(function ($query) use ($term) {
                         $query->select(DB::raw('1'))
                             ->from('detallesimcard as d')
@@ -114,6 +128,11 @@ class LineasChipsController extends Controller
             ->withQueryString();
 
         $items->getCollection()->transform(function ($item) {
+            $item->plan = implode(' - ', [
+                trim((string) ($item->plan ?? '')),
+                trim((string) ($item->plan_megas ?? '')),
+                trim((string) ($item->plan_sms ?? '')),
+            ]);
             $simcardActual = trim((string) ($item->simcard_actual ?? ''));
             $simcardPasada = trim((string) ($item->simcard_pasada ?? ''));
             $precio = trim((string) ($item->precio_numero ?? ''));
@@ -164,6 +183,12 @@ class LineasChipsController extends Controller
                     'placeholder' => 'Filtrar por SimCard',
                 ],
                 [
+                    'name' => 'plan',
+                    'label' => 'Plan',
+                    'type' => 'text',
+                    'placeholder' => 'Filtrar por plan, megas o SMS',
+                ],
+                [
                     'name' => 'estado',
                     'label' => 'Estado',
                     'type' => 'select',
@@ -195,6 +220,8 @@ class LineasChipsController extends Controller
 
     public function numerosTelefonicoCreate(): View
     {
+        [$planOptions, $planPriceMap] = $this->planTelefonicoFormData();
+
         return view('lineaschip.numerotelefonico-form', [
             'title' => 'Nuevo Número telefónico',
             'moduleTitle' => 'Número telefónico',
@@ -213,12 +240,14 @@ class LineasChipsController extends Controller
                     'helpText' => 'Ingrese mínimo 9 digitos, sin guiones ni espacios.',
                 ],
                 [
-                    'name' => 'plan',
-                    'type' => 'text',
+                    'name' => 'plantelef_idplantelef',
+                    'type' => 'select',
                     'label' => 'Plan',
                     'required' => true,
-                    'maxlength' => 45,
-                    'helpText' => 'Ingrese el nombre o referencia del plan.',
+                    'tomSelect' => true,
+                    'options' => $planOptions,
+                    'placeholder' => 'Buscar y seleccionar un plan',
+                    'helpText' => 'Seleccione un plan telefónico. Su precio y moneda se sugieren y puede modificarlos para este número.',
                 ],
                 [
                     'name' => 'precio',
@@ -228,7 +257,7 @@ class LineasChipsController extends Controller
                     'min' => 0,
                     'step' => '0.01',
                     'placeholder' => 'Ej: 29.90',
-                    'helpText' => 'Ingrese solo el valor numérico.',
+                    'helpText' => 'Precio aplicado a este número. Puede diferir del precio del plan.',
                 ],
                 [
                     'name' => 'moneda',
@@ -239,8 +268,9 @@ class LineasChipsController extends Controller
                     'options' => [
                         'S/' => 'S/',
                         '$' => '$',
+                        '€' => '€',
                     ],
-                    'helpText' => 'Seleccione el símbolo de moneda.',
+                    'helpText' => 'Símbolo aplicado a este número; puede diferir del plan.',
                 ],
                 [
                     'name' => 'estado',
@@ -295,6 +325,7 @@ class LineasChipsController extends Controller
                 ],
             ],
             'readOnly' => false,
+            'planPriceMap' => $planPriceMap,
         ]);
     }
 
@@ -304,9 +335,9 @@ class LineasChipsController extends Controller
 
         $validated = $request->validate([
             'numeroTelefonico' => ['required', 'string', 'min:9', 'max:30', 'regex:' . self::SAFE_TEXT_REGEX, 'unique:numerotelefonico,numeroTelefonico'],
-            'plan' => ['required', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+            'plantelef_idplantelef' => ['required', 'integer', 'exists:plantelef,idplantelef'],
             'precio' => ['required', 'numeric', 'min:0'],
-            'moneda' => ['required', Rule::in(['S/', '$'])],
+            'moneda' => ['required', Rule::in(['S/', '$', '€'])],
             'estado' => ['required', 'string', $wantsSimCard ? Rule::in(['1']) : Rule::in(['0', '1'])],
             'idsimCard' => [
                 Rule::requiredIf($wantsSimCard),
@@ -326,6 +357,7 @@ class LineasChipsController extends Controller
             'estado_simcard.in' => 'La SimCard debe estar en estado activo para poder crearla junto al número.',
         ]);
 
+        $this->findPlanTelefonico((int) $validated['plantelef_idplantelef']);
         $precio = number_format((float) $validated['precio'], 2, '.', '');
         $moneda = $validated['moneda'];
 
@@ -333,7 +365,7 @@ class LineasChipsController extends Controller
             DB::transaction(function () use ($validated, $precio, $moneda): void {
                 DB::table('numerotelefonico')->insert([
                     'numeroTelefonico' => $validated['numeroTelefonico'],
-                    'plan' => $validated['plan'],
+                    'plantelef_idplantelef' => $validated['plantelef_idplantelef'],
                     'estado' => '2',
                 ]);
 
@@ -368,7 +400,7 @@ class LineasChipsController extends Controller
 
         DB::table('numerotelefonico')->insert([
             'numeroTelefonico' => $validated['numeroTelefonico'],
-            'plan' => $validated['plan'],
+            'plantelef_idplantelef' => $validated['plantelef_idplantelef'],
             'estado' => $validated['estado'],
         ]);
         DB::table('detalle_precionumero')->insert([
@@ -399,6 +431,7 @@ class LineasChipsController extends Controller
                 ->with('error', 'No se puede editar este Número telefónico porque está ' . self::normalizeEstadoLabel((string) $record->estado) . '. Solo se permite editar cuando está Libre o Disponible.');
         }
 
+        [$planOptions, $planPriceMap] = $this->planTelefonicoFormData();
         $priceDetail = DB::table('detalle_precionumero')
             ->where('numeroTelefonico_numeroTelefonico', $id)
             ->orderByDesc('iddetalle_precionumero')
@@ -437,12 +470,14 @@ class LineasChipsController extends Controller
                     'helpText' => 'Ingrese mínimo 9 digitos, sin guiones ni espacios.',
                 ],
                 [
-                    'name' => 'plan',
-                    'type' => 'text',
+                    'name' => 'plantelef_idplantelef',
+                    'type' => 'select',
                     'label' => 'Plan',
                     'required' => true,
-                    'maxlength' => 45,
-                    'helpText' => 'Ingrese el nombre o referencia del plan.',
+                    'tomSelect' => true,
+                    'options' => $planOptions,
+                    'placeholder' => 'Buscar y seleccionar un plan',
+                    'helpText' => 'Seleccione un plan telefónico. Su precio y moneda se sugieren y puede modificarlos para este número.',
                 ],
                 [
                     'name' => 'precio',
@@ -452,7 +487,7 @@ class LineasChipsController extends Controller
                     'min' => 0,
                     'step' => '0.01',
                     'placeholder' => 'Ej: 29.90',
-                    'helpText' => 'Ingrese solo el valor numérico.',
+                    'helpText' => 'Precio aplicado a este número. Puede diferir del precio del plan.',
                 ],
                 [
                     'name' => 'moneda',
@@ -462,8 +497,9 @@ class LineasChipsController extends Controller
                     'options' => [
                         'S/' => 'S/',
                         '$' => '$',
+                        '€' => '€',
                     ],
-                    'helpText' => 'Seleccione el símbolo de moneda.',
+                    'helpText' => 'Símbolo aplicado a este número; puede diferir del plan.',
                 ],
                 [
                     'name' => 'estado',
@@ -487,6 +523,7 @@ class LineasChipsController extends Controller
                 ],
             ],
             'readOnly' => true,
+            'planPriceMap' => $planPriceMap,
         ] + $this->prepareLockViewData('lineas_chips.numero_telefonico', $id));
     }
 
@@ -528,13 +565,14 @@ class LineasChipsController extends Controller
                 'regex:' . self::SAFE_TEXT_REGEX,
                 Rule::unique('numerotelefonico', 'numeroTelefonico')->ignore($id, 'numeroTelefonico'),
             ],
-            'plan' => ['required', 'string', 'max:45', 'regex:' . self::SAFE_TEXT_REGEX],
+            'plantelef_idplantelef' => ['required', 'integer', 'exists:plantelef,idplantelef'],
             'precio' => ['required', 'numeric', 'min:0'],
-            'moneda' => ['required', Rule::in(['S/', '$'])],
+            'moneda' => ['required', Rule::in(['S/', '$', '€'])],
             'estado' => ['required', 'string', 'in:0,1,2,3'],
         ]);
 
         $newNumero = $validated['numeroTelefonico'];
+        $this->findPlanTelefonico((int) $validated['plantelef_idplantelef']);
         $precio = number_format((float) $validated['precio'], 2, '.', '');
         $moneda = $validated['moneda'];
 
@@ -542,7 +580,7 @@ class LineasChipsController extends Controller
             if ($newNumero !== $id) {
                 DB::table('numerotelefonico')->insert([
                     'numeroTelefonico' => $newNumero,
-                    'plan' => $validated['plan'],
+                    'plantelef_idplantelef' => $validated['plantelef_idplantelef'],
                     'estado' => $validated['estado'],
                 ]);
 
@@ -589,7 +627,7 @@ class LineasChipsController extends Controller
             DB::table('numerotelefonico')
                 ->where('numeroTelefonico', $id)
                 ->update([
-                    'plan' => $validated['plan'],
+                    'plantelef_idplantelef' => $validated['plantelef_idplantelef'],
                     'estado' => $validated['estado'],
                 ]);
 
@@ -672,11 +710,16 @@ class LineasChipsController extends Controller
                     'key' => 'precio_display',
                     'label' => 'Precio',
                     'value' => function ($row) {
-                        $moneda = trim((string) ($row['moneda'] ?? 'S/'));
+                        $moneda = trim((string) ($row['moneda'] ?? ''));
                         $precio = trim((string) ($row['precio'] ?? ''));
+                        if (!in_array($moneda, ['S/', '$', '€'], true)) {
+                            $moneda = str_contains($precio, '€')
+                                ? '€'
+                                : (str_contains($precio, '$') ? '$' : 'S/');
+                        }
 
                         if ($precio === '') {
-                            return $moneda === '' ? '' : $moneda;
+                            return '';
                         }
 
                         $precioDisplay = $precio;
@@ -709,6 +752,29 @@ class LineasChipsController extends Controller
                 ['key' => 'simcard', 'label' => 'SimCard'],
                 ['key' => 'operador', 'label' => 'Operador'],
                 ['key' => 'plan', 'label' => 'Plan'],
+                [
+                    'key' => 'precio_display',
+                    'label' => 'Precio',
+                    'value' => function ($row) {
+                        $moneda = trim((string) ($row['moneda'] ?? ''));
+                        $precio = trim((string) ($row['precio'] ?? ''));
+                        if ($precio === '') {
+                            return '';
+                        }
+
+                        if (!in_array($moneda, ['S/', '$', '€'], true)) {
+                            $moneda = str_contains($precio, '€')
+                                ? '€'
+                                : (str_contains($precio, '$') ? '$' : 'S/');
+                        }
+
+                        if (!preg_match('/^\s*[-+]?\d+(?:[.,]\d+)?\s*$/', $precio)) {
+                            $precio = preg_replace('/[^0-9,.-]/', '', $precio) ?? $precio;
+                        }
+
+                        return $precio === '' ? '' : trim($moneda . ' ' . $precio);
+                    },
+                ],
                 ['key' => 'status', 'label' => 'Estado'],
             ];
             $filename = 'detallesimcard_carga_preview_' . now()->format('Ymd_His') . '.xlsx';
@@ -851,7 +917,8 @@ class LineasChipsController extends Controller
         }
 
         $baseQuery = DB::table('numerotelefonico as n')
-            ->select('n.numeroTelefonico', 'n.plan', 'n.estado')
+            ->leftJoin('plantelef as p', 'p.idplantelef', '=', 'n.plantelef_idplantelef')
+            ->select('n.numeroTelefonico', 'p.nombre as plan', 'p.megas as plan_megas', 'p.sms as plan_sms', 'n.estado')
             ->addSelect([
                 'precio_numero' => DB::table('detalle_precionumero as dp')
                     ->select('dp.precio')
@@ -901,6 +968,16 @@ class LineasChipsController extends Controller
                 });
             }
 
+            $planFilter = trim((string) $request->input('plan', ''));
+            if ($planFilter !== '') {
+                $baseQuery->where(function ($query) use ($planFilter) {
+                    $term = '%' . $planFilter . '%';
+                    $query->where('p.nombre', 'like', $term)
+                        ->orWhere('p.megas', 'like', $term)
+                        ->orWhere('p.sms', 'like', $term);
+                });
+            }
+
             $search = trim((string) $request->input('q', ''));
             if ($search !== '') {
                 $term = '%' . $search . '%';
@@ -932,6 +1009,11 @@ class LineasChipsController extends Controller
             ->get();
 
         $rows->transform(function ($item) {
+            $item->plan = implode(' - ', [
+                trim((string) ($item->plan ?? '')),
+                trim((string) ($item->plan_megas ?? '')),
+                trim((string) ($item->plan_sms ?? '')),
+            ]);
             $simcardActual = trim((string) ($item->simcard_actual ?? ''));
             $simcardPasada = trim((string) ($item->simcard_pasada ?? ''));
             $precio = trim((string) ($item->precio_numero ?? ''));
@@ -1109,6 +1191,8 @@ class LineasChipsController extends Controller
 
     public function simcardCreate(): View
     {
+        [$planOptions, $planPriceMap] = $this->planTelefonicoFormData();
+
         return view('lineaschip.simcard-form', [
             'title' => 'Nueva SimCard',
             'moduleTitle' => 'SimCard',
@@ -1163,6 +1247,42 @@ class LineasChipsController extends Controller
                     'helpText' => 'Ingrese mínimo 9 digitos, sin guiones ni espacios.',
                 ],
                 [
+                    'name' => 'plantelef_idplantelef',
+                    'type' => 'select',
+                    'label' => 'Plan telefónico',
+                    'required' => true,
+                    'tomSelect' => true,
+                    'options' => $planOptions,
+                    'placeholder' => 'Buscar y seleccionar un plan',
+                    'quickCreateNumero' => true,
+                    'helpText' => 'Seleccione un plan; su precio y moneda se sugieren y puede modificarlos para este número.',
+                ],
+                [
+                    'name' => 'precio',
+                    'type' => 'number',
+                    'label' => 'Precio',
+                    'required' => true,
+                    'min' => 0,
+                    'step' => '0.01',
+                    'placeholder' => 'Ej: 29.90',
+                    'quickCreateNumero' => true,
+                    'helpText' => 'Precio aplicado a este número.',
+                ],
+                [
+                    'name' => 'moneda',
+                    'type' => 'select',
+                    'label' => 'Moneda',
+                    'required' => true,
+                    'value' => old('moneda', 'S/'),
+                    'options' => [
+                        'S/' => 'S/',
+                        '$' => '$',
+                        '€' => '€',
+                    ],
+                    'quickCreateNumero' => true,
+                    'helpText' => 'Símbolo aplicado a este número.',
+                ],
+                [
                     'name' => 'estado_numero',
                     'type' => 'select',
                     'label' => 'Estado del número',
@@ -1177,6 +1297,7 @@ class LineasChipsController extends Controller
                 ],
             ],
             'readOnly' => false,
+            'planPriceMap' => $planPriceMap,
         ]);
     }
 
@@ -1198,6 +1319,9 @@ class LineasChipsController extends Controller
                 Rule::unique('numerotelefonico', 'numeroTelefonico'),
             ],
             'estado_numero' => [Rule::requiredIf($wantsNumero), 'nullable', 'string', $wantsNumero ? Rule::in(['1']) : Rule::in(['0', '1'])],
+            'plantelef_idplantelef' => [Rule::requiredIf($wantsNumero), 'nullable', 'integer', 'exists:plantelef,idplantelef'],
+            'precio' => [Rule::requiredIf($wantsNumero), 'nullable', 'numeric', 'min:0'],
+            'moneda' => [Rule::requiredIf($wantsNumero), 'nullable', Rule::in(['S/', '$', '€'])],
         ], [
             'idsimCard.unique' => 'Este ID de SimCard ya está registrado.',
             'numeroTelefonico.unique' => 'Este número ya está registrado.',
@@ -1206,7 +1330,11 @@ class LineasChipsController extends Controller
         ]);
 
         if ($wantsNumero) {
-            DB::transaction(function () use ($validated): void {
+            $this->findPlanTelefonico((int) $validated['plantelef_idplantelef']);
+            $precio = number_format((float) $validated['precio'], 2, '.', '');
+            $moneda = $validated['moneda'];
+
+            DB::transaction(function () use ($validated, $precio, $moneda): void {
                 DB::table('simcard')->insert([
                     'idsimCard' => $validated['idsimCard'],
                     'operador_idoperador' => (int) $validated['operador_idoperador'],
@@ -1215,7 +1343,15 @@ class LineasChipsController extends Controller
 
                 DB::table('numerotelefonico')->insert([
                     'numeroTelefonico' => $validated['numeroTelefonico'],
+                    'plantelef_idplantelef' => $validated['plantelef_idplantelef'],
                     'estado' => '2',
+                ]);
+
+                DB::table('detalle_precionumero')->insert([
+                    'numeroTelefonico_numeroTelefonico' => $validated['numeroTelefonico'],
+                    'precio' => $precio,
+                    'moneda' => $moneda,
+                    'fecha' => Carbon::now()->format('Y-m-d H:i:s'),
                 ]);
 
                 DB::table('detallesimcard')->insert([
@@ -1617,6 +1753,16 @@ class LineasChipsController extends Controller
             $baseQuery->where('d.numeroTelefonico_numeroTelefonico', 'like', '%' . $numeroTelefonicoFilter . '%');
         }
 
+        $planFilter = trim((string) $request->input('plan', ''));
+        if ($planFilter !== '') {
+            $term = '%' . $planFilter . '%';
+            $baseQuery->where(function ($query) use ($term) {
+                $query->where('p.nombre', 'like', $term)
+                    ->orWhere('p.megas', 'like', $term)
+                    ->orWhere('p.sms', 'like', $term);
+            });
+        }
+
         $fechaAsignacionFilter = self::normalizeFechaAsignacionForInput($request->input('fechaAsignacion'));
         if ($fechaAsignacionFilter !== null) {
             $baseQuery->whereDate('d.fechaAsignacion', $fechaAsignacionFilter);
@@ -1634,7 +1780,10 @@ class LineasChipsController extends Controller
                 $query
                     ->where('d.iddetalleSimCard', 'like', $term)
                     ->orWhere('d.simCard_idsimCard', 'like', $term)
-                    ->orWhere('d.numeroTelefonico_numeroTelefonico', 'like', $term);
+                    ->orWhere('d.numeroTelefonico_numeroTelefonico', 'like', $term)
+                    ->orWhere('p.nombre', 'like', $term)
+                    ->orWhere('p.megas', 'like', $term)
+                    ->orWhere('p.sms', 'like', $term);
             });
         }
 
@@ -1643,10 +1792,15 @@ class LineasChipsController extends Controller
                 'd.iddetalleSimCard',
                 'd.simCard_idsimCard',
                 'd.numeroTelefonico_numeroTelefonico',
+                'n.plantelef_idplantelef',
+                'p.nombre as plan_nombre',
+                'p.megas as plan_megas',
+                'p.sms as plan_sms',
                 'd.fechaAsignacion',
                 'd.estado',
                 DB::raw('(SELECT o.nombre FROM operador as o JOIN simcard as s2 ON s2.operador_idoperador = o.idoperador WHERE s2.idsimCard = d.simCard_idsimCard LIMIT 1) as operador_nombre')
             )
+            ->leftJoin('plantelef as p', 'p.idplantelef', '=', 'n.plantelef_idplantelef')
             ->when($estadoFilter === '', fn($query) => $query->where('d.estado', '0'))
             ->orderByRaw("CASE WHEN d.estado = '0' THEN 0 ELSE 1 END")
             ->orderByDesc('d.fechaAsignacion')
@@ -1735,6 +1889,11 @@ class LineasChipsController extends Controller
             })->values();
 
             $row->estado = self::normalizeDetalleSimCardEstadoLabel($row->estado);
+            $row->plan = implode(' - ', array_filter([
+                trim((string) ($row->plan_nombre ?? '')),
+                trim((string) ($row->plan_megas ?? '')),
+                trim((string) ($row->plan_sms ?? '')),
+            ], static fn (string $value): bool => $value !== ''));
             return $row;
         }));
 
@@ -1745,6 +1904,7 @@ class LineasChipsController extends Controller
             'columns' => [
                 ['key' => 'simCard_idsimCard', 'label' => 'SimCard', 'type' => 'text'],
                 ['key' => 'numeroTelefonico_numeroTelefonico', 'label' => 'Número telefónico', 'type' => 'text'],
+                ['key' => 'plan', 'label' => 'Plan', 'type' => 'text'],
                 ['key' => 'operador_nombre', 'label' => 'Operador', 'type' => 'text'],
                 ['key' => 'fechaAsignacion', 'label' => 'Fecha de asignación', 'type' => 'text'],
                 ['key' => 'estado', 'label' => 'Estado', 'type' => 'status'],
@@ -1779,6 +1939,12 @@ class LineasChipsController extends Controller
                     'placeholder' => 'Filtrar por número telefónico',
                 ],
                 [
+                    'name' => 'plan',
+                    'label' => 'Plan',
+                    'type' => 'text',
+                    'placeholder' => 'Filtrar por plan, megas o SMS',
+                ],
+                [
                     'name' => 'fechaAsignacion',
                     'label' => 'Fecha de asignación',
                     'type' => 'date',
@@ -1803,7 +1969,7 @@ class LineasChipsController extends Controller
             'importProcessRoute' => route('modules.lineas-chips.detallesimcard.import.process'),
             'importButtonLabel' => 'Cargar asignaciones',
             'importModalTitle' => 'Cargar asignación por archivo',
-            'importModalHint' => 'Archivo (.xlsx) con las columnas: Número, SimCard, Operador, Plan (opcional)',
+            'importModalHint' => 'Archivo (.xlsx) con las columnas: Número, SimCard, Operador, Plan, Precio',
             'numeroTelefonicoStateList' => DB::table('numerotelefonico')
                 ->where('estado', '1')
                 ->select('numeroTelefonico', DB::raw('1 as isActive'))
@@ -2029,7 +2195,9 @@ class LineasChipsController extends Controller
             abort(404);
         }
 
-        $baseQuery = DB::table('detallesimcard as d');
+        $baseQuery = DB::table('detallesimcard as d')
+            ->leftJoin('numerotelefonico as n', 'n.numeroTelefonico', '=', 'd.numeroTelefonico_numeroTelefonico')
+            ->leftJoin('plantelef as p', 'p.idplantelef', '=', 'n.plantelef_idplantelef');
 
         $selectedIds = (array) $request->input('selectedIds', []);
 
@@ -2044,6 +2212,16 @@ class LineasChipsController extends Controller
             $numeroTelefonicoFilter = trim((string) $request->input('numeroTelefonico', ''));
             if ($numeroTelefonicoFilter !== '') {
                 $baseQuery->where('d.numeroTelefonico_numeroTelefonico', 'like', '%' . $numeroTelefonicoFilter . '%');
+            }
+
+            $planFilter = trim((string) $request->input('plan', ''));
+            if ($planFilter !== '') {
+                $term = '%' . $planFilter . '%';
+                $baseQuery->where(function ($query) use ($term) {
+                    $query->where('p.nombre', 'like', $term)
+                        ->orWhere('p.megas', 'like', $term)
+                        ->orWhere('p.sms', 'like', $term);
+                });
             }
 
             $fechaAsignacionFilter = self::normalizeFechaAsignacionForInput($request->input('fechaAsignacion'));
@@ -2063,7 +2241,10 @@ class LineasChipsController extends Controller
                     $query
                         ->where('d.iddetalleSimCard', 'like', $term)
                         ->orWhere('d.simCard_idsimCard', 'like', $term)
-                        ->orWhere('d.numeroTelefonico_numeroTelefonico', 'like', $term);
+                        ->orWhere('d.numeroTelefonico_numeroTelefonico', 'like', $term)
+                        ->orWhere('p.nombre', 'like', $term)
+                        ->orWhere('p.megas', 'like', $term)
+                        ->orWhere('p.sms', 'like', $term);
                 });
             }
         }
@@ -2073,6 +2254,9 @@ class LineasChipsController extends Controller
                 'd.iddetalleSimCard',
                 'd.simCard_idsimCard',
                 'd.numeroTelefonico_numeroTelefonico',
+                'p.nombre as plan_nombre',
+                'p.megas as plan_megas',
+                'p.sms as plan_sms',
                 'd.fechaAsignacion',
                 'd.estado',
                 DB::raw('(SELECT o.nombre FROM operador as o JOIN simcard as s2 ON s2.operador_idoperador = o.idoperador WHERE s2.idsimCard = d.simCard_idsimCard LIMIT 1) as operador_nombre')
@@ -2083,6 +2267,11 @@ class LineasChipsController extends Controller
 
         $rows->transform(function ($item) {
             $item->fechaAsignacion = self::normalizeFechaAsignacionForInput($item->fechaAsignacion) ?? '';
+            $item->plan = implode(' - ', array_filter([
+                trim((string) ($item->plan_nombre ?? '')),
+                trim((string) ($item->plan_megas ?? '')),
+                trim((string) ($item->plan_sms ?? '')),
+            ], static fn (string $value): bool => $value !== ''));
             $item->estado = self::normalizeDetalleSimCardEstadoLabel($item->estado);
             return $item;
         });
@@ -2091,6 +2280,7 @@ class LineasChipsController extends Controller
             ['key' => 'iddetalleSimCard', 'label' => 'ID'],
             ['key' => 'simCard_idsimCard', 'label' => 'SimCard'],
             ['key' => 'numeroTelefonico_numeroTelefonico', 'label' => 'Número telefónico'],
+            ['key' => 'plan', 'label' => 'Plan'],
             ['key' => 'operador_nombre', 'label' => 'Operador'],
             ['key' => 'fechaAsignacion', 'label' => 'Fecha de asignación'],
             ['key' => 'estado', 'label' => 'Estado'],
@@ -2904,12 +3094,13 @@ class LineasChipsController extends Controller
                 'simcard' => 1,
                 'operador' => 2,
                 'plan' => 3,
+                'precio' => 4,
             ];
 
             if (!empty($records)) {
                 $firstRow = array_map(fn($value) => mb_strtolower(trim((string) $value)), $records[0]);
                 $isHeaderRow = false;
-                $headerKeywords = ['simcard', 'simcards', 'sim card', 'iccid', 'operador', 'operadores', 'operator', 'numero', 'número', 'numeros', 'números', 'telefono', 'teléfono', 'telefonos', 'teléfonos', 'numero telefonico', 'número telefónico', 'plan', 'planes'];
+                $headerKeywords = ['simcard', 'simcards', 'sim card', 'iccid', 'operador', 'operadores', 'operator', 'numero', 'número', 'numeros', 'números', 'telefono', 'teléfono', 'telefonos', 'teléfonos', 'numero telefonico', 'número telefónico', 'plan', 'planes', 'precio', 'price'];
                 foreach ($firstRow as $header) {
                     if (in_array($header, $headerKeywords, true)) {
                         $isHeaderRow = true;
@@ -2923,6 +3114,7 @@ class LineasChipsController extends Controller
                     $columnIndexes['numero'] = $headerMap['numero'] ?? $headerMap['número'] ?? $headerMap['numeros'] ?? $headerMap['números'] ?? $headerMap['telefono'] ?? $headerMap['teléfono'] ?? $headerMap['numero telefonico'] ?? $headerMap['número telefónico'] ?? $columnIndexes['numero'];
                     $columnIndexes['operador'] = $headerMap['operador'] ?? $headerMap['operadores'] ?? $headerMap['operator'] ?? $columnIndexes['operador'];
                     $columnIndexes['plan'] = $headerMap['plan'] ?? $headerMap['planes'] ?? $columnIndexes['plan'];
+                    $columnIndexes['precio'] = $headerMap['precio'] ?? $headerMap['price'] ?? $columnIndexes['precio'];
                     array_shift($records);
                 }
             }
@@ -2995,6 +3187,7 @@ class LineasChipsController extends Controller
 
             $seenSimcards = [];
             $seenNumeros = [];
+            $planCatalog = $this->planTelefonicoCatalog();
             $lineNumber = 1;
 
             foreach ($records as $parts) {
@@ -3002,10 +3195,11 @@ class LineasChipsController extends Controller
                 $operatorName = trim((string) ($parts[$columnIndexes['operador']] ?? ''));
                 $numero = trim((string) ($parts[$columnIndexes['numero']] ?? ''));
                 $plan = trim((string) ($parts[$columnIndexes['plan']] ?? ''));
+                $precioRaw = trim((string) ($parts[$columnIndexes['precio']] ?? ''));
                 $extraValues = array_slice($parts, max($columnIndexes) + 1);
                 $hasExtraData = count(array_filter($extraValues, fn($value) => $value !== '')) > 0;
 
-                if ($simcard === '' || $numero === '' || $operatorName === '') {
+                if ($numero === '') {
                     $emptyCount++;
                     $previewRows[] = [
                         'line' => $lineNumber,
@@ -3013,7 +3207,112 @@ class LineasChipsController extends Controller
                         'operador' => $operatorName,
                         'numero' => $numero,
                         'plan' => $plan,
-                        'status' => 'Fila vacía o incompleta (Número, SimCard y Operador son obligatorios)',
+                        'precio' => $precioRaw,
+                        'moneda' => '',
+                        'status' => 'Fila incompleta (Número es obligatorio)',
+                        'importable' => false,
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                if (mb_strlen($numero) < 9 || mb_strlen($numero) > 30 || !preg_match(self::SAFE_TEXT_REGEX, $numero)) {
+                    $invalidCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => '',
+                        'status' => 'Inválido (formato o longitud de número incorrecto)',
+                        'importable' => false,
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                if ($simcard === '') {
+                    $emptyCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => '',
+                        'status' => 'Fila incompleta (SimCard es obligatorio)',
+                        'importable' => false,
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                if (mb_strlen($simcard) < 10 || mb_strlen($simcard) > 50 || !preg_match(self::SAFE_TEXT_REGEX, $simcard)) {
+                    $invalidCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => '',
+                        'status' => 'Inválido (formato o longitud de SimCard incorrecto)',
+                        'importable' => false,
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                if ($operatorName === '') {
+                    $emptyCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => '',
+                        'status' => 'Fila incompleta (Operador es obligatorio)',
+                        'importable' => false,
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                $operatorId = $operatorMap[mb_strtolower($operatorName)] ?? null;
+                if ($operatorId === null) {
+                    $invalidCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => '',
+                        'status' => 'Inválido (operador no existe en BD)',
+                        'importable' => false,
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                if ($plan === '') {
+                    $emptyCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => '',
+                        'status' => 'Fila incompleta (Plan es obligatorio)',
                         'importable' => false,
                     ];
                     $lineNumber++;
@@ -3028,6 +3327,8 @@ class LineasChipsController extends Controller
                         'operador' => $operatorName,
                         'numero' => $numero,
                         'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => '',
                         'status' => 'Inválido (columnas extras)',
                         'importable' => false,
                     ];
@@ -3035,7 +3336,7 @@ class LineasChipsController extends Controller
                     continue;
                 }
 
-                if (mb_strlen($plan) > 45 || ($plan !== '' && !preg_match(self::SAFE_TEXT_REGEX, $plan))) {
+                if (mb_strlen($plan) > 45 || !preg_match(self::SAFE_TEXT_REGEX, $plan)) {
                     $invalidCount++;
                     $previewRows[] = [
                         'line' => $lineNumber,
@@ -3043,6 +3344,8 @@ class LineasChipsController extends Controller
                         'operador' => $operatorName,
                         'numero' => $numero,
                         'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => '',
                         'status' => 'Inválido (formato o longitud del plan incorrecto)',
                         'importable' => false,
                     ];
@@ -3050,9 +3353,8 @@ class LineasChipsController extends Controller
                     continue;
                 }
 
-                $totalRows++;
-                $operatorId = $operatorMap[mb_strtolower($operatorName)] ?? null;
-                if ($operatorId === null) {
+                $planInfo = $this->resolvePlanTelefonicoByName($planCatalog, $plan);
+                if ($planInfo === null) {
                     $invalidCount++;
                     $previewRows[] = [
                         'line' => $lineNumber,
@@ -3060,12 +3362,51 @@ class LineasChipsController extends Controller
                         'operador' => $operatorName,
                         'numero' => $numero,
                         'plan' => $plan,
-                        'status' => 'Inválido (operador no existe en BD)',
+                        'precio' => $precioRaw,
+                        'moneda' => '',
+                        'status' => 'Inválido (el plan no existe)',
                         'importable' => false,
                     ];
                     $lineNumber++;
                     continue;
                 }
+
+                if ($precioRaw === '') {
+                    $emptyCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'numero' => $numero,
+                        'plan' => $planInfo['nombre'],
+                        'precio' => '',
+                        'moneda' => '',
+                        'status' => 'Fila incompleta (Precio es obligatorio)',
+                        'importable' => false,
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                [$precio, $moneda] = $this->normalizeNumeroPrecio($precioRaw);
+                if ($precio === null) {
+                    $invalidCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'simcard' => $simcard,
+                        'operador' => $operatorName,
+                        'numero' => $numero,
+                        'plan' => $planInfo['nombre'],
+                        'precio' => $precioRaw,
+                        'moneda' => $moneda,
+                        'status' => 'Inválido (precio no numérico)',
+                        'importable' => false,
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                $totalRows++;
 
                 if (isset($seenSimcards[$simcard]) || isset($seenNumeros[$numero])) {
                     $fileDuplicates++;
@@ -3075,6 +3416,8 @@ class LineasChipsController extends Controller
                         'operador' => $operatorName,
                         'numero' => $numero,
                         'plan' => $plan,
+                        'precio' => $precio,
+                        'moneda' => $moneda,
                         'status' => 'Duplicado en archivo (Número o SimCard)',
                         'importable' => false,
                     ];
@@ -3097,6 +3440,8 @@ class LineasChipsController extends Controller
                         'operador' => $operatorName,
                         'numero' => $numero,
                         'plan' => $plan,
+                        'precio' => $precio,
+                        'moneda' => $moneda,
                         'status' => 'Existe en BD',
                         'importable' => false,
                     ];
@@ -3111,9 +3456,12 @@ class LineasChipsController extends Controller
                     'operador' => $operatorName,
                     'numero' => $numero,
                     'plan' => $plan,
+                    'precio' => $precio,
+                    'moneda' => $moneda,
                     'status' => 'Nuevo',
                     'importable' => true,
                     'operatorId' => $operatorId,
+                    'planId' => $planInfo['id'],
                 ];
                 $lineNumber++;
             }
@@ -3194,10 +3542,12 @@ class LineasChipsController extends Controller
 
         try {
             $processedCount = 0;
-            DB::transaction(function () use ($preview, &$processedCount) {
+            $plansById = $this->planTelefonicoById();
+            DB::transaction(function () use ($preview, &$processedCount, $plansById) {
                 $simcardRows = [];
                 $numeroRows = [];
                 $detalleRows = [];
+                $precioRows = [];
 
                 foreach ($preview['allRows'] ?? [] as $row) {
                     if (empty($row['importable'])) {
@@ -3206,10 +3556,26 @@ class LineasChipsController extends Controller
 
                     $simcard = trim((string) ($row['simcard'] ?? ''));
                     $numero = trim((string) ($row['numero'] ?? ''));
-                    $plan = trim((string) ($row['plan'] ?? ''));
+                    $planId = (int) ($row['planId'] ?? 0);
                     $operatorId = (int) ($row['operatorId'] ?? 0);
-                    if ($simcard === '' || $numero === '' || $operatorId === 0) {
+                    if ($simcard === '' || $numero === '' || $operatorId === 0 || $planId === 0) {
                         continue;
+                    }
+
+                    $plan = $plansById[(string) $planId] ?? null;
+                    if ($plan === null) {
+                        throw ValidationException::withMessages([
+                            'importFile' => "El plan telefónico con ID {$planId} ya no existe.",
+                        ]);
+                    }
+                    [$precio, $moneda] = $this->normalizeNumeroPrecio(
+                        (string) ($row['precio'] ?? ''),
+                        (string) ($row['moneda'] ?? '')
+                    );
+                    if ($precio === null) {
+                        throw ValidationException::withMessages([
+                            'importFile' => "El precio del número {$numero} no es válido.",
+                        ]);
                     }
 
                     $simcardRows[] = [
@@ -3219,8 +3585,14 @@ class LineasChipsController extends Controller
                     ];
                     $numeroRows[] = [
                         'numeroTelefonico' => $numero,
-                        'plan' => $plan,
+                        'plantelef_idplantelef' => $planId,
                         'estado' => '2',
+                    ];
+                    $precioRows[] = [
+                        'numeroTelefonico_numeroTelefonico' => $numero,
+                        'precio' => $precio,
+                        'moneda' => $moneda,
+                        'fecha' => Carbon::now()->format('Y-m-d H:i:s'),
                     ];
                     $detalleRows[] = [
                         'simCard_idsimCard' => $simcard,
@@ -3235,6 +3607,9 @@ class LineasChipsController extends Controller
                 }
                 foreach (array_chunk($numeroRows, 500) as $chunk) {
                     DB::table('numerotelefonico')->insertOrIgnore($chunk);
+                }
+                foreach (array_chunk($precioRows, 500) as $chunk) {
+                    DB::table('detalle_precionumero')->insertOrIgnore($chunk);
                 }
                 foreach (array_chunk($detalleRows, 500) as $chunk) {
                     DB::table('detallesimcard')->insertOrIgnore($chunk);
@@ -3368,6 +3743,7 @@ class LineasChipsController extends Controller
                 }
             }
 
+            $planCatalog = $this->planTelefonicoCatalog();
             $seenInFile = [];
             $lineNumber = 1;
 
@@ -3376,15 +3752,15 @@ class LineasChipsController extends Controller
                 $plan = trim((string) ($parts[$planColIndex] ?? ''));
                 $precioRaw = trim((string) ($parts[$precioColIndex] ?? ''));
 
-                if ($numero === '' || $plan === '' || $precioRaw === '') {
+                if ($numero === '') {
                     $emptyCount++;
                     $previewRows[] = [
                         'line' => $lineNumber,
                         'numero' => $numero,
                         'plan' => $plan,
                         'precio' => $precioRaw,
-                        'moneda' => 'S/',
-                        'status' => 'Fila vacía o incompleta (Numero, Plan y Precio son obligatorios)',
+                        'moneda' => '',
+                        'status' => 'Fila incompleta (Numero es obligatorio)',
                         'importable' => false,
                         'importType' => 'numero',
                     ];
@@ -3399,8 +3775,58 @@ class LineasChipsController extends Controller
                         'numero' => $numero,
                         'plan' => $plan,
                         'precio' => $precioRaw,
-                        'moneda' => 'S/',
+                        'moneda' => '',
                         'status' => 'Inválido (formato o longitud de número incorrecto)',
+                        'importable' => false,
+                        'importType' => 'numero',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                if ($plan === '') {
+                    $emptyCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => '',
+                        'status' => 'Fila incompleta (Plan es obligatorio)',
+                        'importable' => false,
+                        'importType' => 'numero',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+
+                $planInfo = $this->resolvePlanTelefonicoByName($planCatalog, $plan);
+                if ($planInfo === null) {
+                    $invalidCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => $precioRaw,
+                        'moneda' => '',
+                        'status' => 'Inválido (el nombre del plan no existe)',
+                        'importable' => false,
+                        'importType' => 'numero',
+                    ];
+                    $lineNumber++;
+                    continue;
+                }
+                $plan = $planInfo['nombre'];
+
+                if ($precioRaw === '') {
+                    $emptyCount++;
+                    $previewRows[] = [
+                        'line' => $lineNumber,
+                        'numero' => $numero,
+                        'plan' => $plan,
+                        'precio' => '',
+                        'moneda' => '',
+                        'status' => 'Fila incompleta (Precio es obligatorio)',
                         'importable' => false,
                         'importType' => 'numero',
                     ];
@@ -3470,6 +3896,7 @@ class LineasChipsController extends Controller
                     'status' => 'Nuevo',
                     'importable' => true,
                     'importType' => 'numero',
+                    'planId' => $planInfo['id'],
                 ];
                 $lineNumber++;
             }
@@ -3550,7 +3977,8 @@ class LineasChipsController extends Controller
 
         try {
             $processedCount = 0;
-            DB::transaction(function () use ($preview, &$processedCount) {
+            $plansById = $this->planTelefonicoById();
+            DB::transaction(function () use ($preview, &$processedCount, $plansById) {
                 $numeroRows = [];
                 $precioRows = [];
 
@@ -3560,25 +3988,32 @@ class LineasChipsController extends Controller
                     }
 
                     $numero = trim((string) ($row['numero'] ?? ''));
-                    $plan = trim((string) ($row['plan'] ?? ''));
-                    $precioRaw = trim((string) ($row['precio'] ?? ''));
+                    $planId = (int) ($row['planId'] ?? 0);
                     if ($numero === '') {
                         continue;
                     }
 
-                    [$precio, $moneda] = $this->resolveNumeroImportPrecio(
-                        $precioRaw,
-                        (string) ($row['moneda'] ?? '')
-                    );
-                    if ($plan === '' || $precio === null) {
-                        continue;
+                    $plan = $plansById[(string) $planId] ?? null;
+                    if ($plan === null) {
+                        throw ValidationException::withMessages([
+                            'importFile' => "El plan telefónico con ID {$planId} ya no existe.",
+                        ]);
                     }
 
                     $numeroRows[] = [
                         'numeroTelefonico' => $numero,
-                        'plan' => $plan,
+                        'plantelef_idplantelef' => $planId,
                         'estado' => '1',
                     ];
+                    [$precio, $moneda] = $this->normalizeNumeroPrecio(
+                        (string) ($row['precio'] ?? ''),
+                        (string) ($row['moneda'] ?? '')
+                    );
+                    if ($precio === null) {
+                        throw ValidationException::withMessages([
+                            'importFile' => "El precio del número {$numero} no es válido.",
+                        ]);
+                    }
                     $precioRows[] = [
                         'numeroTelefonico_numeroTelefonico' => $numero,
                         'precio' => $precio,
@@ -4642,24 +5077,114 @@ class LineasChipsController extends Controller
     }
 
     /**
-     * @return array{0: string|null, 1: string}
+     * @return array{0: array<string, string>, 1: array<string, array{price: string, currency: string}>}
      */
-    private function resolveNumeroImportPrecio(string $value, ?string $monedaPreferida = null): array
+    private function planTelefonicoFormData(): array
     {
-        [$precio, $moneda] = $this->normalizeNumeroPrecio($value);
+        $options = [];
+        $priceMap = [];
 
-        $desired = trim((string) ($monedaPreferida ?? ''));
-        if ($precio !== null && in_array($desired, ['S/', '$'], true)) {
-            return [$precio, $desired];
+        foreach ($this->planTelefonicoById() as $id => $plan) {
+            if ($plan['moneda'] === null) {
+                continue;
+            }
+
+            $options[$id] = $plan['nombre'] . ' - ' . $plan['megas'] . ' - ' . $plan['sms'];
+            $priceMap[$id] = [
+                'price' => $plan['precio'],
+                'currency' => $plan['moneda'],
+            ];
         }
 
-        return [$precio, $moneda];
+        return [$options, $priceMap];
     }
 
-    private function normalizeNumeroPrecio(string $value): array
+    private function planTelefonicoCatalog(): array
+    {
+        $catalog = [];
+        foreach ($this->planTelefonicoById() as $plan) {
+            $key = mb_strtolower(trim($plan['nombre']));
+            $catalog[$key][] = $plan;
+        }
+
+        return $catalog;
+    }
+
+    private function planTelefonicoById(): array
+    {
+        $plans = [];
+        $records = DB::table('plantelef')
+            ->select('idplantelef', 'nombre', 'precio', 'moneda', 'megas', 'sms')
+            ->orderBy('idplantelef')
+            ->get();
+
+        foreach ($records as $record) {
+            $id = (string) $record->idplantelef;
+            $plans[$id] = [
+                'id' => (int) $record->idplantelef,
+                'nombre' => trim((string) $record->nombre),
+                'megas' => trim((string) $record->megas),
+                'sms' => trim((string) $record->sms),
+                'precio' => number_format((float) $record->precio, 2, '.', ''),
+                'moneda' => $this->planCurrencySymbol((string) $record->moneda),
+            ];
+        }
+
+        return $plans;
+    }
+
+    private function resolvePlanTelefonicoByName(array $catalog, string $name): ?array
+    {
+        $matches = $catalog[mb_strtolower(trim($name))] ?? [];
+
+        return count($matches) === 1 ? $matches[0] : null;
+    }
+
+    private function findPlanTelefonico(int $id): object
+    {
+        $plan = DB::table('plantelef')->where('idplantelef', $id)->first();
+        if (!$plan) {
+            throw ValidationException::withMessages([
+                'plantelef_idplantelef' => 'El plan telefónico seleccionado ya no existe.',
+            ]);
+        }
+
+        $moneda = $this->planCurrencySymbol((string) $plan->moneda);
+        if ($moneda === null) {
+            throw ValidationException::withMessages([
+                'plantelef_idplantelef' => 'El plan seleccionado no tiene una moneda permitida (S/, $ o €).',
+            ]);
+        }
+
+        $plan->moneda = $moneda;
+        return $plan;
+    }
+
+    private function planCurrencySymbol(string $currency): ?string
+    {
+        return match (trim($currency)) {
+            'S', 'S/' => 'S/',
+            '$' => '$',
+            '€' => '€',
+            default => null,
+        };
+    }
+
+    private function formatPlanTelefonicoPrice(string $price, string $currency): string
+    {
+        return $currency . ' ' . number_format((float) $price, 2, '.', '');
+    }
+
+    /**
+     * @return array{0: string|null, 1: string}
+     */
+    private function normalizeNumeroPrecio(string $value, ?string $preferredCurrency = null): array
     {
         $raw = trim($value);
-        $moneda = str_contains($raw, '$') ? '$' : 'S/';
+        $moneda = str_contains($raw, '€') ? '€' : (str_contains($raw, '$') ? '$' : 'S/');
+        if (in_array($preferredCurrency, ['S/', '$', '€'], true)) {
+            $moneda = $preferredCurrency;
+        }
         $numeric = preg_replace('/[^0-9,.-]/', '', $raw) ?? '';
 
         if ($numeric === '' || !preg_match('/\d/', $numeric)) {

@@ -296,9 +296,9 @@ class ClienteService
                 $join->on('d.vehiculo_placa', '=', 'v.placa')
                     ->whereRaw('d.iddispositivoCliente = (select max(inner_d.iddispositivoCliente) from dispositivocliente as inner_d where inner_d.vehiculo_placa = v.placa)');
             })
-            ->leftJoin('serviciocliente as sc', function ($join) {
+            ->leftJoin('serviciocliente as sc', function ($join) use ($clienteId) {
                 $join->on('sc.vehiculo_placa', '=', 'v.placa')
-                    ->whereRaw('sc.idservicioCliente = (select max(inner_sc.idservicioCliente) from serviciocliente as inner_sc where inner_sc.vehiculo_placa = v.placa and inner_sc.cliente_idcliente = v.cliente_idcliente)');
+                    ->whereRaw('sc.idservicioCliente = (select max(inner_sc.idservicioCliente) from serviciocliente as inner_sc where inner_sc.vehiculo_placa = v.placa and inner_sc.cliente_idcliente = ?)', [$clienteId]);
             })
             ->leftJoin('moneda as m', 'm.idmoneda', '=', 'sc.moneda_idmoneda')
             ->select([
@@ -321,7 +321,15 @@ class ClienteService
                 'sc.monto',
                 'm.simbolo as moneda_simbolo',
             ])
-            ->where('v.cliente_idcliente', $clienteId)
+            ->where(function (Builder $query) use ($clienteId) {
+                $query->where('v.cliente_idcliente', $clienteId)
+                    ->orWhereExists(function (Builder $serviceQuery) use ($clienteId) {
+                        $serviceQuery->select(DB::raw(1))
+                            ->from('serviciocliente as service_vehicle')
+                            ->whereColumn('service_vehicle.vehiculo_placa', 'v.placa')
+                            ->where('service_vehicle.cliente_idcliente', $clienteId);
+                    });
+            })
             ->orderBy('v.placa')
             ->get();
 

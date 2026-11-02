@@ -63,7 +63,7 @@ class CreditInstallmentReceivablesTest extends TestCase
         $this->assertCount(2, $installments);
         $this->assertSame(['2026-09-10', '2026-10-14'], $installments->pluck('fechaCancelacion')->all());
         $this->assertSame([50.0, 50.0], $installments->pluck('montoActual')->map(fn($amount): float => (float) $amount)->all());
-        $this->assertSame(['PagoCredito', 'PagoCredito'], $installments->pluck('estado')->all());
+        $this->assertSame(['Pendiente cuota crédito', 'Pendiente cuota crédito'], $installments->pluck('estado')->all());
         $this->assertSame(['CCXC:10:2 SC-101', 'CCXC:10:3 SC-101'], $installments->pluck('descripcion')->all());
     }
 
@@ -166,5 +166,122 @@ class CreditInstallmentReceivablesTest extends TestCase
 
         $this->assertCount(1, $groups);
         $this->assertSame(200.0, $groups[0]['monto_total']);
+    }
+
+    public function test_grouped_credit_first_installment_is_distributed_across_receivables(): void
+    {
+        $method = new \ReflectionMethod(CxcService::class, 'allocateCreditPlanCashAcrossReceivables');
+        $method->setAccessible(true);
+
+        $allocations = $method->invoke(
+            new CxcService(),
+            new Collection([
+                (object) ['idcuentasPorCobrar' => 10, 'montoActual' => 100],
+                (object) ['idcuentasPorCobrar' => 20, 'montoActual' => 200],
+            ]),
+            90,
+            0,
+            0,
+            []
+        );
+
+        $this->assertSame([30.0, 60.0], array_values($allocations));
+    }
+
+    public function test_grouped_credit_installments_are_split_by_receivable_and_due_date(): void
+    {
+        $method = new \ReflectionMethod(CxcService::class, 'distributeCreditInstallmentsAcrossReceivables');
+        $method->setAccessible(true);
+        $items = [
+            [
+                'id' => 10,
+                'balance' => 100,
+                'data' => [
+                    'monto_aplicado' => 30,
+                    'monto_deduccion' => 0,
+                    'monto_deduccion_pendiente' => 0,
+                    'monto_saldo_favor_aplicado' => 0,
+                    'monto_nota_credito_aplicado' => 0,
+                    'monto_adelantado' => 0,
+                    'monto_excedente' => 0,
+                ],
+            ],
+            [
+                'id' => 20,
+                'balance' => 200,
+                'data' => [
+                    'monto_aplicado' => 60,
+                    'monto_deduccion' => 0,
+                    'monto_deduccion_pendiente' => 0,
+                    'monto_saldo_favor_aplicado' => 0,
+                    'monto_nota_credito_aplicado' => 0,
+                    'monto_adelantado' => 0,
+                    'monto_excedente' => 0,
+                ],
+            ],
+        ];
+
+        $distributed = $method->invoke(
+            new CxcService(),
+            [
+                ['numero' => 1, 'monto' => 90, 'fecha' => '2026-08-20'],
+                ['numero' => 2, 'monto' => 90, 'fecha' => '2026-09-20'],
+                ['numero' => 3, 'monto' => 120, 'fecha' => '2026-10-20'],
+            ],
+            $items
+        );
+
+        $this->assertSame([30.0, 70.0, 0.0], array_column($distributed[0]['data']['cuotas'], 'monto'));
+        $this->assertSame([60.0, 20.0, 120.0], array_column($distributed[1]['data']['cuotas'], 'monto'));
+        $this->assertSame(
+            [90.0, 90.0, 120.0],
+            array_map(
+                fn (int $index): float => round(
+                    (float) $distributed[0]['data']['cuotas'][$index]['monto']
+                    + (float) $distributed[1]['data']['cuotas'][$index]['monto'],
+                    2
+                ),
+                [0, 1, 2]
+            )
+        );
+    }
+
+    public function test_credit_installment_payment_options_aggregate_children_for_each_due_installment(): void
+    {
+        $method = new \ReflectionMethod(CuentasPorCobrarService::class, 'creditInstallmentOptions');
+        $method->setAccessible(true);
+
+        $options = $method->invoke(
+            new CuentasPorCobrarService(),
+            new Collection([
+                (object) ['idcuentasPorCobrar' => 10, 'service_credit_installment' => false],
+                (object) ['idcuentasPorCobrar' => 20, 'service_credit_installment' => false],
+            ]),
+            [
+                10 => [
+                    ['id' => 101, 'number' => 2, 'amount' => 34.67, 'date' => '2026-11-10'],
+                    ['id' => 102, 'number' => 3, 'amount' => 34.66, 'date' => '2026-12-10'],
+                ],
+                20 => [
+                    ['id' => 201, 'number' => 2, 'amount' => 52.00, 'date' => '2026-11-10'],
+                    ['id' => 202, 'number' => 3, 'amount' => 52.00, 'date' => '2026-12-10'],
+                ],
+            ]
+        );
+
+        $this->assertSame([
+            [
+                'number' => 2,
+                'date' => '2026-11-10',
+                'amount' => 86.67,
+                'ids' => [101, 201],
+            ],
+            [
+                'number' => 3,
+                'date' => '2026-12-10',
+                'amount' => 86.66,
+                'ids' => [102, 202],
+            ],
+        ], $options);
     }
 }

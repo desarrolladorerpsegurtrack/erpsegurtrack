@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Http\Controllers\CuentasPorCobrarController;
 use App\Http\Controllers\BancosController;
+use App\Http\Controllers\ServicioClienteController;
 use App\Services\CotizacionService;
 use App\Services\BancosService;
 use App\Services\CxcService;
@@ -20,6 +21,32 @@ use Tests\TestCase;
 
 class CxcPaymentBreakdownTest extends TestCase
 {
+    public function test_service_history_currency_and_price_description_are_normalized(): void
+    {
+        $cxcController = new CuentasPorCobrarController(
+            new CxcService(),
+            new CuentasPorCobrarService(),
+            new CotizacionService()
+        );
+        $currencySymbol = new \ReflectionMethod($cxcController, 'currencySymbol');
+
+        $this->assertSame('S/', $currencySymbol->invoke($cxcController, 'S'));
+        $this->assertSame('S/', $currencySymbol->invoke($cxcController, 'Sol'));
+        $this->assertSame('$', $currencySymbol->invoke($cxcController, 'Dólar'));
+
+        $serviceController = new ServicioClienteController();
+        $normalizeHistory = new \ReflectionMethod($serviceController, 'normalizeHistoryPriceDescription');
+
+        $this->assertSame(
+            'Cambio de precio de S/ 48 a S/ 50',
+            $normalizeHistory->invoke($serviceController, 'Cambio de precio de S 48 a S 50')
+        );
+        $this->assertSame(
+            'Cambio de precio de $ 48 a $ 50',
+            $normalizeHistory->invoke($serviceController, 'Cambio de precio de $ 48 a $ 50')
+        );
+    }
+
     #[DataProvider('deductionCases')]
     public function test_deduction_uses_gross_threshold_and_client_type(
         float $gross,
@@ -39,6 +66,14 @@ class CxcPaymentBreakdownTest extends TestCase
 
         $this->assertSame(15.0, $result['deduction']);
         $this->assertSame(485.0, $result['cash_due']);
+    }
+
+    public function test_quotation_retention_preserves_two_decimal_places(): void
+    {
+        $result = CxcService::calculatePaymentBreakdown(2580, true, 0, false, 0, true, true);
+
+        $this->assertSame(77.4, $result['deduction']);
+        $this->assertSame(2502.6, $result['cash_due']);
     }
 
     public function test_quotation_retention_is_not_applied_when_not_selected(): void
@@ -99,6 +134,342 @@ class CxcPaymentBreakdownTest extends TestCase
 
         $this->assertSame(100.0, CxcService::convertPaymentAmountToDebtCurrency(345, 3.45, 2, 1));
         $this->assertSame(345.0, CxcService::convertPaymentAmountToDebtCurrency(100, 3.45, 1, 2));
+    }
+
+    public function test_quotation_overpayment_keeps_customer_credit_in_payment_currency(): void
+    {
+        Schema::create('cliente', function (Blueprint $table): void {
+            $table->string('idcliente')->primary();
+            $table->string('razonSocial')->nullable();
+            $table->string('nombreComercial')->nullable();
+            $table->string('detraccion')->nullable();
+        });
+        Schema::create('cuentasporcobrar', function (Blueprint $table): void {
+            $table->increments('idcuentasPorCobrar');
+            $table->string('cliente_idcliente');
+            $table->integer('tipoCobro_idtipoCobros');
+            $table->integer('moneda_idmoneda');
+            $table->string('docReferencia')->nullable();
+            $table->string('descripcion');
+            $table->decimal('montoOriginal', 20, 2);
+            $table->decimal('montoActual', 20, 2);
+            $table->integer('canCuotas')->nullable();
+            $table->dateTime('fechaRegistro')->nullable();
+            $table->dateTime('fechaCancelacion')->nullable();
+            $table->string('estado');
+        });
+        Schema::create('cotizacion', function (Blueprint $table): void {
+            $table->string('nroCotizacion')->primary();
+            $table->string('estado');
+            $table->string('cliente_idcliente');
+            $table->integer('moneda_idmoneda');
+            $table->integer('formaPago_idformaPago');
+            $table->decimal('total', 20, 2);
+            $table->string('archivoPago')->nullable();
+            $table->date('fechaPago')->nullable();
+        });
+        Schema::create('almacen', function (Blueprint $table): void {
+            $table->increments('idalmacen');
+            $table->string('detalle');
+            $table->integer('tipoElemento_idtipoElemento');
+        });
+        Schema::create('tipoelemento', function (Blueprint $table): void {
+            $table->increments('idtipoElemento');
+            $table->string('nombre');
+        });
+        Schema::create('detallecotizacion', function (Blueprint $table): void {
+            $table->increments('iddetalleCotizacion');
+            $table->string('cotizacion_nroCotizacion');
+            $table->integer('almacen_idalmacen');
+        });
+        Schema::create('moneda', function (Blueprint $table): void {
+            $table->increments('idmoneda');
+            $table->string('detalle');
+            $table->string('simbolo');
+        });
+        Schema::create('entidadbancaria', function (Blueprint $table): void {
+            $table->increments('identidadBancaria');
+        });
+        Schema::create('formapago', function (Blueprint $table): void {
+            $table->increments('idformaPago');
+            $table->string('detalle');
+        });
+        Schema::create('bancos', function (Blueprint $table): void {
+            $table->increments('idbancos');
+            $table->integer('entidadBancaria_identidadBancaria');
+            $table->dateTime('fechaRegistro');
+            $table->string('informacion', 100);
+            $table->decimal('monto', 20, 2);
+            $table->string('tipoMov', 1);
+        });
+        Schema::create('detallecxc', function (Blueprint $table): void {
+            $table->increments('iddetalleCXC');
+            $table->integer('formaPago_idformaPago');
+            $table->integer('cuentasPorCobrar_idcuentasPorCobrar');
+            $table->integer('moneda_idmoneda');
+            $table->string('descripcion', 100)->nullable();
+            $table->dateTime('fechaPagoProgramada')->nullable();
+            $table->dateTime('fechaPago')->nullable();
+            $table->integer('nCuota')->nullable();
+            $table->integer('bancos_idbancos');
+            $table->string('estado', 1)->nullable();
+        });
+
+        DB::table('cliente')->insert([
+            'idcliente' => 'CLIENTE-1',
+            'razonSocial' => 'GRINGO EXPRESS S.A.C.',
+            'detraccion' => '0',
+        ]);
+        DB::table('moneda')->insert([
+            ['idmoneda' => 1, 'detalle' => 'Sol (S)', 'simbolo' => 'S/'],
+            ['idmoneda' => 2, 'detalle' => 'Dólar', 'simbolo' => '$'],
+        ]);
+        DB::table('entidadbancaria')->insert(['identidadBancaria' => 1]);
+        DB::table('formapago')->insert(['idformaPago' => 1, 'detalle' => 'Contado']);
+        DB::table('tipoelemento')->insert(['idtipoElemento' => 1, 'nombre' => 'EQUIPAMIENTO']);
+        $warehouseId = DB::table('almacen')->insertGetId([
+            'detalle' => 'Equipo de prueba',
+            'tipoElemento_idtipoElemento' => 1,
+        ]);
+        DB::table('cotizacion')->insert([
+            'nroCotizacion' => 'CT-OVERPAY-FOREIGN',
+            'estado' => '1',
+            'cliente_idcliente' => 'CLIENTE-1',
+            'moneda_idmoneda' => 2,
+            'formaPago_idformaPago' => 1,
+            'total' => 160,
+        ]);
+        DB::table('detallecotizacion')->insert([
+            'cotizacion_nroCotizacion' => 'CT-OVERPAY-FOREIGN',
+            'almacen_idalmacen' => $warehouseId,
+        ]);
+        $cxcId = DB::table('cuentasporcobrar')->insertGetId([
+            'cliente_idcliente' => 'CLIENTE-1',
+            'tipoCobro_idtipoCobros' => 1,
+            'moneda_idmoneda' => 2,
+            'descripcion' => 'COTIZACION:CT-OVERPAY-FOREIGN',
+            'montoOriginal' => 160,
+            'montoActual' => 160,
+            'estado' => 'NUEVO',
+        ]);
+
+        config(['locks.enabled' => false]);
+        $request = Request::create('/quotation/cross-currency-overpay', 'POST', [
+            'fecha_pago' => '2026-10-26',
+            'docReferencia' => 'F001-1500',
+            'formaPago_idformaPago' => 1,
+            'entidadBancaria_identidadBancaria' => 1,
+            'modo_pago' => 'total',
+            'moneda_idmoneda' => 2,
+            'payment_currency_mode' => 'other',
+            'currency_selector' => 1,
+            'tipo_cambio' => 3.45,
+            'monto_cancelado' => 1500,
+        ], [], [], [
+            'HTTP_ACCEPT' => 'application/json',
+            'HTTP_X_REQUESTED_WITH' => 'XMLHttpRequest',
+        ]);
+        $request->setLaravelSession(app('session')->driver());
+        app()->instance('request', $request);
+        $response = (new CuentasPorCobrarController(
+            new CxcService(),
+            new CuentasPorCobrarService(),
+            new CotizacionService()
+        ))->approveQuotation($request, 'CT-OVERPAY-FOREIGN');
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('Cotización aprobada correctamente.', $response->getData(true)['message']);
+        $this->assertSame(1500.0, (float) DB::table('bancos')
+            ->where('tipoMov', 'I')
+            ->value('monto'));
+        $this->assertSame(948.0, (float) DB::table('bancos')
+            ->where('tipoMov', 'A')
+            ->value('monto'));
+        $this->assertSame(
+            'Saldo a favor del cliente por sobrepago de CT-OVERPAY-FOREIGN',
+            DB::table('bancos')->where('tipoMov', 'A')->value('informacion')
+        );
+        $this->assertSame(1, (int) DB::table('detallecxc')
+            ->where('estado', 'A')
+            ->value('moneda_idmoneda'));
+        $this->assertSame(948.0, (new CxcService())->saldoFavorDisponible('CLIENTE-1', 1));
+        $this->assertSame(0.0, (new CxcService())->saldoFavorDisponible('CLIENTE-1', 2));
+
+        $serviceCxcId = DB::table('cuentasporcobrar')->insertGetId([
+            'cliente_idcliente' => 'CLIENTE-1',
+            'tipoCobro_idtipoCobros' => 1,
+            'moneda_idmoneda' => 1,
+            'descripcion' => 'CXC 01/10/2026 a 31/10/2026 SC-123',
+            'montoOriginal' => 100,
+            'montoActual' => 100,
+            'fechaCancelacion' => '2026-10-31',
+            'estado' => 'NUEVO',
+        ]);
+
+        (new CxcService())->procesarPagoCancelacion($serviceCxcId, [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'montoPago' => 100,
+            'monto_recibido' => 120,
+            'monto_convertido' => 120,
+            'monto_banco' => 120,
+            'monto_aplicado' => 100,
+            'monto_excedente' => 20,
+            'fechaPago' => '2026-10-26',
+            'docReferencia' => 'F001-120',
+            'modo_pago' => 'total',
+        ]);
+
+        $this->assertSame(
+            'Saldo a favor del cliente por sobrepago de octubre 2026 - GRINGO EXPRESS S.A.C.',
+            DB::table('bancos')->where('tipoMov', 'A')->orderByDesc('idbancos')->value('informacion')
+        );
+    }
+
+    public function test_service_group_overpayment_keeps_credit_in_payment_currency(): void
+    {
+        Schema::create('cliente', function (Blueprint $table): void {
+            $table->string('idcliente')->primary();
+            $table->string('detraccion')->nullable();
+            $table->string('razonSocial')->nullable();
+            $table->string('nombreComercial')->nullable();
+        });
+        Schema::create('cuentasporcobrar', function (Blueprint $table): void {
+            $table->increments('idcuentasPorCobrar');
+            $table->string('cliente_idcliente');
+            $table->integer('tipoCobro_idtipoCobros');
+            $table->integer('moneda_idmoneda');
+            $table->string('docReferencia')->nullable();
+            $table->string('descripcion');
+            $table->decimal('montoOriginal', 20, 2);
+            $table->decimal('montoActual', 20, 2);
+            $table->integer('canCuotas')->nullable();
+            $table->dateTime('fechaRegistro')->nullable();
+            $table->dateTime('fechaCancelacion')->nullable();
+            $table->string('estado');
+        });
+        Schema::create('serviciocliente', function (Blueprint $table): void {
+            $table->increments('idservicioCliente');
+            $table->string('cliente_idcliente');
+            $table->string('estado');
+            $table->date('fechaInicio');
+            $table->date('fecheVencimiento');
+            $table->integer('moneda_idmoneda');
+            $table->integer('tipoCobro_idtipoCobros');
+            $table->decimal('monto', 10, 2);
+            $table->integer('almacen_idalmacen')->nullable();
+            $table->string('vehiculo_placa')->nullable();
+        });
+        Schema::create('cuentasporcobrar_serviciocliente', function (Blueprint $table): void {
+            $table->integer('cuentasPorCobrar_idcuentasPorCobrar');
+            $table->integer('servicioCliente_idservicioCliente');
+            $table->decimal('montoServicio', 12, 2)->nullable();
+            $table->primary(['cuentasPorCobrar_idcuentasPorCobrar', 'servicioCliente_idservicioCliente']);
+        });
+        Schema::create('moneda', function (Blueprint $table): void {
+            $table->increments('idmoneda');
+            $table->string('detalle');
+            $table->string('simbolo');
+        });
+        Schema::create('entidadbancaria', function (Blueprint $table): void {
+            $table->increments('identidadBancaria');
+        });
+        Schema::create('formapago', function (Blueprint $table): void {
+            $table->increments('idformaPago');
+            $table->string('detalle');
+        });
+        Schema::create('almacen', function (Blueprint $table): void {
+            $table->increments('idalmacen');
+            $table->string('detalle')->nullable();
+        });
+        Schema::create('bancos', function (Blueprint $table): void {
+            $table->increments('idbancos');
+            $table->integer('entidadBancaria_identidadBancaria');
+            $table->dateTime('fechaRegistro');
+            $table->string('informacion', 100);
+            $table->decimal('monto', 20, 2);
+            $table->string('tipoMov', 1);
+        });
+        Schema::create('detallecxc', function (Blueprint $table): void {
+            $table->increments('iddetalleCXC');
+            $table->integer('formaPago_idformaPago');
+            $table->integer('cuentasPorCobrar_idcuentasPorCobrar');
+            $table->integer('moneda_idmoneda');
+            $table->string('descripcion', 100)->nullable();
+            $table->dateTime('fechaPagoProgramada')->nullable();
+            $table->dateTime('fechaPago')->nullable();
+            $table->integer('nCuota')->nullable();
+            $table->integer('bancos_idbancos');
+            $table->string('estado', 1)->nullable();
+        });
+
+        DB::table('cliente')->insert([
+            'idcliente' => 'CLIENTE-2',
+            'detraccion' => '0',
+            'razonSocial' => 'Cliente de dos servicios',
+        ]);
+        DB::table('moneda')->insert([
+            ['idmoneda' => 1, 'detalle' => 'Sol', 'simbolo' => 'S/'],
+            ['idmoneda' => 2, 'detalle' => 'Dólar', 'simbolo' => '$'],
+        ]);
+        DB::table('entidadbancaria')->insert(['identidadBancaria' => 1]);
+        DB::table('formapago')->insert(['idformaPago' => 1, 'detalle' => 'Contado']);
+
+        $cxcIds = [];
+        foreach ([201, 202, 203] as $serviceId) {
+            $cxcId = DB::table('cuentasporcobrar')->insertGetId([
+                'cliente_idcliente' => 'CLIENTE-2',
+                'tipoCobro_idtipoCobros' => 5,
+                'moneda_idmoneda' => 2,
+                'descripcion' => 'CXC 01/10/2026 a 31/10/2026 SC-' . $serviceId,
+                'montoOriginal' => 2.95,
+                'montoActual' => 2.95,
+                'fechaCancelacion' => '2026-10-31',
+                'estado' => 'FACTURADO',
+            ]);
+            $cxcIds[] = $cxcId;
+            DB::table('serviciocliente')->insert([
+                'idservicioCliente' => $serviceId,
+                'cliente_idcliente' => 'CLIENTE-2',
+                'estado' => 'activo',
+                'fechaInicio' => '2026-10-01',
+                'fecheVencimiento' => '2026-10-31',
+                'moneda_idmoneda' => 2,
+                'tipoCobro_idtipoCobros' => 5,
+                'monto' => 2.95,
+            ]);
+            DB::table('cuentasporcobrar_serviciocliente')->insert([
+                'cuentasPorCobrar_idcuentasPorCobrar' => $cxcId,
+                'servicioCliente_idservicioCliente' => $serviceId,
+                'montoServicio' => 2.95,
+            ]);
+        }
+
+        (new CxcService())->procesarPagoGrupo($cxcIds, [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'tipoCobro_idtipoCobros' => 5,
+            'moneda_idmoneda' => 2,
+            'currency_selector' => 1,
+            'payment_currency_mode' => 'other',
+            'monto_cancelado' => 31,
+            'tipo_cambio' => 3.45,
+            'modo_pago' => 'total',
+            'montoPago' => 8.85,
+            'fechaPago' => '2026-10-26',
+            'docReferencia' => 'F001-31',
+            'descripcion' => 'Pago de tres servicios en soles',
+            'servicio_ids' => [201, 202, 203],
+            'renewal_cxc_id' => $cxcIds[0],
+            'renewal_cxc_ids' => [],
+            'aplicar_deduccion' => false,
+        ]);
+
+        $this->assertSame(31.0, (float) DB::table('bancos')->where('tipoMov', 'I')->sum('monto'));
+        $this->assertSame(0.47, (float) DB::table('bancos')->where('tipoMov', 'A')->value('monto'));
+        $this->assertSame(1, (int) DB::table('detallecxc')->where('estado', 'A')->value('moneda_idmoneda'));
+        $this->assertSame(0.47, (new CxcService())->saldoFavorDisponible('CLIENTE-2', 1));
+        $this->assertSame(0.0, (new CxcService())->saldoFavorDisponible('CLIENTE-2', 2));
     }
 
     public static function deductionCases(): array
@@ -185,6 +556,8 @@ class CxcPaymentBreakdownTest extends TestCase
         );
         $applyFilters = new \ReflectionMethod($controller, 'applyQuotationFilters');
         $applyFilters->setAccessible(true);
+        $orderByStatus = new \ReflectionMethod($controller, 'orderQuotationsByStatus');
+        $orderByStatus->setAccessible(true);
         $filteredQuotes = static function (string $status) use ($controller, $applyFilters): array {
             $query = DB::table('cotizacion as c');
             $applyFilters->invoke($controller, $query, Request::create('/?quote_status=' . $status), 'pending');
@@ -203,6 +576,18 @@ class CxcPaymentBreakdownTest extends TestCase
         $this->assertSame(['Q-RET'], $filteredQuotes('pending_retencion'));
         $this->assertSame(['Q-APPROVED'], $filteredQuotes('approved'));
         $this->assertSame(['Q-APPROVED', 'Q-AUTO', 'Q-CREDIT', 'Q-DET', 'Q-LEGACY', 'Q-NEW', 'Q-PARTIAL', 'Q-RET'], $filteredQuotes('all'));
+        $defaultQuery = DB::table('cotizacion as c');
+        $applyFilters->invoke($controller, $defaultQuery, Request::create('/'), 'all');
+        $orderByStatus->invoke($controller, $defaultQuery);
+        $orderedQuotes = $defaultQuery
+            ->addSelect('c.nroCotizacion')
+            ->orderBy('c.nroCotizacion')
+            ->pluck('c.nroCotizacion')
+            ->all();
+        $this->assertSame(
+            ['Q-DET', 'Q-AUTO', 'Q-RET', 'Q-PARTIAL', 'Q-CREDIT', 'Q-LEGACY', 'Q-NEW', 'Q-APPROVED'],
+            $orderedQuotes
+        );
         $this->assertSame('Pendiente a Detracción', DB::table('cuentasporcobrar')
             ->where('descripcion', 'COTIZACION:Q-DET')
             ->value('estado'));
@@ -539,6 +924,123 @@ class CxcPaymentBreakdownTest extends TestCase
             ->pluck('montoOriginal')
             ->map(fn ($amount): float => (float) $amount)
             ->all());
+
+        DB::table('cliente')->where('idcliente', 'CLIENTE-1')->update(['detraccion' => '0']);
+        $withholdingCxcIds = [];
+        $withholdingServiceIds = [51, 52];
+        foreach ($withholdingServiceIds as $serviceId) {
+            DB::table('serviciocliente')->insert([
+                'idservicioCliente' => $serviceId,
+                'cliente_idcliente' => 'CLIENTE-1',
+                'estado' => 'activo',
+                'fechaInicio' => '2026-09-03',
+                'fecheVencimiento' => '2026-11-03',
+                'moneda_idmoneda' => 1,
+                'tipoCobro_idtipoCobros' => 5,
+                'monto' => 605,
+                'vehiculo_placa' => 'PLACA-' . $serviceId,
+            ]);
+            $withholdingCxcIds[] = DB::table('cuentasporcobrar')->insertGetId([
+                'cliente_idcliente' => 'CLIENTE-1',
+                'tipoCobro_idtipoCobros' => 5,
+                'moneda_idmoneda' => 1,
+                'descripcion' => 'CXC 03/09/2026 a 03/11/2026 SC-' . $serviceId,
+                'montoOriginal' => 605,
+                'montoActual' => 605,
+                'fechaCancelacion' => '2026-11-03',
+                'estado' => '1',
+            ]);
+            DB::table('cuentasporcobrar_serviciocliente')->insert([
+                'cuentasPorCobrar_idcuentasPorCobrar' => end($withholdingCxcIds),
+                'servicioCliente_idservicioCliente' => $serviceId,
+                'montoServicio' => 605,
+            ]);
+        }
+
+        $pendingWithholdingResult = (new CxcService())->procesarPagoGrupo($withholdingCxcIds, [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'tipoCobro_idtipoCobros' => 5,
+            'moneda_idmoneda' => 1,
+            'modo_pago' => 'total',
+            'montoPago' => 1065,
+            'fechaPago' => '2026-10-20',
+            'docReferencia' => 'F001-1065',
+            'descripcion' => 'Pago neto con detracción pendiente',
+            'withholding_decision' => 'pending',
+            'servicio_ids' => $withholdingServiceIds,
+            'renewal_cxc_id' => $withholdingCxcIds[0],
+            'renewal_cxc_ids' => $withholdingCxcIds,
+        ]);
+        $pendingWithholdingReceivables = DB::table('cuentasporcobrar')
+            ->whereIn('idcuentasPorCobrar', $withholdingCxcIds)
+            ->orderBy('idcuentasPorCobrar')
+            ->get();
+
+        $this->assertSame(145.0, $pendingWithholdingResult['remaining_debt']);
+        $this->assertSame(
+            ['Pendiente a Detracción', 'Pendiente a Detracción'],
+            $pendingWithholdingReceivables->pluck('estado')->all()
+        );
+        $this->assertSame([72.5, 72.5], $pendingWithholdingReceivables
+            ->pluck('montoActual')
+            ->map(fn ($amount): float => (float) $amount)
+            ->all());
+
+        DB::table('serviciocliente')->insert([
+            'idservicioCliente' => 53,
+            'cliente_idcliente' => 'CLIENTE-1',
+            'estado' => 'activo',
+            'fechaInicio' => '2026-09-03',
+            'fecheVencimiento' => '2026-11-03',
+            'moneda_idmoneda' => 1,
+            'tipoCobro_idtipoCobros' => 5,
+            'monto' => 1000,
+            'vehiculo_placa' => 'PLACA-53',
+        ]);
+        $overpaymentCxcId = DB::table('cuentasporcobrar')->insertGetId([
+            'cliente_idcliente' => 'CLIENTE-1',
+            'tipoCobro_idtipoCobros' => 5,
+            'moneda_idmoneda' => 1,
+            'descripcion' => 'CXC 03/09/2026 a 03/11/2026 SC-53',
+            'montoOriginal' => 1000,
+            'montoActual' => 1000,
+            'fechaCancelacion' => '2026-11-03',
+            'estado' => '1',
+        ]);
+        DB::table('cuentasporcobrar_serviciocliente')->insert([
+            'cuentasPorCobrar_idcuentasPorCobrar' => $overpaymentCxcId,
+            'servicioCliente_idservicioCliente' => 53,
+            'montoServicio' => 1000,
+        ]);
+
+        $overpaymentResult = (new CxcService())->procesarPagoGrupo([$overpaymentCxcId], [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'tipoCobro_idtipoCobros' => 5,
+            'moneda_idmoneda' => 1,
+            'modo_pago' => 'total',
+            'montoPago' => 920,
+            'fechaPago' => '2026-10-20',
+            'docReferencia' => 'F001-920',
+            'descripcion' => 'Pago con saldo a favor',
+            'withholding_decision' => 'pending',
+            'servicio_ids' => [53],
+            'renewal_cxc_id' => $overpaymentCxcId,
+            'renewal_cxc_ids' => [$overpaymentCxcId],
+        ]);
+
+        $this->assertSame(40.0, $overpaymentResult['new_credit']);
+        $this->assertSame(120.0, (float) DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $overpaymentCxcId)
+            ->value('montoActual'));
+        $this->assertSame('Pendiente a Detracción', DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $overpaymentCxcId)
+            ->value('estado'));
+        $this->assertSame(40.0, (float) DB::table('bancos')
+            ->where('tipoMov', 'A')
+            ->where('informacion', 'like', 'Saldo a favor del cliente por sobrepago%')
+            ->sum('monto'));
     }
 
     public function test_group_payment_records_unit_bank_entries_credit_and_individual_successors(): void
@@ -855,6 +1357,35 @@ class CxcPaymentBreakdownTest extends TestCase
         $this->assertSame(50.0, (float) DB::table('bancos')->where('informacion', 'Pago Servicio - PLACA-41 (Abono parcial de servicio)')->value('monto'));
         $this->assertSame(0, DB::table('bancos')->where('tipoMov', 'T')->count());
 
+        try {
+            (new CxcService())->procesarPagoGrupo([$partialCxcId], [
+                'entidadBancaria_identidadBancaria' => 1,
+                'formaPago_idformaPago' => 1,
+                'moneda_idmoneda' => 1,
+                'modo_pago' => 'parcial',
+                'montoPago' => 949,
+                'completar_pago_parcial' => true,
+                'aplicar_deduccion' => false,
+                'fechaPago' => '2026-11-03',
+            ]);
+            $this->fail('El pago pendiente debe rechazar montos menores al saldo total.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('El monto registrado debe coincidir con el saldo pendiente actual.', $exception->getMessage());
+        }
+
+        (new CxcService())->procesarPagoGrupo([$partialCxcId], [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'moneda_idmoneda' => 1,
+            'modo_pago' => 'parcial',
+            'montoPago' => 950,
+            'completar_pago_parcial' => true,
+            'aplicar_deduccion' => false,
+            'fechaPago' => '2026-11-03',
+        ]);
+        $this->assertSame(0.0, (float) DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $partialCxcId)->value('montoActual'));
+        $this->assertSame('3', DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $partialCxcId)->value('estado'));
+
         DB::table('cliente')->where('idcliente', 'CLIENTE-1')->update(['detraccion' => '0']);
         DB::table('moneda')->insert(['idmoneda' => 2, 'detalle' => 'Dolar', 'simbolo' => '$']);
         $this->assertSame(345.0, CxcService::convertPaymentAmountToDebtCurrency(100, 3.45, 1, 2));
@@ -1102,8 +1633,11 @@ class CxcPaymentBreakdownTest extends TestCase
             new CuentasPorCobrarService(),
             new CotizacionService()
         );
-        $makeQuotationRequest = function (string $uri, array $input, array $files = []): Request {
-            $request = Request::create($uri, 'POST', $input, [], $files);
+        $makeQuotationRequest = function (string $uri, array $input, array $files = [], bool $expectsJson = false): Request {
+            $request = Request::create($uri, 'POST', $input, [], $files, [
+                'HTTP_ACCEPT' => $expectsJson ? 'application/json' : 'text/html',
+                'HTTP_X_REQUESTED_WITH' => $expectsJson ? 'XMLHttpRequest' : '',
+            ]);
             $request->setLaravelSession(app('session')->driver());
             app()->instance('request', $request);
 
@@ -1298,10 +1832,13 @@ class CxcPaymentBreakdownTest extends TestCase
         $this->assertNull($pendingConvertedInstallment->fechaPago);
         $this->assertNotNull($pendingConvertedInstallment->bancos_idbancos);
         $this->assertSame((int) $paidFirstInstallment->bancos_idbancos, (int) $pendingConvertedInstallment->bancos_idbancos);
+        DB::table('cotizacion')->where('nroCotizacion', $creditQuotation)->update([
+            'formaPago_idformaPago' => 1,
+        ]);
         $controller->approveQuotation($makeQuotationRequest('/quotation/credit/next', [
             'fecha_pago' => '2026-11-11',
             'docReferencia' => 'F001-103',
-            'formaPago_idformaPago' => 2,
+            'formaPago_idformaPago' => 1,
             'entidadBancaria_identidadBancaria' => 1,
             'modo_pago' => 'parcial',
             'montoPago' => 11.16,
@@ -1314,6 +1851,10 @@ class CxcPaymentBreakdownTest extends TestCase
         $this->assertSame(2, DB::table('detallecxc')
             ->where('cuentasPorCobrar_idcuentasPorCobrar', $creditCxcId)
             ->count());
+        $this->assertSame(2, (int) DB::table('detallecxc')
+            ->where('cuentasPorCobrar_idcuentasPorCobrar', $creditCxcId)
+            ->where('nCuota', 2)
+            ->value('formaPago_idformaPago'));
 
         DB::table('tipoelemento')->insert([
             ['idtipoElemento' => 1, 'nombre' => 'SERVICIO TÉCNICO'],
@@ -1588,7 +2129,7 @@ class CxcPaymentBreakdownTest extends TestCase
             ->where('estado', '0')
             ->first();
         $this->assertSame('Pendiente a Retención', $pendingTaxCxc->estado);
-        $this->assertSame(47.0, (float) $pendingTaxCxc->montoActual);
+        $this->assertSame(47.25, (float) $pendingTaxCxc->montoActual);
         $this->assertSame(1575.0, (float) DB::table('bancos')->where('informacion', 'Pago de cotización CT-TAX-GROSS')->value('monto'));
         $this->assertNotNull($pendingTaxDetail);
         $this->assertNotNull($pendingTaxDetail->bancos_idbancos);
@@ -1612,7 +2153,7 @@ class CxcPaymentBreakdownTest extends TestCase
             'servicio' => 'EQUIPAMIENTO',
         ]]));
         $this->assertSame('S/ 1,575.00', $exportRows[0]['pago_realizado']);
-        $this->assertSame('S/ 47.00', $exportRows[0]['retencion']);
+        $this->assertSame('S/ 47.25', $exportRows[0]['retencion']);
         $this->assertSame('', $exportRows[0]['autoretencion']);
         $this->assertSame('', $exportRows[0]['autodetraccion']);
         $this->assertSame('', $exportRows[0]['detraccion']);
@@ -1665,7 +2206,7 @@ class CxcPaymentBreakdownTest extends TestCase
         $this->assertSame('2', DB::table('cotizacion')->where('nroCotizacion', 'CT-TAX-GROSS')->value('estado'));
         $this->assertSame('3', DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $grossQuoteCxcId)->value('estado'));
         $this->assertSame(0.0, (float) DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $grossQuoteCxcId)->value('montoActual'));
-        $this->assertSame(47.0, (float) DB::table('bancos')
+        $this->assertSame(47.25, (float) DB::table('bancos')
             ->where('entidadBancaria_identidadBancaria', 5)
             ->where('tipoMov', 'T')
             ->where('informacion', 'like', 'Retención pagada de CT-TAX-GROSS%')
@@ -1676,7 +2217,7 @@ class CxcPaymentBreakdownTest extends TestCase
             ->first();
         $this->assertNotNull($retentionMovement);
         $this->assertSame(5, (int) $retentionMovement->entidadBancaria_identidadBancaria);
-        $this->assertSame(47.0, (float) $retentionMovement->monto);
+        $this->assertSame(47.25, (float) $retentionMovement->monto);
         $this->assertStringContainsString('Se pagó la retención de 47 soles', $retentionMovement->informacion);
         $this->assertSame(1575.0, (float) DB::table('bancos')
             ->where('idbancos', $originalPaymentBankId)
@@ -1694,7 +2235,7 @@ class CxcPaymentBreakdownTest extends TestCase
         ))->invoke(new BancosController(new BancosService()), $retentionMovement->tipoMov, $retentionMovement->informacion));
         $grossQuoteBankStats = (new BancosService())->getStats(Request::create('/bancos?q=CT-TAX-GROSS'));
         $this->assertSame(1575.0, $grossQuoteBankStats['balances']['S/']['balance_positivo']);
-        $this->assertSame(47.0, $grossQuoteBankStats['balances']['S/']['balance_negativo']);
+        $this->assertSame(47.25, $grossQuoteBankStats['balances']['S/']['balance_negativo']);
         $this->assertSame(0, DB::table('bancos')
             ->where('tipoMov', 'S')
             ->where('informacion', 'like', 'Autodetracción%')
@@ -1714,7 +2255,7 @@ class CxcPaymentBreakdownTest extends TestCase
         ]));
         $this->assertSame(0.0, $revertedAutodetraccionBankStats['balances']['S/']['balance_positivo']);
         $this->assertSame(0.0, $revertedAutodetraccionBankStats['balances']['S/']['balance_negativo']);
-        $this->assertSame(47.0, $revertedAutodetraccionBankStats['balances']['S/']['anulado_revertido']);
+        $this->assertSame(47.25, $revertedAutodetraccionBankStats['balances']['S/']['anulado_revertido']);
         DB::table('cliente')->where('idcliente', 'CLIENTE-1')->update(['detraccion' => '1']);
         $creditTaxCxcId = $createTaxQuote('CT-TAX-CREDIT', 1000, 2, 2);
         $creditTaxResponse = $controller->approveQuotation($makeQuotationRequest('/quotation/tax/credit', [
@@ -1787,6 +2328,45 @@ class CxcPaymentBreakdownTest extends TestCase
             ->where('dc.descripcion', 'Pago de cotización CT-CROSS-CURRENCY')
             ->value('m.simbolo');
         $this->assertSame('S/', $paymentSymbol);
+
+        $foreignOverpaymentQuoteId = 'CT-CROSS-CURRENCY-OVERPAY';
+        $foreignOverpaymentCxcId = $createTaxQuote($foreignOverpaymentQuoteId, 160, 1, 3, 2);
+        $saldoFavorSolesBeforeForeignOverpayment = (new CxcService())->saldoFavorDisponible('CLIENTE-1', 1);
+        $foreignOverpaymentResponse = $controller->approveQuotation($makeQuotationRequest(
+            '/quotation/cross-currency-overpay',
+            [
+                'fecha_pago' => '2026-11-12',
+                'docReferencia' => 'F001-OVERPAY',
+                'formaPago_idformaPago' => 1,
+                'entidadBancaria_identidadBancaria' => 1,
+                'modo_pago' => 'total',
+                'moneda_idmoneda' => 2,
+                'payment_currency_mode' => 'other',
+                'currency_selector' => 1,
+                'tipo_cambio' => 3.45,
+                'monto_cancelado' => 1500,
+            ],
+            [],
+            true
+        ), $foreignOverpaymentQuoteId);
+        $this->assertSame(200, $foreignOverpaymentResponse->getStatusCode());
+        $this->assertSame('Cotización aprobada correctamente.', $foreignOverpaymentResponse->getData(true)['message']);
+        $this->assertSame(1500.0, (float) DB::table('bancos')
+            ->where('informacion', 'Pago de cotización ' . $foreignOverpaymentQuoteId)
+            ->value('monto'));
+        $this->assertSame(948.0, (float) DB::table('bancos')
+            ->where('informacion', 'like', 'Saldo a favor del cliente por sobrepago%')
+            ->where('tipoMov', 'A')
+            ->orderByDesc('idbancos')
+            ->value('monto'));
+        $this->assertSame(1, (int) DB::table('detallecxc')
+            ->where('cuentasPorCobrar_idcuentasPorCobrar', $foreignOverpaymentCxcId)
+            ->where('estado', 'A')
+            ->value('moneda_idmoneda'));
+        $this->assertSame(
+            round($saldoFavorSolesBeforeForeignOverpayment + 948, 2),
+            round((new CxcService())->saldoFavorDisponible('CLIENTE-1', 1), 2)
+        );
 
         DB::table('cliente')->where('idcliente', 'CLIENTE-1')->update(['detraccion' => '0']);
         $equipmentTaxCxcId = $createTaxQuote('CT-TAX-EQUIPMENT', 1000, 1, 3);
@@ -2228,6 +2808,10 @@ class CxcPaymentBreakdownTest extends TestCase
             'overdue on generation day' => ['4', '2026-10-20', '2026-10-01', true],
             'partial payment remains pending' => ['Pendiente Pago parcial', '2026-10-20', '2026-10-01', true],
             'credit remains pending' => ['Pendiente a credito', '2026-10-20', '2026-10-01', true],
+            'credit plan parent remains eligible' => ['Pendiente a credito: 1/3', '2026-10-20', '2026-10-01', true],
+            'pending autodetraccion remains eligible' => ['Pendiente Autodetracción', '2026-10-20', '2026-10-01', true],
+            'pending retention remains eligible' => ['Pendiente a Retención', '2026-10-20', '2026-10-01', true],
+            'credit installment child is excluded' => ['Pendiente cuota crédito', '2026-10-20', '2026-10-01', false],
             'does not renew before first day' => ['1', '2026-10-20', '2026-09-30', false],
             'paid cxc is excluded from schedule' => ['3', '2026-10-20', '2026-10-01', false],
             'cancelled alias is excluded from schedule' => ['CANCELADO', '2026-10-20', '2026-10-01', false],

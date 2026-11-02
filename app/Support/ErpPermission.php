@@ -66,6 +66,7 @@ class ErpPermission
             'sistema.historialflujo',
         ],
         'lineas_chips' => [
+            'lineas_chips.plan_telefonico',
             'lineas_chips.numero_telefonico',
             'lineas_chips.simcard',
             'lineas_chips.detallesimcard',
@@ -129,6 +130,10 @@ class ErpPermission
     ];
 
     private const LINEAS_CHIPS_ROUTE_RULES = [
+        'plan-telefonico' => 'lineas_chips.plan_telefonico',
+        'plan_telefonico' => 'lineas_chips.plan_telefonico',
+        'planes-telefonicos' => 'lineas_chips.plan_telefonico',
+        'planes_telefonicos' => 'lineas_chips.plan_telefonico',
         'numeros-telefonico' => 'lineas_chips.numero_telefonico',
         'numeros_telefonico' => 'lineas_chips.numero_telefonico',
         'numero-telefonico' => 'lineas_chips.numero_telefonico',
@@ -469,6 +474,7 @@ class ErpPermission
             'dispositivo_cliente', 'dispositivo-cliente', 'dispositivo cliente' => 'dispositivo_cliente',
             'vehiculos.dispositivo_cliente', 'vehiculos.dispositivo-cliente', 'vehiculos.dispositivo cliente' => 'dispositivo_cliente',
             'lineas_chips', 'lineas-chips', 'lineas chips' => 'lineas_chips',
+            'lineas_chips.plan_telefonico', 'lineas-chips.plan-telefonico', 'plan_telefonico', 'plan-telefonico', 'plantelef' => 'lineas_chips.plan_telefonico',
             'lineas_chips.numero_telefonico', 'lineas_chips.numeros_telefonico', 'lineas_chips.numero-telefonico', 'lineas_chips.numeros-telefonico' => 'lineas_chips.numero_telefonico',
             'lineas_chips.simcard', 'lineas-chips.simcard', 'simcard' => 'lineas_chips.simcard',
             'lineas_chips.detallesimcard', 'lineas-chips.detallesimcard', 'detallesimcard', 'detalle-simcard' => 'lineas_chips.detallesimcard',
@@ -611,6 +617,10 @@ class ErpPermission
         }
 
         $routeNameLower = mb_strtolower($routeName);
+        if (str_starts_with($routeNameLower, 'modules.lineas-chips.plan-telefonico.export')) {
+            return 'exportar';
+        }
+
         if (
             str_contains($routeNameLower, 'modules.lineas-chips.detallesimcard.import.')
             || str_contains($routeNameLower, 'modules.lineas-chips.detallesimcard.preview.export')
@@ -718,6 +728,7 @@ class ErpPermission
             // Lineas y Chips
             'lineas_chips' => 'modules.lineas-chips',
             'lineas_chips.numero_dispositivo' => 'modules.lineas-chips.numeros-dispositivo.index',
+            'lineas_chips.plan_telefonico' => 'modules.lineas-chips.plan-telefonico.index',
             'lineas_chips.numero_telefonico' => 'modules.lineas-chips.numeros-telefonico.index',
             'lineas_chips.simcard' => 'modules.lineas-chips.simcard.index',
             'lineas_chips.detallesimcard' => 'modules.lineas-chips.detallesimcard.index',

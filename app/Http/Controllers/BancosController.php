@@ -8,6 +8,7 @@ use App\Services\BancosService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
@@ -31,13 +32,17 @@ class BancosController extends Controller
                 'label' => $bank->label,
             ])
             ->all();
-        $items = $this->bancosService->getList($request, $this->resolvePerPage($request));
-        $items->getCollection()->transform(function ($row): mixed {
-            $row->fechaRegistro_display = $row->fechaRegistro ? date('d/m/Y H:i', strtotime((string) $row->fechaRegistro)) : '-';
-            $row->monto_display = $this->formatMoney($row->monto, $row->moneda_simbolo ?? null);
-            $row->tipoMov_display = $this->movementLabel($row->tipoMov, $row->informacion);
-            return $row;
-        });
+        $perPage = $this->resolvePerPage($request);
+        $allRows = $this->bancosService->getExportRows($request);
+        $groupedRows = $this->groupBankMovements($allRows);
+        $currentPage = LengthAwarePaginator::resolveCurrentPage();
+        $items = new LengthAwarePaginator(
+            $groupedRows->forPage($currentPage, $perPage)->values(),
+            $groupedRows->count(),
+            $perPage,
+            $currentPage,
+            ['path' => $request->url(), 'query' => $request->query()]
+        );
 
         $stats = $this->bancosService->getStats($request);
         return view('finanzas.bancos', [
@@ -45,20 +50,28 @@ class BancosController extends Controller
             'singularTitle' => 'Movimiento bancario',
             'items' => $items,
             'columns' => [
-                ['key' => 'idbancos', 'label' => 'ID', 'type' => 'text'],
-                ['key' => 'entidad_bancaria_nombre', 'label' => 'Entidad bancaria', 'type' => 'text'],
                 ['key' => 'cliente_nombre', 'label' => 'Cliente', 'type' => 'text'],
                 ['key' => 'fechaRegistro_display', 'label' => 'Fecha de registro', 'type' => 'text'],
                 ['key' => 'informacion', 'label' => 'Información', 'type' => 'text'],
-                ['key' => 'monto_display', 'label' => 'Monto', 'type' => 'text'],
-                ['key' => 'tipoMov_display', 'label' => 'Movimiento', 'type' => 'text'],
+                ['key' => 'monto_display', 'label' => 'Monto total', 'type' => 'text'],
             ],
+            'hideHistoryPanelTitle' => true,
+            'historyTitle' => 'Movimientos del grupo',
             'stats' => collect($stats['balances'])->flatMap(function (array $balance, string $symbol): array {
-                return [
-                    ['label' => 'Balance positivo (' . $symbol . ')', 'value' => $this->formatMoney($balance['balance_positivo'], $symbol)],
-                    ['label' => 'Balance negativo (' . $symbol . ')', 'value' => $this->formatMoney($balance['balance_negativo'], $symbol)],
-                    ['label' => 'Anulado/Revertido (' . $symbol . ')', 'value' => $this->formatMoney($balance['anulado_revertido'] ?? 0, $symbol)],
-                ];
+                $cards = [];
+                foreach ([
+                    'balance_positivo' => 'Balance positivo',
+                    'balance_negativo' => 'Balance negativo',
+                    'saldo_a_favor' => 'Saldo a favor',
+                    'anulado_revertido' => 'Anulado/Revertido',
+                ] as $key => $label) {
+                    $amount = (float) ($balance[$key] ?? 0);
+                    if (abs($amount) < 0.005) {
+                        continue;
+                    }
+                    $cards[] = ['label' => $label . ' (' . $symbol . ')', 'value' => $this->formatMoney($amount, $symbol)];
+                }
+                return $cards;
             })->values()->all(),
             'refreshStatsOnFilter' => true,
             'filters' => [
@@ -70,15 +83,7 @@ class BancosController extends Controller
                 ]],
                 ['name' => 'fechaDesde', 'toName' => 'fechaHasta', 'label' => 'Fecha de registro', 'type' => 'date_range'],
                 ['name' => 'montoDesde', 'toName' => 'montoHasta', 'label' => 'Monto', 'type' => 'number_range', 'placeholder' => 'Ej. 35'],
-                ['name' => 'tipoMov', 'label' => 'Movimiento', 'type' => 'select', 'placeholder' => 'Todos', 'options' => [
-                    ['value' => 'I', 'label' => 'Ingreso'],
-                    ['value' => 'S', 'label' => 'Salida'],
-                    ['value' => 'A', 'label' => 'Saldo a favor'],
-                    ['value' => 'C', 'label' => 'Aplicación de saldo a favor'],
-                    ['value' => 'T', 'label' => 'Detracción/retención aplicada'],
-                    ['value' => 'AUTODETRACCION', 'label' => 'Autodetracción'],
-                    ['value' => 'ANULADO', 'label' => 'Anulado/Revertido'],
-                ]],
+                ['name' => 'tipoMov', 'label' => 'Movimiento', 'type' => 'select', 'placeholder' => 'Todos', 'options' => $this->movementFilterOptions()],
             ],
             'createRoute' => route('modules.finanzas.bancos.create'),
             'editRoute' => 'modules.finanzas.bancos.edit',
@@ -549,7 +554,11 @@ class BancosController extends Controller
 
     public function bulkDestroy(Request $request): RedirectResponse
     {
-        $ids = collect((array) $request->input('selectedIds', []))->filter('is_numeric')->map('intval')->unique()->values();
+        $ids = collect((array) $request->input('selectedIds', []))
+            ->filter(fn (mixed $id): bool => is_numeric((string) $id))
+            ->map(fn (mixed $id): int => (int) $id)
+            ->unique()
+            ->values();
         if ($ids->isEmpty()) return redirect()->route('modules.finanzas.bancos.index')->with('error', 'Selecciona al menos un movimiento.');
         try { DB::table('bancos')->whereIn('idbancos', $ids->all())->delete(); }
         catch (QueryException) { return redirect()->route('modules.finanzas.bancos.index')->with('error', 'No se pueden eliminar movimientos con dependencias asociadas.'); }
@@ -578,7 +587,7 @@ class BancosController extends Controller
             'monto' => ['required', 'numeric', 'min:0', 'decimal:0,2'],
         ];
 
-        $rules['tipoMov'] = ['required', 'in:I,S'];
+        $rules['tipoMov'] = ['required', 'in:I,S,A'];
 
         $data = $request->validate($rules);
         $data['monto'] = number_format((float) $data['monto'], 2, '.', '');
@@ -690,7 +699,7 @@ class BancosController extends Controller
             ];
             $fields[] = ['name' => 'monto', 'type' => 'number', 'label' => 'Monto', 'required' => true, 'inputmode' => 'decimal', 'step' => '0.01', 'min' => 0, 'value' => number_format((float) $value('monto', 0), 2, '.', '')];
             $fields[] = ['name' => 'informacion', 'type' => 'text', 'label' => 'Información', 'required' => false, 'maxlength' => 100];
-            $fields[] = ['name' => 'tipoMov', 'type' => 'select', 'label' => 'Tipo de movimiento', 'required' => true, 'value' => $type, 'options' => [['value' => 'I', 'label' => 'Ingreso'], ['value' => 'S', 'label' => 'Salida']], 'placeholder' => 'Selecciona tipo de movimiento'];
+            $fields[] = ['name' => 'tipoMov', 'type' => 'select', 'label' => 'Tipo de movimiento', 'required' => true, 'value' => $type, 'options' => $this->movementTypeOptions(), 'placeholder' => 'Selecciona tipo de movimiento'];
         }
         $backRoute = $isCreditNote
             ? route('modules.finanzas.nota-creditos.index')
@@ -824,6 +833,254 @@ class BancosController extends Controller
         return $symbol . ' ' . number_format((float) $value, 2, '.', ',');
     }
 
+    private function groupBankMovements($rows): \Illuminate\Support\Collection
+    {
+        $linkedOperations = [];
+        $movementCollection = collect($rows);
+        $clientNameAliases = $movementCollection->map(function ($row): string {
+            return mb_strtolower(trim((string) ($row->cliente_nombre ?? '')), 'UTF-8');
+        })->filter(function ($name): bool {
+            return $name !== '' && $name !== '-' && !str_starts_with($name, 'sin ');
+        })->unique()->values()->all();
+        foreach ($movementCollection->groupBy(function ($row) use ($clientNameAliases): string {
+            $timestamp = strtotime((string) ($row->fechaRegistro ?? ''));
+            $client = $this->movementClientKey($row, $clientNameAliases);
+            $currency = trim((string) ($row->moneda_simbolo ?? 'S/'));
+            $cxcId = trim((string) ($row->cxc_id ?? ''));
+            return implode('|', [$client ?: '-', $currency, $timestamp > 0 ? date('Y-m-d H:i', $timestamp) : '', $cxcId]);
+        }) as $operationKey => $operationRows) {
+            $operationTypes = $operationRows->pluck('tipoMov')->map(fn ($type) => strtoupper(trim((string) $type)));
+            if ($operationTypes->contains('I') && ($operationTypes->contains('A') || $operationTypes->contains('C'))) {
+                $linkedOperations[$operationKey] = true;
+            }
+        }
+        foreach ($movementCollection->groupBy(function ($row) use ($clientNameAliases): string {
+            $timestamp = strtotime((string) ($row->fechaRegistro ?? ''));
+            $client = $this->movementClientKey($row, $clientNameAliases);
+            $currency = trim((string) ($row->moneda_simbolo ?? 'S/'));
+            return implode('|', [$client ?: '-', $currency, $timestamp > 0 ? date('Y-m-d H:i', $timestamp) : '']);
+        }) as $minuteKey => $minuteRows) {
+            $types = $minuteRows->pluck('tipoMov')->map(fn ($type) => strtoupper(trim((string) $type)));
+            $hasIncomeAndBalance = $types->contains('I') && ($types->contains('A') || $types->contains('C'));
+            if ($types->contains('A') || $hasIncomeAndBalance || $minuteRows->count() >= 3 || $types->contains('T')) {
+                $linkedOperations['minute|' . $minuteKey] = true;
+            }
+        }
+
+        return $movementCollection->groupBy(function ($row) use ($linkedOperations, $clientNameAliases): string {
+            $client = $this->movementClientKey($row, $clientNameAliases);
+            $currency = trim((string) ($row->moneda_simbolo ?? 'S/'));
+            $information = trim((string) ($row->informacion ?? ''));
+            $service = trim((string) ($row->servicio ?? ''));
+            $text = $information !== '' ? $information : $service;
+            $quotation = $this->movementQuotationKey($text);
+            if ($quotation !== null) {
+                return implode('|', [$client ?: '-', $currency, 'cotizacion-' . $quotation]);
+            }
+
+            $timestamp = strtotime((string) ($row->fechaRegistro ?? ''));
+            $operationMinute = $timestamp > 0 ? date('Y-m-d H:i', $timestamp) : '';
+            $minuteOperationKey = implode('|', [$client ?: '-', $currency, $operationMinute]);
+            if ($operationMinute !== '' && ($linkedOperations['minute|' . $minuteOperationKey] ?? false) === true) {
+                return implode('|', [$client ?: '-', $currency, 'operacion-' . $operationMinute]);
+            }
+
+            $period = $this->movementPeriodKey($text);
+            if ($period === 'sin-periodo') {
+                $timestamp = strtotime((string) ($row->fechaRegistro ?? ''));
+                $period = $timestamp > 0 ? 'fecha-' . date('Y-m-d', $timestamp) : 'sin-periodo';
+            }
+            $comment = $this->movementCommentKey($text);
+
+            $timestamp = strtotime((string) ($row->fechaRegistro ?? ''));
+            $operationDate = $timestamp > 0 ? date('Y-m-d H:i', $timestamp) : '';
+            $cxcId = trim((string) ($row->cxc_id ?? ''));
+            $operationKey = implode('|', [$client ?: '-', $currency, $operationDate, $cxcId]);
+            if (($linkedOperations[$operationKey] ?? false) === true) {
+                return 'operacion|' . $operationKey;
+            }
+
+            return implode('|', [$client ?: '-', $currency, $period, $comment]);
+        })->map(function ($group): object {
+            $first = $group->sortByDesc(fn ($row) => strtotime((string) $row->fechaRegistro) ?: 0)->first();
+            $latest = $group->max(fn ($row) => strtotime((string) $row->fechaRegistro) ?: 0);
+            $total = array_sum(array_map(function ($row): float {
+                $type = strtoupper(trim((string) ($row->tipoMov ?? '')));
+                if (in_array($type, ['I'], true) && !preg_match('/^\[ANULADO\]/iu', trim((string) ($row->informacion ?? '')))) {
+                    return (float) $row->monto;
+                }
+                if ($type === 'T') {
+                    $information = trim((string) ($row->informacion ?? ''));
+                    if (!preg_match('/^\[ANULADO\]/iu', $information)
+                        && !preg_match('/autodetracci[oó]n|autoretenci[oó]n/iu', $information)) {
+                        return (float) $row->monto;
+                    }
+                }
+
+                return 0.0;
+            }, $group->all()));
+            $currency = $first->moneda_simbolo ?? null;
+
+            $first->fechaRegistro_display = $latest > 0 ? date('d/m/Y H:i', $latest) : '-';
+            $first->monto_display = $this->formatMoney($total, $currency);
+            $first->informacion = trim((string) $first->informacion);
+            $first->tipoMov_display = $group->count() > 1
+                ? 'Varios movimientos (' . $group->count() . ')'
+                : $this->movementLabel($first->tipoMov, $first->informacion);
+            $first->relation_groups = [[
+                'label' => 'Movimientos del grupo',
+                'columns' => [
+                    ['key' => 'idbancos', 'label' => 'ID', 'type' => 'text'],
+                    ['key' => 'entidad_bancaria_nombre', 'label' => 'Entidad bancaria', 'type' => 'text'],
+                    ['key' => 'informacion', 'label' => 'Información', 'type' => 'text'],
+                    ['key' => 'fechaRegistro_display', 'label' => 'Fecha de registro', 'type' => 'text'],
+                    ['key' => 'monto_display', 'label' => 'Monto', 'type' => 'text'],
+                    ['key' => 'tipoMov_display', 'label' => 'Movimiento', 'type' => 'text'],
+                ],
+                'records' => $group->sort(function ($left, $right): int {
+                    $leftRank = $this->movementGroupSortRank($left->tipoMov, $left->informacion);
+                    $rightRank = $this->movementGroupSortRank($right->tipoMov, $right->informacion);
+                    if ($leftRank !== $rightRank) {
+                        return $leftRank <=> $rightRank;
+                    }
+
+                    $leftTime = strtotime((string) $left->fechaRegistro) ?: 0;
+                    $rightTime = strtotime((string) $right->fechaRegistro) ?: 0;
+                    if ($leftTime !== $rightTime) {
+                        return $rightTime <=> $leftTime;
+                    }
+
+                    return (int) $right->idbancos <=> (int) $left->idbancos;
+                })->map(function ($row): array {
+                    $row = clone $row;
+                    $row->fechaRegistro_display = $row->fechaRegistro
+                        ? date('d/m/Y H:i', strtotime((string) $row->fechaRegistro))
+                        : '-';
+                    $row->monto_display = $this->formatMoney($row->monto, $row->moneda_simbolo ?? null);
+                    $row->tipoMov_display = $this->movementLabel($row->tipoMov, $row->informacion);
+
+                    return (array) $row;
+                })->values()->all(),
+            ]];
+
+            return $first;
+        })->values();
+    }
+
+    private function movementClientKey(object $row, array $clientNameAliases = []): string
+    {
+        $information = mb_strtolower(trim((string) ($row->informacion ?? '')), 'UTF-8');
+        foreach ($clientNameAliases as $alias) {
+            if ($information !== '' && mb_strpos($information, $alias, 0, 'UTF-8') !== false) {
+                return $alias;
+            }
+        }
+
+        $name = mb_strtolower(trim((string) ($row->cliente_nombre ?? '')), 'UTF-8');
+        $name = preg_replace('/\s+/', ' ', $name ?? '') ?? '';
+        if ($name !== '' && $name !== '-') {
+            foreach ($clientNameAliases as $alias) {
+                if (mb_strpos($alias, $name, 0, 'UTF-8') !== false || mb_strpos($name, $alias, 0, 'UTF-8') !== false) {
+                    return $alias;
+                }
+            }
+            return $name;
+        }
+
+        $ruc = trim((string) ($row->cliente_ruc ?? ''));
+        return $ruc !== '' && $ruc !== '-' ? $ruc : '-';
+    }
+
+    private function movementQuotationKey(string $text): ?string
+    {
+        if (preg_match('/\b(CT|COTIZACION|Cotización)\s*[-#:]?\s*([A-Za-z0-9_-]+)/iu', $text, $matches) === 1) {
+            $prefix = mb_strtoupper(trim($matches[1]), 'UTF-8');
+            $number = trim($matches[2]);
+            if ($prefix === 'CT') {
+                return 'CT-' . $number;
+            }
+            if (str_starts_with(mb_strtoupper($number, 'UTF-8'), 'CT')) {
+                return 'CT-' . preg_replace('/^CT[-#:]?/i', '', $number);
+            }
+            return 'COTIZACION-' . $number;
+        }
+
+        return null;
+    }
+
+    private function movementPeriodKey(string $text): string
+    {
+        $text = mb_strtolower(trim($text), 'UTF-8');
+        $months = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+        foreach ($months as $index => $month) {
+            if (preg_match('/\b' . preg_quote($month, '/') . '\s*(?:del\s*)?(19|20)\d{2}\b/u', $text, $matches) === 1) {
+                return str_pad((string) ($index + 1), 2, '0', STR_PAD_LEFT) . '-' . substr((string) $matches[0], -4);
+            }
+        }
+        if (preg_match('/\b(19|20)\d{2}[-\/](0?[1-9]|1[0-2])\b/u', $text, $matches) === 1) {
+            $parts = preg_split('/[-\/]/', $matches[0]);
+            return str_pad((string) $parts[1], 2, '0', STR_PAD_LEFT) . '-' . $parts[0];
+        }
+        if (preg_match('/\b(0?[1-9]|1[0-2])[\-\/](19|20)\d{2}\b/u', $text, $matches) === 1) {
+            $parts = preg_split('/[-\/]/', $matches[0]);
+            return str_pad((string) $parts[0], 2, '0', STR_PAD_LEFT) . '-' . $parts[1];
+        }
+
+        return 'sin-periodo';
+    }
+
+    private function movementCommentKey(string $text): string
+    {
+        $text = preg_replace('/\[ANULADO\]/iu', ' ', $text ?? '');
+        $text = preg_replace('/\b(?:CXC|Cotización|Cotizacion)\s*(?:#|:)?\s*[A-Za-z0-9_-]+/iu', ' ', $text ?? '');
+        $text = preg_replace('/\s+-\s+[A-Za-z0-9]{4,10}(?=\s*(?:\(|$))/u', ' ', $text ?? '');
+        $text = preg_replace('/\b(?:PLACA|placa)\s*[:#]?\s*[A-Za-z0-9_-]+/iu', ' ', $text ?? '');
+        $text = preg_replace('/\b(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b(?:\s+(?:del\s+)?(?:19|20)\d{2})?/iu', ' ', $text ?? '');
+        $text = preg_replace('/\b(?:19|20)\d{2}[-\/](?:0?[1-9]|1[0-2])\b|\b(?:0?[1-9]|1[0-2])[-\/](?:19|20)\d{2}\b|\b\d{1,2}[\/-]\d{1,2}[\/-](?:19|20)\d{2}\b/iu', ' ', $text ?? '');
+        $text = mb_strtolower(trim(preg_replace('/\s+/', ' ', $text ?? '') ?? ''), 'UTF-8');
+
+        return $text !== '' ? $text : 'sin-comentario';
+    }
+
+    private function movementTypeOptions(): array
+    {
+        return [
+            ['value' => 'I', 'label' => 'Ingreso'],
+            ['value' => 'S', 'label' => 'Salida'],
+            ['value' => 'A', 'label' => 'Saldo a favor'],
+        ];
+    }
+
+    private function movementFilterOptions(): array
+    {
+        return array_merge($this->movementTypeOptions(), [
+            ['value' => 'C', 'label' => 'Uso de saldo a favor'],
+            ['value' => 'T', 'label' => 'Detracción/retención aplicada'],
+            ['value' => 'AUTODETRACCION', 'label' => 'Autodetracción'],
+            ['value' => 'ANULADO', 'label' => 'Anulado/Revertido'],
+        ]);
+    }
+
+    private function movementGroupSortRank(mixed $type, mixed $information): int
+    {
+        $informationText = mb_strtolower(trim((string) ($information ?? '')), 'UTF-8');
+        if (str_starts_with(trim((string) ($information ?? '')), '[ANULADO]')) {
+            return 6;
+        }
+        if (preg_match('/^(?:autodetracci[oó]n|autoretenci[oó]n)/iu', $informationText) === 1) {
+            return 2;
+        }
+
+        return match ((string) $type) {
+            'I' => 0,
+            'T' => 1,
+            'A' => 3,
+            'S' => 4,
+            'C' => 5,
+            default => 4,
+        };
+    }
+
     private function movementLabel(mixed $type, mixed $information): string
     {
         if (str_starts_with(trim((string) ($information ?? '')), '[ANULADO]')) {
@@ -841,7 +1098,7 @@ class BancosController extends Controller
         return match ((string) $type) {
             'I' => 'Ingreso',
             'A' => 'Saldo a favor',
-            'C' => 'Aplicación de saldo a favor',
+            'C' => 'Uso de saldo a favor',
             'T' => str_starts_with(mb_strtolower(trim((string) ($information ?? '')), 'UTF-8'), 'retención')
                 ? 'Retención'
                 : 'Detracción',
@@ -850,3 +1107,4 @@ class BancosController extends Controller
     }
 
 }
+

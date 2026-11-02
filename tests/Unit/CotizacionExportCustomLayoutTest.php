@@ -10,6 +10,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
 
 class CotizacionExportCustomLayoutTest extends TestCase
@@ -97,6 +98,81 @@ class CotizacionExportCustomLayoutTest extends TestCase
         DB::table('formapago')->insert([
             ['idformaPago' => 1, 'detalle' => 'Contado', 'tiempo' => 0],
         ]);
+    }
+
+    public function test_pending_autodetraccion_is_included_in_the_quotation_export(): void
+    {
+        DB::table('cliente')->insert([
+            'idcliente' => '20100000000',
+            'razonSocial' => 'SERVICIOS GENERALES S.A.C.',
+        ]);
+        DB::table('cotizacion')->insert([
+            'nroCotizacion' => 'CT-PENDING-AUTO',
+            'cliente_idcliente' => '20100000000',
+            'total' => 960.00,
+            'fechaHoraEmision' => '2026-10-10 10:00:00',
+            'estado' => '1',
+        ]);
+        $cxcId = DB::table('cuentasporcobrar')->insertGetId([
+            'descripcion' => 'COTIZACION:CT-PENDING-AUTO',
+            'montoOriginal' => 960.00,
+            'montoActual' => 115.00,
+            'estado' => 'Pendiente Autodetracción',
+        ]);
+        $paymentId = DB::table('bancos')->insertGetId([
+            'monto' => 960.00,
+            'tipoMov' => 'I',
+            'fechaRegistro' => '2026-10-10 10:30:00',
+            'informacion' => 'Pago de cotización',
+        ]);
+        DB::table('detallecxc')->insert([
+            'cuentasPorCobrar_idcuentasPorCobrar' => $cxcId,
+            'bancos_idbancos' => $paymentId,
+            'descripcion' => 'Pago de cotización',
+            'fechaPago' => '2026-10-10 10:30:00',
+            'estado' => '1',
+        ]);
+
+        $controller = new CuentasPorCobrarController(
+            new CxcService(),
+            new CuentasPorCobrarService(),
+            new CotizacionService()
+        );
+        $prepareMethod = new \ReflectionMethod($controller, 'prepareQuotationsExportData');
+        $prepareMethod->setAccessible(true);
+
+        $exportRows = $prepareMethod->invoke($controller, collect([(object) [
+            'nroCotizacion' => 'CT-PENDING-AUTO',
+            'cliente_idcliente' => '20100000000',
+            'razonSocial' => 'SERVICIOS GENERALES S.A.C.',
+            'nombreComercial' => null,
+            'cliente_nombre' => 'SERVICIOS GENERALES S.A.C.',
+            'total' => 960.00,
+            'fechaHoraEmision' => '2026-10-10 10:00:00',
+            'cotizacion_estado' => '1',
+            'moneda_detalle' => 'Soles',
+            'moneda_simbolo' => 'S/',
+        ]]));
+
+        $this->assertSame('S/ 960.00', $exportRows[0]['pago_realizado']);
+        $this->assertSame('S/ 115.00', $exportRows[0]['autodetraccion']);
+        $this->assertSame('', $exportRows[0]['fecha_abono_autodetraccion']);
+        $this->assertSame('', $exportRows[0]['detraccion']);
+
+        $exportMethod = new \ReflectionMethod($controller, 'exportCustomQuotationsXlsxResponse');
+        $exportMethod->setAccessible(true);
+        $response = $exportMethod->invoke($controller, $exportRows, 'cotizaciones.xlsx');
+        $path = $response->getFile()->getPathname();
+
+        try {
+            $sheet = IOFactory::load($path)->getActiveSheet();
+            $this->assertSame('S/ 115.00', $sheet->getCell('J2')->getValue());
+            $this->assertNull($sheet->getCell('K2')->getValue());
+        } finally {
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
     }
 
     public function test_prepare_quotations_export_data_matches_image_scenarios(): void

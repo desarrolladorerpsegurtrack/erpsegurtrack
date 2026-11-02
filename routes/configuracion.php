@@ -255,7 +255,9 @@ Route::middleware('erp.module:configuracion')->group(function () {
     Route::get('/modulos/configuracion/tecnologia', [ConfiguracionController::class, 'tecnologiasIndex'])->name('modules.configuracion.tecnologias.index');
     Route::get('/modulos/configuracion/tecnologia/export/{format}', [ConfiguracionController::class, 'tecnologiasExport'])->name('modules.configuracion.tecnologias.export')->where('format', 'pdf|xlsx');
     Route::post('/modulos/configuracion/tecnologia/export/{format}', [ConfiguracionController::class, 'tecnologiasExport'])->name('modules.configuracion.tecnologias.export.post')->where('format', 'pdf|xlsx');
-    Route::get('/modulos/configuracion/tecnologia/crear', [ConfiguracionController::class, 'tecnologiasCreate'])->name('modules.configuracion.tecnologias.create');
+    Route::get('/modulos/configuracion/tecnologia/crear', function () {
+        abort(500);
+    });
     Route::post('/modulos/configuracion/tecnologia', [ConfiguracionController::class, 'tecnologiasStore'])->name('modules.configuracion.tecnologias.store');
     Route::get('/modulos/configuracion/tecnologia/{id}/editar', [ConfiguracionController::class, 'tecnologiasEdit'])->name('modules.configuracion.tecnologias.edit');
     Route::put('/modulos/configuracion/tecnologia/{id}', [ConfiguracionController::class, 'tecnologiasUpdate'])->name('modules.configuracion.tecnologias.update');

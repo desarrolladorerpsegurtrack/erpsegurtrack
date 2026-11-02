@@ -41,6 +41,10 @@
 				const flag = clienteMeta[value];
 				return serverIsIntegrador || (!!value && (flag === true || flag === 1 || flag === '1' || flag === 'true' || flag === 'si' || flag === 'yes'));
 			};
+			const isCurrentServiceWiatag = () => {
+				const detail = servicioMeta[readServicioValue()]?.detalle || '';
+				return String(detail).trim().replace(/\s+/g, ' ').toUpperCase() === 'SERVICIO DE APP WIATAG';
+			};
 
 			if (isEdit) {
 				const vehicleDisplay = document.querySelector('[name="vehiculo_display"]');
@@ -130,7 +134,9 @@
 				if (!numeroSelect) return;
 
 				numeroSelect.disabled = false;
-				const requiresPhone = !isIntegrador && (!isEdit || getTomValue(estadoSelect) === 'activo');
+				const requiresPhone = !isIntegrador
+					&& !isCurrentServiceWiatag()
+					&& (!isEdit || getTomValue(estadoSelect) === 'activo');
 				if (requiresPhone) {
 					numeroSelect.setAttribute('required', 'required');
 					numeroSelect.setAttribute('aria-required', 'true');
@@ -246,6 +252,7 @@
 				if (!isEdit && monto && data.precio !== null && data.precio !== undefined) {
 					monto.value = data.precio;
 				}
+				toggleNumeroTelefonicoField(isCurrentClientIntegrator());
 				calculate();
 			};
 			const refreshServiceFields = () => {

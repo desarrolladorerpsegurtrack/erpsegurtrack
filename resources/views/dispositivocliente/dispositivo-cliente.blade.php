@@ -2,6 +2,10 @@
 
 @push('styles')
 	<style>
+		.container.dispositivo-cliente-page-container {
+			max-width: 1450px;
+		}
+
 		.dispositivo-cliente-list-table {
 			table-layout: fixed;
 		}
@@ -37,6 +41,7 @@
 			});
 
 			table?.classList.add('dispositivo-cliente-list-table');
+			table?.closest('.container')?.classList.add('dispositivo-cliente-page-container');
 		})();
 	</script>
 @endpush

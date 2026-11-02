@@ -19,6 +19,8 @@ class ErpPermissionRouteResolutionTest extends TestCase
             'modules.almacen' => 'almacen.almacen',
             'modules.almacen.index' => 'almacen.almacen',
             'modules.almacen.nota-salida.index' => 'almacen.nota_salida',
+            'modules.lineas-chips.plan-telefonico.index' => 'lineas_chips.plan_telefonico',
+            'modules.lineas-chips.plan-telefonico.store' => 'lineas_chips.plan_telefonico',
             'modules.vehiculos.index' => 'vehiculos',
             'modules.dispositivo-cliente.index' => 'dispositivo_cliente',
             'modules.vehiculos.edit' => 'vehiculos',
@@ -56,6 +58,8 @@ class ErpPermissionRouteResolutionTest extends TestCase
         $this->assertSame('editar', ErpPermission::inferActionFromRouteName('modules.clientes.update', 'PUT'));
         $this->assertSame('eliminar', ErpPermission::inferActionFromRouteName('modules.clientes.destroy', 'DELETE'));
         $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.clientes.export', 'GET'));
+        $this->assertSame('exportar', ErpPermission::inferActionFromRouteName('modules.lineas-chips.plan-telefonico.export', 'GET'));
+        $this->assertSame('exportar', ErpPermission::inferActionFromRouteName('modules.lineas-chips.plan-telefonico.export.post', 'POST'));
         $this->assertSame('ver', ErpPermission::inferActionFromRouteName('modules.vehiculos.index', 'GET'));
         $this->assertSame(
             'aprobar',
@@ -116,6 +120,26 @@ class ErpPermissionRouteResolutionTest extends TestCase
     {
         $this->assertSame('clientes.credenciales', ErpPermission::normalizePermissionKey('clientes.credenciales'));
         $this->assertSame('clientes.credenciales', ErpPermission::normalizePermissionKey('clientes.credencial'));
+    }
+
+    public function test_plan_telefonico_is_a_granular_lineas_chips_permission(): void
+    {
+        $this->assertSame(
+            'lineas_chips.plan_telefonico',
+            ErpPermission::normalizePermissionKey('lineas-chips.plan-telefonico')
+        );
+
+        $matrix = \App\Support\RolePermissionMatrix::defaultMatrix();
+        foreach (['ver', 'crear', 'editar', 'eliminar', 'exportar'] as $action) {
+            $this->assertArrayHasKey($action, $matrix['lineas_chips.plan_telefonico']);
+        }
+
+        $this->assertSame(
+            'modules.lineas-chips.plan-telefonico.index',
+            ErpPermission::getDefaultRedirectRoute([
+                'permissions' => ['lineas_chips.plan_telefonico' => ['ver']],
+            ])
+        );
     }
 
     public function test_normalizes_cuentasporcobrar_permission_key(): void

@@ -31,6 +31,37 @@ class EnsureErpActionMiddlewareTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
     }
 
+    public function test_plan_telefonico_routes_require_its_own_granular_permission(): void
+    {
+        $response = $this->runMiddleware(
+            routeName: 'modules.lineas-chips.plan-telefonico.store',
+            method: 'POST',
+            authData: [
+                'roles' => ['operador'],
+                'modules' => ['lineas_chips'],
+                'permissions' => [
+                    'lineas_chips.plan_telefonico' => ['crear'],
+                ],
+            ],
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+
+        $this->assertForbidden(function (): void {
+            $this->runMiddleware(
+                routeName: 'modules.lineas-chips.plan-telefonico.store',
+                method: 'POST',
+                authData: [
+                    'roles' => ['operador'],
+                    'modules' => ['lineas_chips'],
+                    'permissions' => [
+                        'lineas_chips.numero_telefonico' => ['crear'],
+                    ],
+                ],
+            );
+        });
+    }
+
     public function test_denies_access_when_only_sibling_granular_permission_exists(): void
     {
         $this->assertForbidden(function (): void {

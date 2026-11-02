@@ -836,6 +836,7 @@
                                                                         <div class="flex flex-col gap-4">
                                                                             @foreach($relationGroups as $relationGroup)
                                                                                 @php
+                                                                                    $isBankMovementsGroup = ($relationGroup['label'] ?? '') === 'Movimientos del grupo';
                                                                                     $groupMaxTs = null;
                                                                                     $groupTimestamps = [];
                                                                                     foreach ((array) ($relationGroup['records'] ?? []) as $rgRec) {
@@ -851,9 +852,9 @@
                                                                                     <div class="border-b border-black bg-slate-200 text-slate-800 px-4 py-3 text-sm font-semibold">
                                                                                         {{ $relationGroup['label'] ?? 'Relación' }}
                                                                                     </div>
-                                                                                    <div class="overflow-x-auto ">
+                                                                                    <div class="overflow-x-auto @if($isBankMovementsGroup) overflow-y-auto @endif" @if($isBankMovementsGroup) style="max-height: 220px;" @endif>
                                                                                         <table class="w-full text-left text-sm border-collapse border border-black">
-                                                                                            <thead class="bg-slate-300 text-slate-800">
+                                                                                            <thead class="bg-slate-300 text-slate-800 @if($isBankMovementsGroup) sticky top-0 z-10 @endif">
                                                                                                 <tr>
                                                                                                     @foreach(($relationGroup['columns'] ?? []) as $relationColumn)
                                                                                                         <th class="px-3 py-2 whitespace-nowrap border-b border-black">{{ $relationColumn['label'] ?? '' }}</th>
@@ -897,7 +898,7 @@
                                                                                                                         $isActive = stripos($label, 'activo') !== false && stripos($label, 'inactivo') === false;
                                                                                                                     }
                                                                                                                 @endphp
-                                                                                                                <td class="px-3 py-2 border-b border-black">
+                                                                                                                <td class="px-3 py-2 border-b border-black" title="{{ $label }}">
                                                                                                                     <div class="flex items-center">
                                                                                                                         <i data-lucide="database" class="h-3.5 w-3.5 stroke-[1.7] {{ $isActive ? 'text-danger' : 'text-slate-400' }}"></i>
                                                                                                                         <span class="ml-1.5 whitespace-nowrap font-medium {{ $isActive ? 'text-danger' : 'text-slate-500' }}">{{ $label }}</span>
@@ -922,9 +923,9 @@
                                                                                                                         }
                                                                                                                     }
                                                                                                                 @endphp
-                                                                                                                <td class="px-3 py-2 whitespace-nowrap border-b border-black">{{ $formattedRelationDate }}</td>
+                                                                                                                <td class="px-3 py-2 whitespace-nowrap border-b border-black" title="{{ $formattedRelationDate }}">{{ $formattedRelationDate }}</td>
                                                                                                             @else
-                                                                                                                <td class="px-3 py-2 whitespace-nowrap border-b border-black">@if($relationIsIntegrator)<span class="text-danger">IN-</span>@endif{{ $relationValue }}</td>
+                                                                                                                <td class="px-3 py-2 whitespace-nowrap border-b border-black" title="{{ $relationValue }}">@if($relationIsIntegrator)<span class="text-danger">IN-</span>@endif{{ $relationValue }}</td>
                                                                                                             @endif
                                                                                                         @endforeach
                                                                                                     </tr>
@@ -1276,41 +1277,51 @@
                                         <div><span class="block text-slate-500">Existente en BD</span><span class="font-semibold text-slate-700">{{ (int) ($activeImportPreview['duplicateExistingRows'] ?? 0) }}</span></div>
                                     </div>
 
-                                    <div class="mt-4 rounded-[0.85rem] border border-slate-200" style="max-height: 240px; overflow-y: auto;">
-                                        <table class="w-full text-left text-sm">
+                                    <div class="mt-4 rounded-[0.85rem] border border-slate-200" style="max-height: 240px; overflow-x: auto; overflow-y: auto; overscroll-behavior-x: contain;">
+                                        <table class="text-left text-sm" style="width: 100%; min-width: {{ $activeImportType === 'numero' ? '740px' : ($activeImportType === 'simcard' ? '760px' : '1120px') }}; table-layout: fixed;">
                                             <thead class="bg-slate-100 text-slate-600">
                                                 <tr>
-                                                    <th class="px-3 py-2">Línea</th>
+                                                    <th class="w-16 px-3 py-2">Línea</th>
                                                     @if($activeImportType === 'numero')
-                                                        <th class="px-3 py-2">Número</th>
+                                                        <th class="w-36 px-3 py-2">Número</th>
+                                                        <th class="w-40 px-3 py-2">Plan</th>
+                                                        <th class="w-32 px-3 py-2">Precio</th>
                                                     @elseif($activeImportType === 'simcard')
-                                                        <th class="px-3 py-2">SimCard</th>
-                                                        <th class="px-3 py-2">Operador</th>
+                                                        <th class="w-56 px-3 py-2">SimCard</th>
+                                                        <th class="w-36 px-3 py-2">Operador</th>
                                                     @else
-                                                        <th class="px-3 py-2">Número</th>
-                                                        <th class="px-3 py-2">SimCard</th> 
-                                                        <th class="px-3 py-2">Operador</th>
-                                                        <th class="px-3 py-2">Plan</th>
+                                                        <th class="w-36 px-3 py-2">Número</th>
+                                                        <th class="w-56 px-3 py-2">SimCard</th>
+                                                        <th class="w-36 px-3 py-2">Operador</th>
+                                                        <th class="w-40 px-3 py-2">Plan</th>
+                                                        <th class="w-32 px-3 py-2">Precio</th>
                                                     @endif
-                                                    <th class="px-3 py-2">Estado</th>
+                                                    <th class="w-60 px-3 py-2">Estado</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 @foreach(($activeImportPreview['previewRows'] ?? []) as $previewRow)
                                                     <tr class="border-t border-slate-100">
-                                                        <td class="px-3 py-2">{{ $previewRow['line'] ?? '-' }}</td>
+                                                        <td class="whitespace-nowrap px-3 py-2">{{ $previewRow['line'] ?? '-' }}</td>
                                                         @if(($previewRow['importType'] ?? $activeImportType) === 'numero')
-                                                            <td class="px-3 py-2">{{ $previewRow['numero'] ?? '' }}</td>
+                                                            <td class="whitespace-nowrap px-3 py-2">{{ $previewRow['numero'] ?? '' }}</td>
+                                                            <td class="break-words px-3 py-2">{{ $previewRow['plan'] ?? '' }}</td>
+                                                            <td class="whitespace-nowrap px-3 py-2">{{ trim(($previewRow['moneda'] ?? '') . ' ' . ($previewRow['precio'] ?? '')) }}</td>
                                                         @elseif(($previewRow['importType'] ?? $activeImportType) === 'simcard')
-                                                            <td class="px-3 py-2">{{ $previewRow['simcard'] ?? '' }}</td>
-                                                            <td class="px-3 py-2">{{ $previewRow['operador'] ?? '' }}</td>
+                                                            <td class="whitespace-nowrap px-3 py-2">{{ $previewRow['simcard'] ?? '' }}</td>
+                                                            <td class="whitespace-nowrap px-3 py-2">{{ $previewRow['operador'] ?? '' }}</td>
                                                         @else
-                                                            <td class="px-3 py-2">{{ $previewRow['numero'] ?? '' }}</td>
-                                                            <td class="px-3 py-2">{{ $previewRow['simcard'] ?? '' }}</td>
-                                                            <td class="px-3 py-2">{{ $previewRow['operador'] ?? '' }}</td>
-                                                            <td class="px-3 py-2">{{ $previewRow['plan'] ?? '' }}</td>
+                                                            <td class="whitespace-nowrap px-3 py-2">{{ $previewRow['numero'] ?? '' }}</td>
+                                                            <td class="whitespace-nowrap px-3 py-2">{{ $previewRow['simcard'] ?? '' }}</td>
+                                                            <td class="whitespace-nowrap px-3 py-2">{{ $previewRow['operador'] ?? '' }}</td>
+                                                            <td class="break-words px-3 py-2">{{ $previewRow['plan'] ?? '' }}</td>
+                                                            @php
+                                                                $previewPrice = trim((string) ($previewRow['precio'] ?? ''));
+                                                                $previewCurrency = trim((string) ($previewRow['moneda'] ?? ''));
+                                                            @endphp
+                                                            <td class="whitespace-nowrap px-3 py-2">{{ $previewPrice !== '' && $previewCurrency !== '' && !str_contains($previewPrice, $previewCurrency) ? $previewCurrency . ' ' . $previewPrice : $previewPrice }}</td>
                                                         @endif
-                                                        <td class="px-3 py-2">{{ $previewRow['status'] ?? '' }}</td>
+                                                        <td class="break-words px-3 py-2">{{ $previewRow['status'] ?? '' }}</td>
                                                     </tr>
                                                 @endforeach
                                             </tbody>
@@ -1505,6 +1516,9 @@
             let hasBoundEscapeDropdownClose = false;
             let fetchController = null;
             let fetchRequestId = 0;
+            const listControlDisabledStates = new WeakMap();
+            const paginationLinkStates = new WeakMap();
+            let activeTableSkeleton = null;
             let selectAllCheckbox = null;
             let rowCheckboxes = [];
             let bulkDeleteButton = null;
@@ -1521,6 +1535,154 @@
             const getSearchInput = () => form ? form.querySelector('[name="q"]') : null;
 
             const getPageSizeElement = () => wrapper ? wrapper.querySelector('[name="perPage"]') : null;
+
+            const setPaginationLinkLoading = (link, loading) => {
+                if (loading) {
+                    if (!paginationLinkStates.has(link)) {
+                        paginationLinkStates.set(link, {
+                            pointerEvents: link.style.pointerEvents,
+                            opacity: link.style.opacity,
+                            ariaDisabled: link.getAttribute('aria-disabled'),
+                            tabIndex: link.getAttribute('tabindex'),
+                        });
+                    }
+                    link.style.pointerEvents = 'none';
+                    link.style.opacity = '0.5';
+                    link.setAttribute('aria-disabled', 'true');
+                    link.setAttribute('tabindex', '-1');
+                } else if (paginationLinkStates.has(link)) {
+                    const state = paginationLinkStates.get(link);
+                    link.style.pointerEvents = state.pointerEvents;
+                    link.style.opacity = state.opacity;
+                    if (state.ariaDisabled === null) link.removeAttribute('aria-disabled');
+                    else link.setAttribute('aria-disabled', state.ariaDisabled);
+                    if (state.tabIndex === null) link.removeAttribute('tabindex');
+                    else link.setAttribute('tabindex', state.tabIndex);
+                    paginationLinkStates.delete(link);
+                }
+            };
+
+            const setListControlsLoading = (loading) => {
+                const controls = new Set([
+                    ...(form ? form.querySelectorAll('input:not([type="hidden"]):not([name="q"]), select, textarea, button[type="submit"], [data-list-clear-search]') : []),
+                    ...(wrapper ? wrapper.querySelectorAll('[name="perPage"]') : []),
+                ]);
+                controls.forEach((control) => {
+                    if (loading) {
+                        if (!listControlDisabledStates.has(control)) {
+                            listControlDisabledStates.set(control, control.disabled);
+                        }
+                        control.disabled = true;
+                    } else if (listControlDisabledStates.has(control)) {
+                        control.disabled = listControlDisabledStates.get(control);
+                        listControlDisabledStates.delete(control);
+                    }
+                });
+
+                form?.querySelectorAll('a[data-list-clear]').forEach((link) => setPaginationLinkLoading(link, loading));
+                wrapper?.querySelectorAll('nav a[href]').forEach((link) => setPaginationLinkLoading(link, loading));
+            };
+
+            const setTableSkeletonLoading = (container, loading) => {
+                if (loading) {
+                    if (activeTableSkeleton) {
+                        return;
+                    }
+                    const table = container?.querySelector('table');
+                    const parent = table?.parentElement;
+                    if (!table || !parent) {
+                        return;
+                    }
+
+                    let animationStyle = document.getElementById('erp-table-skeleton-styles');
+                    if (!animationStyle) {
+                        animationStyle = document.createElement('style');
+                        animationStyle.id = 'erp-table-skeleton-styles';
+                        animationStyle.textContent = `
+                            @keyframes erp-table-skeleton-shimmer {
+                                100% { transform: translateX(100%); }
+                            }
+                            .erp-table-skeleton-overlay {
+                                position: absolute; inset: 0; z-index: 20; overflow: hidden;
+                                background: rgba(255, 255, 255, .94); pointer-events: none;
+                            }
+                            .erp-table-skeleton-overlay table { width: 100%; min-width: 100%; }
+                            .erp-table-skeleton-overlay td { height: 44px; }
+                            .erp-table-skeleton-bar {
+                                display: block; position: relative; overflow: hidden; height: 12px;
+                                width: 72%; border-radius: 999px; background: #e8ebf0;
+                            }
+                            .erp-table-skeleton-bar::after {
+                                position: absolute; inset: 0; content: ''; transform: translateX(-100%);
+                                background: linear-gradient(90deg, transparent, rgba(255,255,255,.8), transparent);
+                                animation: erp-table-skeleton-shimmer 1.2s infinite;
+                            }
+                            .erp-table-skeleton-overlay tr:nth-child(2n) .erp-table-skeleton-bar { width: 54%; }
+                            .erp-table-skeleton-overlay td:nth-child(3n) .erp-table-skeleton-bar { width: 86%; }
+                        `;
+                        document.head.appendChild(animationStyle);
+                    }
+
+                    const skeleton = table.cloneNode(true);
+                    const sourceRow = table.querySelector('tbody tr');
+                    skeleton.removeAttribute('id');
+                    skeleton.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
+                    skeleton.querySelectorAll('button, input, select, a').forEach((element) => {
+                        if (element.closest('thead')) {
+                            element.replaceWith(document.createTextNode(element.textContent || ''));
+                        }
+                    });
+                    skeleton.querySelectorAll('tbody, tfoot').forEach((section) => section.remove());
+                    const body = document.createElement('tbody');
+                    skeleton.appendChild(body);
+                    const sourceCells = sourceRow
+                        ? Array.from(sourceRow.children).filter((cell) => cell.tagName === 'TD')
+                        : [];
+                    const columnCount = Math.max(1, sourceCells.length || skeleton.querySelectorAll('thead tr:first-child th').length);
+                    const pageSize = Number(getPageSizeElement()?.value || 10);
+                    const rowCount = Math.max(1, Math.min(100, pageSize));
+                    for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+                        const row = sourceRow ? sourceRow.cloneNode(true) : document.createElement('tr');
+                        if (sourceRow) {
+                            row.replaceChildren();
+                        }
+                        row.removeAttribute('id');
+                        for (let columnIndex = 0; columnIndex < columnCount; columnIndex++) {
+                            const cell = sourceCells[columnIndex]?.cloneNode(false) || document.createElement('td');
+                            cell.removeAttribute('id');
+                            cell.replaceChildren();
+                            const bar = document.createElement('span');
+                            bar.className = 'erp-table-skeleton-bar';
+                            cell.appendChild(bar);
+                            row.appendChild(cell);
+                        }
+                        body.appendChild(row);
+                    }
+
+                    const previousPosition = parent.style.position;
+                    if (getComputedStyle(parent).position === 'static') {
+                        parent.style.position = 'relative';
+                    }
+                    const previousVisibility = table.style.visibility;
+                    table.style.visibility = 'hidden';
+                    const overlay = document.createElement('div');
+                    overlay.className = 'erp-table-skeleton-overlay';
+                    overlay.appendChild(skeleton);
+                    parent.appendChild(overlay);
+                    activeTableSkeleton = { table, parent, overlay, previousPosition, previousVisibility };
+
+                    return;
+                }
+
+                if (!activeTableSkeleton) {
+                    return;
+                }
+                const { table, parent, overlay, previousPosition, previousVisibility } = activeTableSkeleton;
+                overlay.remove();
+                table.style.visibility = previousVisibility;
+                parent.style.position = previousPosition;
+                activeTableSkeleton = null;
+            };
 
             const updateFilterCount = () => {
                 if (!form || !wrapper) {
@@ -1819,22 +1981,22 @@
                     .map((checkbox) => checkbox.value)
                     .filter((value) => value !== '');
 
+                const baseHref = link.getAttribute('data-export-base') || link.href;
+                if (!baseHref) {
+                    return;
+                }
+                const exportUrl = new URL(baseHref, window.location.origin);
+                const params = getRequestParams();
+
                 // Si hay selecciones, usar POST; si no, usar GET
                 if (selectedIds.length > 0) {
-                    const format = link.getAttribute('data-export-format') || 'pdf';
-                    const baseHref = link.getAttribute('data-export-base') || link.href;
-                    if (!baseHref) {
-                        return;
-                    }
-
                     // Extraer la ruta base sin parámetros
-                    const url = new URL(baseHref, window.location.origin);
-                    const exportUrl = url.pathname.replace(/\?.*$/, '');
+                    const exportPath = exportUrl.pathname.replace(/\?.*$/, '');
 
                     // Crear formulario oculto para POST
                     const form = document.createElement('form');
                     form.method = 'POST';
-                    form.action = exportUrl;
+                    form.action = exportPath;
                     form.style.display = 'none';
 
                     // Agregar token CSRF
@@ -1855,9 +2017,7 @@
                         input.value = id;
                         form.appendChild(input);
                     });
-
                     // Agregar filtros también
-                    const params = getRequestParams();
                     for (const [key, value] of params.entries()) {
                         const input = document.createElement('input');
                         input.type = 'hidden';
@@ -1870,8 +2030,9 @@
                     form.submit();
                     document.body.removeChild(form);
                 } else {
-                    // Si no hay selecciones, usar el href normal (GET)
-                    window.location.href = link.href;
+                    // Usa los filtros actuales del formulario, no una URL posiblemente desactualizada.
+                    exportUrl.search = params.toString();
+                    window.location.href = exportUrl.toString();
                 }
             };
 
@@ -2315,7 +2476,10 @@
                 init();
             };
 
-            const fetchList = async (url, options = {}) => {
+            const fetchList = async (url) => {
+                clearTimeout(debounceTimer);
+                setListControlsLoading(true);
+                setTableSkeletonLoading(wrapper, true);
                 const requestId = ++fetchRequestId;
 
                 if (fetchController) {
@@ -2348,6 +2512,8 @@
                 } finally {
                     if (fetchController === controller) {
                         fetchController = null;
+                        setTableSkeletonLoading(wrapper, false);
+                        setListControlsLoading(false);
                     }
                 }
             };
@@ -2374,7 +2540,7 @@
                 debounceTimer = setTimeout(() => {
                     const url = buildUrl();
                     updateExportLinks();
-                    fetchList(url, { preserveSearchFocus: true });
+                    fetchList(url);
                 }, 350);
             };
 
@@ -2755,7 +2921,7 @@
                                 <td class="px-3 py-2">${row.line ?? '-'}</td>
                                 <td class="px-3 py-2">${row.numero ?? ''}</td>
                                 <td class="px-3 py-2">${row.plan ?? ''}</td>
-                                <td class="px-3 py-2">${row.moneda ?? 'S/'} ${row.precio ?? ''}</td>
+                                <td class="px-3 py-2">${row.moneda ? row.moneda + ' ' : ''}${row.precio ?? ''}</td>
                                 <td class="px-3 py-2">${row.status ?? ''}</td>
                             </tr>
                         `;
@@ -2774,12 +2940,13 @@
 
                     return `
                         <tr class="border-t border-slate-100">
-                            <td class="px-3 py-2">${row.line ?? '-'}</td>
-                            <td class="px-3 py-2">${row.numero ?? ''}</td>
-                            <td class="px-3 py-2">${row.simcard ?? ''}</td>
-                            <td class="px-3 py-2">${row.operador ?? ''}</td>
-                            <td class="px-3 py-2">${row.plan ?? ''}</td>
-                            <td class="px-3 py-2">${row.status ?? ''}</td>
+                            <td class="whitespace-nowrap px-3 py-2">${row.line ?? '-'}</td>
+                            <td class="whitespace-nowrap px-3 py-2">${row.numero ?? ''}</td>
+                            <td class="whitespace-nowrap px-3 py-2">${row.simcard ?? ''}</td>
+                            <td class="whitespace-nowrap px-3 py-2">${row.operador ?? ''}</td>
+                            <td class="break-words px-3 py-2">${row.plan ?? ''}</td>
+                            <td class="whitespace-nowrap px-3 py-2">${row.moneda && row.precio && !String(row.precio).includes(row.moneda) ? row.moneda + ' ' + row.precio : (row.precio ?? '')}</td>
+                            <td class="break-words px-3 py-2">${row.status ?? ''}</td>
                         </tr>
                     `;
                 }).join('');
@@ -2848,36 +3015,37 @@
                 `;
 
                 let headersHtml = `
-                    <th class="px-3 py-2">Línea</th>
-                    <th class="px-3 py-2">Número</th>
-                    <th class="px-3 py-2">SimCard</th>
-                    <th class="px-3 py-2">Operador</th>
-                    <th class="px-3 py-2">Plan</th>
-                    <th class="px-3 py-2">Estado</th>
+                    <th class="w-16 px-3 py-2">Línea</th>
+                    <th class="w-36 px-3 py-2">Número</th>
+                    <th class="w-56 px-3 py-2">SimCard</th>
+                    <th class="w-36 px-3 py-2">Operador</th>
+                    <th class="w-40 px-3 py-2">Plan</th>
+                    <th class="w-32 px-3 py-2">Precio</th>
+                    <th class="w-60 px-3 py-2">Estado</th>
                 `;
 
                 if (preview.importType === 'numero') {
                     headersHtml = `
-                        <th class="px-3 py-2">Línea</th>
-                        <th class="px-3 py-2">Número</th>
-                        <th class="px-3 py-2">Plan</th>
-                        <th class="px-3 py-2">Precio</th>
-                        <th class="px-3 py-2">Estado</th>
+                        <th class="w-16 px-3 py-2">Línea</th>
+                        <th class="w-36 px-3 py-2">Número</th>
+                        <th class="w-40 px-3 py-2">Plan</th>
+                        <th class="w-32 px-3 py-2">Precio</th>
+                        <th class="w-60 px-3 py-2">Estado</th>
                     `;
                 } else if (preview.importType === 'simcard') {
                     headersHtml = `
-                        <th class="px-3 py-2">Línea</th>
-                        <th class="px-3 py-2">SimCard</th>
-                        <th class="px-3 py-2">Operador</th>
-                        <th class="px-3 py-2">Estado</th>
+                        <th class="w-16 px-3 py-2">Línea</th>
+                        <th class="w-56 px-3 py-2">SimCard</th>
+                        <th class="w-36 px-3 py-2">Operador</th>
+                        <th class="w-60 px-3 py-2">Estado</th>
                     `;
                 }
 
                 const initialRows = getPreviewRowsChunk('import');
                 previewContainer.innerHTML = `
                     ${summaryHtml}
-                    <div class="mt-4 rounded-[0.85rem] border border-slate-200" style="max-height: 240px; overflow-y: auto;">
-                        <table class="w-full text-left text-sm">
+                    <div class="mt-4 rounded-[0.85rem] border border-slate-200" style="max-height: 240px; overflow-x: auto; overflow-y: auto; overscroll-behavior-x: contain;">
+                        <table class="text-left text-sm" style="width: 100%; min-width: ${preview.importType === 'numero' ? '740px' : (preview.importType === 'simcard' ? '760px' : '1120px')}; table-layout: fixed;">
                             <thead class="bg-slate-100 text-slate-600">
                                 <tr>
                                     ${headersHtml}
@@ -2909,6 +3077,10 @@
                 `;
 
                 const rowsBody = document.getElementById('detallesimcard-import-preview-rows');
+                const previewScroller = rowsBody?.closest('div[style*="overflow-y: auto"]');
+                if (previewScroller instanceof HTMLElement) {
+                    previewScroller.scrollLeft = 0;
+                }
                 attachPreviewScroll(rowsBody, 'import');
                 restoreIcons();
             };

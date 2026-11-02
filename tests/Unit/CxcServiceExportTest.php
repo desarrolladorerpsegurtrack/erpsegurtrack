@@ -29,12 +29,19 @@ class CxcServiceExportTest extends TestCase
             'fecha_fin' => '31/10/2026',
             'mes' => 'octubre',
             'moneda_simbolo' => 'S/',
+            'monto_total' => 1000,
             'cxc_ids' => [],
-            'tipos_servicios' => [[
-                'servicio_nombre' => 'Servicio mensual',
-                'monto_subtotal' => 1000,
+            'tipos_servicios' => [
+                [
+                    'servicio_nombre' => 'Servicio mensual',
+                    'monto_subtotal' => 600,
+                ],
+                [
+                    'servicio_nombre' => 'Servicio adicional',
+                    'monto_subtotal' => 400,
+                ],
             ]],
-        ]]);
+        ]);
         $path = $response->getFile()->getPathname();
 
         try {
@@ -135,6 +142,7 @@ class CxcServiceExportTest extends TestCase
             'fecha_fin' => '31/10/2026',
             'mes' => 'octubre',
             'moneda_simbolo' => 'S/',
+            'monto_total' => 3000,
             'cxc_ids' => [],
             'cxc_id' => 11,
             'tipos_servicios' => [[
@@ -157,19 +165,17 @@ class CxcServiceExportTest extends TestCase
         try {
             $sheet = IOFactory::load($path)->getActiveSheet();
 
-            $this->assertSame('S/ 1,000.00', $sheet->getCell('F2')->getValue());
-            $this->assertSame('S/ 880.00', $sheet->getCell('G2')->getValue());
-            $this->assertSame('S/ 120.00', $sheet->getCell('J2')->getValue());
-            $this->assertNull($sheet->getCell('K2')->getValue());
-            $this->assertSame('S/ 120.00', $sheet->getCell('H3')->getValue());
-            $this->assertSame('22/10/2026', $sheet->getCell('I3')->getValue());
-            $this->assertSame('F001-002', $sheet->getCell('E3')->getValue());
-            $this->assertSame('S/ 1,000.00', $sheet->getCell('G4')->getValue());
-            $this->assertSame('S/ 120.00', $sheet->getCell('J4')->getValue());
-            $this->assertSame('25/10/2026', $sheet->getCell('K4')->getValue());
-            $this->assertSame('RETENCION', $sheet->getCell('H7')->getValue());
-            $this->assertSame('S/ 970.00', $sheet->getCell('G8')->getValue());
-            $this->assertSame('S/ 30.00', $sheet->getCell('H8')->getValue());
+            $this->assertSame('S/ 3,000.00', $sheet->getCell('F2')->getValue());
+            $this->assertNull($sheet->getCell('A3')->getValue());
+            $this->assertSame('S/ 2,760.00', $sheet->getCell('G2')->getValue());
+            $this->assertSame('S/ 120.00', $sheet->getCell('H2')->getValue());
+            $this->assertSame('22/10/2026', $sheet->getCell('I2')->getValue());
+            $this->assertSame('S/ 240.00', $sheet->getCell('J2')->getValue());
+            $this->assertSame('25/10/2026', $sheet->getCell('K2')->getValue());
+            $this->assertSame('RETENCION', $sheet->getCell('H5')->getValue());
+            $this->assertSame('S/ 970.00', $sheet->getCell('G6')->getValue());
+            $this->assertSame('S/ 30.00', $sheet->getCell('H6')->getValue());
+            $this->assertNull($sheet->getCell('A7')->getValue());
         } finally {
             if (is_file($path)) {
                 unlink($path);

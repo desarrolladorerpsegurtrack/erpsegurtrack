@@ -41,8 +41,9 @@ class RolePermissionMatrix
         'lineas_chips' => [
             'label' => 'Lineas y Chips',
             'submodules' => [
-                'lineas_chips.numero_telefonico' => 'Número telefónico',
                 'lineas_chips.numero_dispositivo' => 'Número de dispositivo',
+                'lineas_chips.plan_telefonico' => 'Plan Telefonico',
+                'lineas_chips.numero_telefonico' => 'Número telefónico',
                 'lineas_chips.simcard' => 'Plastico (SimCard)',
                 'lineas_chips.detallesimcard' => 'Asignacion SimCard',
                 'lineas_chips.cargar_numeros' => 'Cargar asignación',

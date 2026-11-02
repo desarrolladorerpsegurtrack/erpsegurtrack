@@ -177,6 +177,7 @@
         ];
 
         $visibleLineasChips = [
+            'plan_telefonico' => $hasAnyAction('lineas_chips.plan_telefonico'),
             'numero_telefonico' => $hasAnyAction('lineas_chips.numero_telefonico'),
             'numero_dispositivo' => $hasAnyAction('lineas_chips.numero_dispositivo'),
             'simcard' => $hasAnyAction('lineas_chips.simcard'),
@@ -608,6 +609,16 @@
                                                             <i data-lucide="chevron-right"
                                                                 class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
                                                             <div class="side-menu__link__title">Números de dispositivo</div>
+                                                        </a>
+                                                    </li>
+                                                @endif
+                                                @if($visibleLineasChips['plan_telefonico'])
+                                                    <li>
+                                                        <a href="{{ route('modules.lineas-chips.plan-telefonico.index') }}"
+                                                            class="side-menu__link {{ request()->routeIs('modules.lineas-chips.plan-telefonico*') ? 'side-menu__link--active' : '' }}">
+                                                            <i data-lucide="chevron-right"
+                                                                class="stroke-[1] w-5 h-5 side-menu__link__icon"></i>
+                                                            <div class="side-menu__link__title">Plan Telefonico</div>
                                                         </a>
                                                     </li>
                                                 @endif

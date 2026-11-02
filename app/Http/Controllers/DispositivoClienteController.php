@@ -260,6 +260,7 @@ class DispositivoClienteController extends Controller
             ],
             'relationPanelView' => 'cliente.relation-panel',
             'identifierKey' => 'iddispositivoCliente',
+            
         ]);
     }
 

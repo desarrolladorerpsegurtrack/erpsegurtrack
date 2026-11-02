@@ -81,6 +81,15 @@ class BancosControllerCreditNoteStorageTest extends TestCase
         $this->assertStringNotContainsString('/bancos', $view->getData()['formAction']);
     }
 
+    public function test_credit_note_listing_loads_with_the_credit_note_tables(): void
+    {
+        $view = (new BancosController(new BancosService()))
+            ->notaCreditos(Request::create('/modulos/finanzas/nota-creditos'));
+
+        $this->assertSame('Nota de créditos', $view->getData()['title']);
+        $this->assertSame(0, $view->getData()['items']->total());
+    }
+
     public function test_credit_note_can_be_edited_when_it_has_no_applications(): void
     {
         $id = $this->createCreditNote();

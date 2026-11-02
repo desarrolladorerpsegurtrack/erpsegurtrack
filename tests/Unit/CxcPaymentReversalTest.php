@@ -262,7 +262,7 @@ class CxcPaymentReversalTest extends TestCase
                 ];
             });
             $groups = (new \ReflectionMethod(CuentasPorCobrarService::class, 'groupServices'))
-                ->invoke(new CuentasPorCobrarService(), $displayRows, collect(), [], collect());
+                ->invoke(new CuentasPorCobrarService(), $displayRows, collect(), [], collect(), [], [10 => $serviceIds]);
             $this->assertCount(1, $groups);
             $this->assertSame($vehicleCount, $groups[0]['num_unidades']);
             $this->assertSame($serviceCount, $groups[0]['num_tservicios']);

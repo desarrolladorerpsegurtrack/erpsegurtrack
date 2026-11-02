@@ -386,6 +386,136 @@
 			const getForm = () => document.getElementById(formId);
 			const getSearchInput = () => form ? form.querySelector('[name="q"]') : null;
 			const getPageSizeElement = () => (wrapper ? wrapper.querySelector('[name="perPage"]') : null);
+			const listControlDisabledStates = new WeakMap();
+			const paginationLinkStates = new WeakMap();
+			let activeTableSkeleton = null;
+
+			const setPaginationLinkLoading = (link, loading) => {
+				if (loading) {
+					if (!paginationLinkStates.has(link)) {
+						paginationLinkStates.set(link, {
+							pointerEvents: link.style.pointerEvents,
+							opacity: link.style.opacity,
+							ariaDisabled: link.getAttribute('aria-disabled'),
+							tabIndex: link.getAttribute('tabindex'),
+						});
+					}
+					link.style.pointerEvents = 'none';
+					link.style.opacity = '0.5';
+					link.setAttribute('aria-disabled', 'true');
+					link.setAttribute('tabindex', '-1');
+				} else if (paginationLinkStates.has(link)) {
+					const state = paginationLinkStates.get(link);
+					link.style.pointerEvents = state.pointerEvents;
+					link.style.opacity = state.opacity;
+					if (state.ariaDisabled === null) link.removeAttribute('aria-disabled');
+					else link.setAttribute('aria-disabled', state.ariaDisabled);
+					if (state.tabIndex === null) link.removeAttribute('tabindex');
+					else link.setAttribute('tabindex', state.tabIndex);
+					paginationLinkStates.delete(link);
+				}
+			};
+
+			const setListControlsLoading = (loading) => {
+				const controls = new Set([
+					...(form ? form.querySelectorAll('input:not([type="hidden"]):not([name="q"]), select, textarea, button[type="submit"], [data-list-clear-search]') : []),
+					...(wrapper ? wrapper.querySelectorAll('[name="perPage"]') : []),
+				]);
+				controls.forEach((control) => {
+					if (loading) {
+						if (!listControlDisabledStates.has(control)) {
+							listControlDisabledStates.set(control, control.disabled);
+						}
+						control.disabled = true;
+					} else if (listControlDisabledStates.has(control)) {
+						control.disabled = listControlDisabledStates.get(control);
+						listControlDisabledStates.delete(control);
+					}
+				});
+
+				form?.querySelectorAll('a[data-list-clear]').forEach((link) => setPaginationLinkLoading(link, loading));
+				wrapper?.querySelectorAll('nav a[href]').forEach((link) => setPaginationLinkLoading(link, loading));
+			};
+
+			const setTableSkeletonLoading = (container, loading) => {
+				if (loading) {
+					if (activeTableSkeleton) return;
+					const table = container?.querySelector('table');
+					const parent = table?.parentElement;
+					if (!table || !parent) return;
+
+					let animationStyle = document.getElementById('erp-table-skeleton-styles');
+					if (!animationStyle) {
+						animationStyle = document.createElement('style');
+						animationStyle.id = 'erp-table-skeleton-styles';
+						animationStyle.textContent = `
+							@keyframes erp-table-skeleton-shimmer { 100% { transform: translateX(100%); } }
+							.erp-table-skeleton-overlay { position:absolute; inset:0; z-index:20; overflow:hidden; background:rgba(255,255,255,.94); pointer-events:none; }
+							.erp-table-skeleton-overlay table { width:100%; min-width:100%; }
+							.erp-table-skeleton-overlay td { height:56px; }
+							.erp-table-skeleton-bar { display:block; position:relative; overflow:hidden; height:14px; width:88%; border-radius:999px; background:#e8ebf0; }
+							.erp-table-skeleton-bar::after { position:absolute; inset:0; content:''; transform:translateX(-100%); background:linear-gradient(90deg,transparent,rgba(255,255,255,.8),transparent); animation:erp-table-skeleton-shimmer 1.2s infinite; }
+							.erp-table-skeleton-overlay tr:nth-child(2n) .erp-table-skeleton-bar { width:76%; }
+							.erp-table-skeleton-overlay td:nth-child(3n) .erp-table-skeleton-bar { width:96%; }
+						`;
+						document.head.appendChild(animationStyle);
+					}
+
+					const skeleton = table.cloneNode(true);
+					const sourceRow = table.querySelector('tbody tr');
+					skeleton.removeAttribute('id');
+					skeleton.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
+					skeleton.querySelectorAll('button, input, select, a').forEach((element) => {
+						if (element.closest('thead')) element.replaceWith(document.createTextNode(element.textContent || ''));
+					});
+					skeleton.querySelectorAll('tbody, tfoot').forEach((section) => section.remove());
+					const body = document.createElement('tbody');
+					skeleton.appendChild(body);
+					const sourceCells = sourceRow
+						? Array.from(sourceRow.children).filter((cell) => cell.tagName === 'TD')
+						: [];
+					const columnCount = Math.max(1, sourceCells.length || skeleton.querySelectorAll('thead tr:first-child th').length);
+					const pageSize = Number(getPageSizeElement()?.value || 10);
+					const rowCount = Math.max(1, Math.min(100, pageSize));
+					const previousMinHeight = parent.style.minHeight;
+					const skeletonHeight = Math.max(320, Math.min(560, window.innerHeight * 0.65));
+					parent.style.minHeight = `${Math.max(parent.clientHeight, skeletonHeight)}px`;
+					for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+						const row = sourceRow ? sourceRow.cloneNode(true) : document.createElement('tr');
+						if (sourceRow) row.replaceChildren();
+						row.removeAttribute('id');
+						for (let columnIndex = 0; columnIndex < columnCount; columnIndex++) {
+							const cell = sourceCells[columnIndex]?.cloneNode(false) || document.createElement('td');
+							cell.removeAttribute('id');
+							cell.replaceChildren();
+							const bar = document.createElement('span');
+							bar.className = 'erp-table-skeleton-bar';
+							cell.appendChild(bar);
+							row.appendChild(cell);
+						}
+						body.appendChild(row);
+					}
+
+					const previousPosition = parent.style.position;
+					if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+					const previousVisibility = table.style.visibility;
+					table.style.visibility = 'hidden';
+					const overlay = document.createElement('div');
+					overlay.className = 'erp-table-skeleton-overlay';
+					overlay.appendChild(skeleton);
+					parent.appendChild(overlay);
+					activeTableSkeleton = { table, parent, overlay, previousPosition, previousVisibility, previousMinHeight };
+					return;
+				}
+
+				if (!activeTableSkeleton) return;
+				const { table, parent, overlay, previousPosition, previousVisibility, previousMinHeight } = activeTableSkeleton;
+				overlay.remove();
+				table.style.visibility = previousVisibility;
+				parent.style.position = previousPosition;
+				parent.style.minHeight = previousMinHeight;
+				activeTableSkeleton = null;
+			};
 
 			const getRequestParams = () => {
 				const formData = new FormData(form);
@@ -862,7 +992,10 @@
 				init();
 			};
 
-			const fetchList = async (url, options = {}) => {
+			const fetchList = async (url) => {
+				clearTimeout(debounceTimer);
+				setListControlsLoading(true);
+				setTableSkeletonLoading(wrapper, true);
 				const requestId = ++fetchRequestId;
 
 				if (fetchController) {
@@ -895,6 +1028,8 @@
 				} finally {
 					if (fetchController === controller) {
 						fetchController = null;
+						setTableSkeletonLoading(wrapper, false);
+						setListControlsLoading(false);
 					}
 				}
 			};
@@ -918,7 +1053,7 @@
 				clearTimeout(debounceTimer);
 				debounceTimer = setTimeout(() => {
 					const url = buildUrl();
-					fetchList(url, { preserveSearchFocus: true });
+					fetchList(url);
 				}, 350);
 			};
 

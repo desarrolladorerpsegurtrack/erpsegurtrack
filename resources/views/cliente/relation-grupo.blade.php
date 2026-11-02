@@ -1,13 +1,21 @@
 <div class="overflow-hidden rounded-xl border border-black bg-white shadow-sm">
+    @php
+        $groups = collect($relationGroups ?? [])->values();
+        $clientCount = $groups
+            ->flatMap(function ($group) {
+                return $group['records'] ?? [];
+            })
+            ->pluck('idcliente')
+            ->filter()
+            ->unique()
+            ->count();
+    @endphp
+
     <div class="border-b border-black px-2 py-2 text-sm font-semibold text-slate-800 bg-slate-200">
-        Clientes del Grupo
+        Clientes del Grupo: Cantidad de clientes ({{ $clientCount }})
     </div>
 
     <div style="max-height: 200px; overflow-x: auto; overflow-y: auto;">
-        @php
-            $groups = collect($relationGroups ?? [])->values();
-        @endphp
-
         @if($groups->isEmpty())
             <div class="text-sm text-slate-500">Sin clientes asociados.</div>
         @else

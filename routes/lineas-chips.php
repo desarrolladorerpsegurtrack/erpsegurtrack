@@ -1,11 +1,22 @@
 <?php
 
 use App\Http\Controllers\LineasChipsController;
+use App\Http\Controllers\PlanTelefonicoController;
 use App\Http\Controllers\BulkDestroyController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('erp.module:lineas_chips')->group(function () {
     Route::get('/modulos/lineas-chips', [LineasChipsController::class, 'index'])->name('modules.lineas-chips');
+
+    Route::get('/modulos/lineas-chips/plan-telefonico', [PlanTelefonicoController::class, 'index'])->name('modules.lineas-chips.plan-telefonico.index');
+    Route::get('/modulos/lineas-chips/plan-telefonico/export/{format}', [PlanTelefonicoController::class, 'export'])->name('modules.lineas-chips.plan-telefonico.export')->where('format', 'pdf|xlsx');
+    Route::post('/modulos/lineas-chips/plan-telefonico/export/{format}', [PlanTelefonicoController::class, 'export'])->name('modules.lineas-chips.plan-telefonico.export.post')->where('format', 'pdf|xlsx');
+    Route::get('/modulos/lineas-chips/plan-telefonico/crear', [PlanTelefonicoController::class, 'create'])->name('modules.lineas-chips.plan-telefonico.create');
+    Route::post('/modulos/lineas-chips/plan-telefonico', [PlanTelefonicoController::class, 'store'])->name('modules.lineas-chips.plan-telefonico.store');
+    Route::delete('/modulos/lineas-chips/plan-telefonico/bulk-destroy', [PlanTelefonicoController::class, 'bulkDestroy'])->name('modules.lineas-chips.plan-telefonico.bulk-destroy');
+    Route::get('/modulos/lineas-chips/plan-telefonico/{id}/editar', [PlanTelefonicoController::class, 'edit'])->name('modules.lineas-chips.plan-telefonico.edit');
+    Route::put('/modulos/lineas-chips/plan-telefonico/{id}', [PlanTelefonicoController::class, 'update'])->name('modules.lineas-chips.plan-telefonico.update');
+    Route::delete('/modulos/lineas-chips/plan-telefonico/{id}', [PlanTelefonicoController::class, 'destroy'])->name('modules.lineas-chips.plan-telefonico.destroy');
 
     Route::get('/modulos/lineas-chips/numeros-telefonico', [LineasChipsController::class, 'numerosTelefonicoIndex'])->name('modules.lineas-chips.numeros-telefonico.index');
     Route::get('/modulos/lineas-chips/numeros-telefonico/export/{format}', [LineasChipsController::class, 'numerosTelefonicoExport'])->name('modules.lineas-chips.numeros-telefonico.export')->where('format', 'pdf|xlsx');

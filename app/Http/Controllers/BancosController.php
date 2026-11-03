@@ -33,8 +33,16 @@ class BancosController extends Controller
             ])
             ->all();
         $perPage = $this->resolvePerPage($request);
-        $allRows = $this->bancosService->getExportRows($request);
-        $groupedRows = $this->groupBankMovements($allRows);
+        $allRows = $this->bancosService->getExportRows($request, false);
+        $groupedRows = $this->filterGroupedMovementsByAmount(
+            $this->groupBankMovements($allRows),
+            $request
+        );
+        $movementIds = $groupedRows
+            ->flatMap(fn ($row): array => $row->movement_ids ?? [])
+            ->unique()
+            ->values()
+            ->all();
         $currentPage = LengthAwarePaginator::resolveCurrentPage();
         $items = new LengthAwarePaginator(
             $groupedRows->forPage($currentPage, $perPage)->values(),
@@ -44,7 +52,7 @@ class BancosController extends Controller
             ['path' => $request->url(), 'query' => $request->query()]
         );
 
-        $stats = $this->bancosService->getStats($request);
+        $stats = $this->bancosService->getStats($request, $movementIds);
         return view('finanzas.bancos', [
             'title' => 'Banco / Caja',
             'singularTitle' => 'Movimiento bancario',
@@ -304,7 +312,9 @@ class BancosController extends Controller
 
     public function export(Request $request, string $format)
     {
-        abort_unless(in_array(strtolower($format), ['pdf', 'xlsx'], true), 404);
+        $format = strtolower($format);
+        abort_unless(in_array($format, ['pdf', 'xlsx'], true), 404);
+        $isXlsx = $format === 'xlsx';
         $columns = [
             ['key' => 'idbancos', 'label' => 'ID'],
             ['key' => 'entidad_bancaria_nombre', 'label' => 'Entidad bancaria'],
@@ -314,7 +324,13 @@ class BancosController extends Controller
             [
                 'key' => 'monto',
                 'label' => 'Monto',
-                'value' => fn ($row): string => $this->formatMoney($row->monto, $row->moneda_simbolo ?? null),
+                'type' => $isXlsx ? 'number' : 'text',
+                'value' => fn ($row) => $isXlsx
+                    ? (float) $row->monto
+                    : $this->formatMoney($row->monto, $row->moneda_simbolo ?? null),
+                'numberFormat' => fn ($row): string => '"'
+                    . str_replace('"', '""', $this->normalizeCurrencySymbol((string) ($row->moneda_simbolo ?? 'S/')))
+                    . '" #,##0.00',
             ],
             [
                 'key' => 'tipoMov',
@@ -323,8 +339,11 @@ class BancosController extends Controller
             ],
         ];
         $filename = 'bancos_finanzas_' . now()->format('Ymd_His') . '.' . strtolower($format);
-        $rows = $this->bancosService->getExportRows($request);
-        return strtolower($format) === 'xlsx'
+        $rows = $this->resolveBankExportRows(
+            $this->bancosService->getExportRows($request, false),
+            $request
+        );
+        return $format === 'xlsx'
             ? $this->exportXlsxResponse($rows, $columns, $filename)
             : $this->exportPdfResponse($rows, $columns, 'Banco / Caja', $filename);
     }
@@ -842,6 +861,7 @@ class BancosController extends Controller
         })->filter(function ($name): bool {
             return $name !== '' && $name !== '-' && !str_starts_with($name, 'sin ');
         })->unique()->values()->all();
+        $cxcLinkedGroups = $this->cxcLinkedWithholdingGroups($movementCollection, $clientNameAliases);
         foreach ($movementCollection->groupBy(function ($row) use ($clientNameAliases): string {
             $timestamp = strtotime((string) ($row->fechaRegistro ?? ''));
             $client = $this->movementClientKey($row, $clientNameAliases);
@@ -867,7 +887,12 @@ class BancosController extends Controller
             }
         }
 
-        return $movementCollection->groupBy(function ($row) use ($linkedOperations, $clientNameAliases): string {
+        return $movementCollection->groupBy(function ($row) use ($linkedOperations, $clientNameAliases, $cxcLinkedGroups): string {
+            $movementId = (string) ($row->idbancos ?? '');
+            if (isset($cxcLinkedGroups[$movementId])) {
+                return $cxcLinkedGroups[$movementId];
+            }
+
             $client = $this->movementClientKey($row, $clientNameAliases);
             $currency = trim((string) ($row->moneda_simbolo ?? 'S/'));
             $information = trim((string) ($row->informacion ?? ''));
@@ -922,6 +947,8 @@ class BancosController extends Controller
             $currency = $first->moneda_simbolo ?? null;
 
             $first->fechaRegistro_display = $latest > 0 ? date('d/m/Y H:i', $latest) : '-';
+            $first->monto_total = round($total, 2);
+            $first->movement_ids = $group->pluck('idbancos')->map(fn ($id): int => (int) $id)->values()->all();
             $first->monto_display = $this->formatMoney($total, $currency);
             $first->informacion = trim((string) $first->informacion);
             $first->tipoMov_display = $group->count() > 1
@@ -933,7 +960,7 @@ class BancosController extends Controller
                     ['key' => 'idbancos', 'label' => 'ID', 'type' => 'text'],
                     ['key' => 'entidad_bancaria_nombre', 'label' => 'Entidad bancaria', 'type' => 'text'],
                     ['key' => 'informacion', 'label' => 'Información', 'type' => 'text'],
-                    ['key' => 'fechaRegistro_display', 'label' => 'Fecha de registro', 'type' => 'text'],
+                    ['key' => 'registro', 'label' => 'Fecha de registro', 'type' => 'text'],
                     ['key' => 'monto_display', 'label' => 'Monto', 'type' => 'text'],
                     ['key' => 'tipoMov_display', 'label' => 'Movimiento', 'type' => 'text'],
                 ],
@@ -953,9 +980,8 @@ class BancosController extends Controller
                     return (int) $right->idbancos <=> (int) $left->idbancos;
                 })->map(function ($row): array {
                     $row = clone $row;
-                    $row->fechaRegistro_display = $row->fechaRegistro
-                        ? date('d/m/Y H:i', strtotime((string) $row->fechaRegistro))
-                        : '-';
+                    $timestamp = strtotime((string) ($row->fechaRegistro ?? ''));
+                    $row->registro = $timestamp !== false ? date('d/m/Y, H:i', $timestamp) : '-';
                     $row->monto_display = $this->formatMoney($row->monto, $row->moneda_simbolo ?? null);
                     $row->tipoMov_display = $this->movementLabel($row->tipoMov, $row->informacion);
 
@@ -965,6 +991,142 @@ class BancosController extends Controller
 
             return $first;
         })->values();
+    }
+
+    private function cxcLinkedWithholdingGroups($rows, array $clientNameAliases): array
+    {
+        $movements = collect($rows)->values();
+        $parents = range(0, max(0, $movements->count() - 1));
+        $find = function (int $index) use (&$parents, &$find): int {
+            if ($parents[$index] !== $index) {
+                $parents[$index] = $find($parents[$index]);
+            }
+
+            return $parents[$index];
+        };
+        $union = function (int $left, int $right) use (&$parents, $find): void {
+            $leftRoot = $find($left);
+            $rightRoot = $find($right);
+            if ($leftRoot !== $rightRoot) {
+                $parents[$rightRoot] = $leftRoot;
+            }
+        };
+        $firstMovementByCxc = [];
+        $movementIndicesById = [];
+
+        foreach ($movements as $index => $row) {
+            $movementIndicesById[(string) ($row->idbancos ?? '')] = $index;
+            $client = $this->movementClientKey($row, $clientNameAliases);
+            $currency = trim((string) ($row->moneda_simbolo ?? 'S/'));
+            $cxcIds = preg_split('/[,\s]+/', trim((string) ($row->cxc_ids ?? ''))) ?: [];
+            if ($cxcIds === [] || $cxcIds === ['']) {
+                $cxcIds = [trim((string) ($row->cxc_id ?? ''))];
+            }
+
+            foreach (array_unique(array_filter($cxcIds, fn ($id): bool => trim((string) $id) !== '')) as $cxcId) {
+                $key = implode('|', [$client, $currency, trim((string) $cxcId)]);
+                if (isset($firstMovementByCxc[$key])) {
+                    $union($index, $firstMovementByCxc[$key]);
+                } else {
+                    $firstMovementByCxc[$key] = $index;
+                }
+            }
+        }
+
+        $components = [];
+        foreach ($movements as $index => $row) {
+            $components[$find($index)][] = $row;
+        }
+
+        $linkedGroups = [];
+        foreach ($components as $root => $component) {
+            if (count($component) < 2) {
+                continue;
+            }
+
+            $hasIncome = false;
+            $hasWithholding = false;
+            foreach ($component as $row) {
+                $type = strtoupper(trim((string) ($row->tipoMov ?? '')));
+                $information = trim((string) ($row->informacion ?? ''));
+                if (preg_match('/^\[ANULADO\]/iu', $information) === 1) {
+                    continue;
+                }
+                $hasIncome = $hasIncome || $type === 'I';
+                $hasWithholding = $hasWithholding || $type === 'T';
+            }
+
+            if (!$hasIncome || !$hasWithholding) {
+                continue;
+            }
+
+            $first = $component[0];
+            $groupKey = implode('|', [
+                'cxc-operation',
+                $this->movementClientKey($first, $clientNameAliases),
+                trim((string) ($first->moneda_simbolo ?? 'S/')),
+                (string) $root,
+            ]);
+            foreach ($component as $row) {
+                $movementId = (string) ($row->idbancos ?? '');
+                if (isset($movementIndicesById[$movementId])) {
+                    $linkedGroups[$movementId] = $groupKey;
+                }
+            }
+        }
+
+        return $linkedGroups;
+    }
+
+    private function filterGroupedMovementsByAmount($rows, Request $request): \Illuminate\Support\Collection
+    {
+        $filters = $request->validate([
+            'montoDesde' => ['nullable', 'numeric', 'min:0'],
+            'montoHasta' => ['nullable', 'numeric', 'min:0'],
+        ]);
+        $amountFrom = isset($filters['montoDesde']) ? round((float) $filters['montoDesde'], 2) : null;
+        $amountTo = isset($filters['montoHasta']) ? round((float) $filters['montoHasta'], 2) : null;
+
+        return collect($rows)->filter(function ($row) use ($amountFrom, $amountTo): bool {
+            $amount = (float) ($row->monto_total ?? 0);
+
+            return ($amountFrom === null || $amount >= $amountFrom)
+                && ($amountTo === null || $amount <= $amountTo);
+        })->values();
+    }
+
+    private function resolveBankExportRows(\Illuminate\Support\Collection $rows, Request $request): \Illuminate\Support\Collection
+    {
+        $groups = $this->filterGroupedMovementsByAmount(
+            $this->groupBankMovements($rows),
+            $request
+        );
+        $rawSelectedIds = $request->input('selectedIds', []);
+        $hasSelection = is_array($rawSelectedIds) && $rawSelectedIds !== [];
+
+        if ($hasSelection) {
+            $selectedIds = collect($rawSelectedIds)
+                ->filter(fn ($id): bool => is_scalar($id) && ctype_digit((string) $id))
+                ->map(fn ($id): string => (string) $id)
+                ->unique()
+                ->values();
+            $groups = $groups->filter(
+                fn ($group): bool => collect($group->movement_ids ?? [])
+                    ->map(fn ($id): string => (string) $id)
+                    ->intersect($selectedIds)
+                    ->isNotEmpty()
+            );
+        }
+
+        $exportMovementIds = $groups
+            ->flatMap(fn ($group): array => $group->movement_ids ?? [])
+            ->map(fn ($id): string => (string) $id)
+            ->unique()
+            ->all();
+
+        return $rows
+            ->filter(fn ($row): bool => in_array((string) $row->idbancos, $exportMovementIds, true))
+            ->values();
     }
 
     private function movementClientKey(object $row, array $clientNameAliases = []): string
@@ -1107,4 +1269,3 @@ class BancosController extends Controller
     }
 
 }
-

@@ -164,6 +164,263 @@ class BancosMovementStatsTest extends TestCase
         $this->assertSame('S/ 15.31', $grouped->first()->monto_display);
     }
 
+    public function test_income_and_later_withholding_are_grouped_by_linked_cxc_ids(): void
+    {
+        $controller = new \App\Http\Controllers\BancosController(new BancosService());
+        $groupBankMovements = new \ReflectionMethod($controller, 'groupBankMovements');
+        $rows = collect([
+            (object) [
+                'idbancos' => 10,
+                'cliente_ruc' => '20123456789',
+                'cliente_nombre' => 'Cliente de prueba',
+                'cxc_ids' => '25',
+                'moneda_simbolo' => 'S/',
+                'fechaRegistro' => '2026-10-29 10:10:00',
+                'informacion' => 'Pago de servicio mensual',
+                'monto' => 350,
+                'tipoMov' => 'I',
+            ],
+            (object) [
+                'idbancos' => 11,
+                'cliente_ruc' => '20123456789',
+                'cliente_nombre' => 'Cliente de prueba',
+                'cxc_ids' => '26',
+                'moneda_simbolo' => 'S/',
+                'fechaRegistro' => '2026-10-29 10:10:00',
+                'informacion' => 'Pago de servicio mensual',
+                'monto' => 352,
+                'tipoMov' => 'I',
+            ],
+            (object) [
+                'idbancos' => 12,
+                'cliente_ruc' => '20123456789',
+                'cliente_nombre' => 'Cliente de prueba',
+                'cxc_ids' => '25,26',
+                'moneda_simbolo' => 'S/',
+                'fechaRegistro' => '2026-10-31 10:15:00',
+                'informacion' => 'Detracción pagada de octubre 2026',
+                'monto' => 96,
+                'tipoMov' => 'T',
+            ],
+        ]);
+
+        $grouped = $groupBankMovements->invoke($controller, $rows);
+
+        $this->assertCount(1, $grouped);
+        $this->assertSame('S/ 798.00', $grouped->first()->monto_display);
+        $this->assertSame([10, 11, 12], $grouped->first()->movement_ids);
+        $records = $grouped->first()->relation_groups[0]['records'];
+        $this->assertSame('registro', $grouped->first()->relation_groups[0]['columns'][3]['key']);
+        $this->assertSame('31/10/2026, 10:15', $records[2]['registro']);
+    }
+
+    public function test_bank_amount_range_filters_by_the_displayed_group_total(): void
+    {
+        $controller = new \App\Http\Controllers\BancosController(new BancosService());
+        $groupBankMovements = new \ReflectionMethod($controller, 'groupBankMovements');
+        $filterGroupedMovementsByAmount = new \ReflectionMethod($controller, 'filterGroupedMovementsByAmount');
+        $rows = collect([
+            (object) [
+                'idbancos' => 1,
+                'cliente_ruc' => '20123456789',
+                'cliente_nombre' => 'Cliente de prueba',
+                'cxc_id' => 25,
+                'servicio' => 'Pago mensual',
+                'moneda_simbolo' => 'S/',
+                'fechaRegistro' => '2026-10-27 14:05:00',
+                'informacion' => 'Pago mensual octubre 2026 - Pago de servicio',
+                'monto' => 20,
+                'tipoMov' => 'I',
+                'entidad_bancaria_nombre' => 'Banco de prueba',
+            ],
+            (object) [
+                'idbancos' => 2,
+                'cliente_ruc' => '20123456789',
+                'cliente_nombre' => 'Cliente de prueba',
+                'cxc_id' => 26,
+                'servicio' => 'Pago mensual',
+                'moneda_simbolo' => 'S/',
+                'fechaRegistro' => '2026-10-27 14:05:00',
+                'informacion' => 'Pago mensual octubre 2026 - Pago de servicio',
+                'monto' => 30,
+                'tipoMov' => 'I',
+                'entidad_bancaria_nombre' => 'Banco de prueba',
+            ],
+        ]);
+        $grouped = $groupBankMovements->invoke($controller, $rows);
+
+        $matchesGroupTotal = $filterGroupedMovementsByAmount->invoke(
+            $controller,
+            $grouped,
+            Request::create('/bancos', 'GET', ['montoDesde' => '45', 'montoHasta' => '55'])
+        );
+        $matchesIndividualMovementOnly = $filterGroupedMovementsByAmount->invoke(
+            $controller,
+            $grouped,
+            Request::create('/bancos', 'GET', ['montoDesde' => '10', 'montoHasta' => '25'])
+        );
+
+        $this->assertCount(1, $matchesGroupTotal);
+        $this->assertSame(50.0, $matchesGroupTotal->first()->monto_total);
+        $this->assertSame('S/ 50.00', $matchesGroupTotal->first()->monto_display);
+        $this->assertCount(0, $matchesIndividualMovementOnly);
+    }
+
+    public function test_bank_export_respects_group_amount_filter_and_selected_group(): void
+    {
+        $controller = new \App\Http\Controllers\BancosController(new BancosService());
+        $resolveBankExportRows = new \ReflectionMethod($controller, 'resolveBankExportRows');
+        $rows = collect([
+            (object) [
+                'idbancos' => 100,
+                'cliente_ruc' => 'CLIENT-1',
+                'cliente_nombre' => 'Cliente de prueba',
+                'cxc_id' => 1,
+                'moneda_simbolo' => 'S/',
+                'fechaRegistro' => '2026-10-27 12:00:00',
+                'informacion' => 'Pago mensual octubre 2026',
+                'monto' => 20,
+                'tipoMov' => 'I',
+            ],
+            (object) [
+                'idbancos' => 101,
+                'cliente_ruc' => 'CLIENT-1',
+                'cliente_nombre' => 'Cliente de prueba',
+                'cxc_id' => 2,
+                'moneda_simbolo' => 'S/',
+                'fechaRegistro' => '2026-10-28 12:00:00',
+                'informacion' => 'Pago mensual octubre 2026',
+                'monto' => 30,
+                'tipoMov' => 'I',
+            ],
+            (object) [
+                'idbancos' => 102,
+                'cliente_ruc' => 'CLIENT-1',
+                'cliente_nombre' => 'Cliente de prueba',
+                'cxc_id' => 3,
+                'moneda_simbolo' => 'S/',
+                'fechaRegistro' => '2026-11-01 12:00:00',
+                'informacion' => 'Pago mensual noviembre 2026',
+                'monto' => 40,
+                'tipoMov' => 'I',
+            ],
+        ]);
+
+        $filteredRows = $resolveBankExportRows->invoke(
+            $controller,
+            $rows,
+            Request::create('/bancos', 'GET', ['montoDesde' => '45', 'montoHasta' => '55'])
+        );
+        $selectedRows = $resolveBankExportRows->invoke(
+            $controller,
+            $rows,
+            Request::create('/bancos', 'POST', ['selectedIds' => ['100']])
+        );
+
+        $this->assertSame([100, 101], $filteredRows->pluck('idbancos')->all());
+        $this->assertSame([100, 101], $selectedRows->pluck('idbancos')->all());
+    }
+
+    public function test_bank_xlsx_exports_amounts_as_numeric_cells_with_currency_format(): void
+    {
+        $request = Request::create('/modulos/finanzas/bancos/export/xlsx', 'GET');
+        $service = \Mockery::mock(BancosService::class);
+        $service->shouldReceive('getExportRows')
+            ->once()
+            ->with(\Mockery::type(Request::class), false)
+            ->andReturn(collect([
+                (object) [
+                    'idbancos' => 100,
+                    'cliente_ruc' => 'CLIENT-1',
+                    'cliente_nombre' => 'Cliente de prueba',
+                    'cxc_id' => 1,
+                    'moneda_simbolo' => 'S/',
+                    'fechaRegistro' => '2026-10-27 12:00:00',
+                    'informacion' => 'Pago de prueba soles',
+                    'monto' => '123.45',
+                    'tipoMov' => 'I',
+                ],
+                (object) [
+                    'idbancos' => 101,
+                    'cliente_ruc' => 'CLIENT-2',
+                    'cliente_nombre' => 'Cliente dólares',
+                    'cxc_id' => 2,
+                    'moneda_simbolo' => '$',
+                    'fechaRegistro' => '2026-10-28 12:00:00',
+                    'informacion' => 'Pago de prueba dólares',
+                    'monto' => '67.89',
+                    'tipoMov' => 'I',
+                ],
+            ]));
+
+        $response = (new \App\Http\Controllers\BancosController($service))->export($request, 'xlsx');
+        $filePath = $response->getFile()->getPathname();
+
+        try {
+            $sheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($filePath)->getActiveSheet();
+
+            $this->assertSame(\PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC, $sheet->getCell('F2')->getDataType());
+            $this->assertSame(123.45, $sheet->getCell('F2')->getValue());
+            $this->assertSame('"S/" #,##0.00', $sheet->getStyle('F2')->getNumberFormat()->getFormatCode());
+            $this->assertSame(\PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC, $sheet->getCell('F3')->getDataType());
+            $this->assertSame(67.89, $sheet->getCell('F3')->getValue());
+            $this->assertSame('"$" #,##0.00', $sheet->getStyle('F3')->getNumberFormat()->getFormatCode());
+        } finally {
+            if (is_file($filePath)) {
+                unlink($filePath);
+            }
+        }
+    }
+
+    public function test_stats_include_movements_selected_by_the_group_total_range(): void
+    {
+        $movementIds = [];
+        foreach ([20, 30] as $amount) {
+            $movementId = DB::table('bancos')->insertGetId([
+                'entidadBancaria_identidadBancaria' => 1,
+                'fechaRegistro' => '2026-10-27 12:00:00',
+                'informacion' => 'Pago mensual octubre 2026',
+                'monto' => $amount,
+                'tipoMov' => 'I',
+            ]);
+            $movementIds[] = $movementId;
+            DB::table('detallecxc')->insert([
+                'cuentasPorCobrar_idcuentasPorCobrar' => 1,
+                'bancos_idbancos' => $movementId,
+                'moneda_idmoneda' => 1,
+                'estado' => '1',
+            ]);
+        }
+
+        $service = new BancosService();
+        $request = Request::create('/bancos', 'GET', ['montoDesde' => '45', 'montoHasta' => '55']);
+        $controller = new \App\Http\Controllers\BancosController($service);
+        $groupBankMovements = new \ReflectionMethod($controller, 'groupBankMovements');
+        $filterGroupedMovementsByAmount = new \ReflectionMethod($controller, 'filterGroupedMovementsByAmount');
+        $rows = collect(array_map(fn (int $movementId, int $amount): object => (object) [
+            'idbancos' => $movementId,
+            'cliente_ruc' => '20123456789',
+            'cliente_nombre' => 'Cliente de prueba',
+            'servicio' => 'Pago mensual octubre 2026',
+            'moneda_simbolo' => 'S/',
+            'fechaRegistro' => '2026-10-27 12:00:00',
+            'informacion' => 'Pago mensual octubre 2026',
+            'monto' => $amount,
+            'tipoMov' => 'I',
+        ], $movementIds, [20, 30]));
+        $groupedRows = $filterGroupedMovementsByAmount->invoke(
+            $controller,
+            $groupBankMovements->invoke($controller, $rows),
+            $request
+        );
+        $selectedMovementIds = $groupedRows->flatMap(fn ($row): array => $row->movement_ids)->all();
+
+        $stats = $service->getStats($request, $selectedMovementIds);
+
+        $this->assertEqualsCanonicalizing($movementIds, $selectedMovementIds);
+        $this->assertSame(50.0, $stats['balances']['S/']['balance_positivo']);
+    }
+
     public function test_same_service_payment_on_same_date_is_grouped_even_when_vehicle_and_cxc_change(): void
     {
         $controller = new \App\Http\Controllers\BancosController(new BancosService());

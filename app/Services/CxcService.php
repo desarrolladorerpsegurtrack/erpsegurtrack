@@ -3760,7 +3760,8 @@ class CxcService
                 } else {
                     $clientName = DB::table('cliente')
                         ->where('idcliente', $cxc->cliente_idcliente)
-                        ->value(DB::raw("COALESCE(NULLIF(TRIM(razonSocial), ''), NULLIF(TRIM(nombreComercial), ''), idcliente)"));
+                        ->selectRaw("COALESCE(NULLIF(TRIM(razonSocial), ''), NULLIF(TRIM(nombreComercial), ''), idcliente) as resultado_final")
+                        ->value('resultado_final');
                     $servicePeriodDate = !empty($cxc->fechaCancelacion)
                         ? Carbon::parse($cxc->fechaCancelacion)
                         : Carbon::parse($fechaPago);

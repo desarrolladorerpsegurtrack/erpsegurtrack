@@ -75,11 +75,25 @@ trait ExportableList
 
                 $value = is_string($value) ? trim(strip_tags($value)) : $value;
                 $coordinate = Coordinate::stringFromColumnIndex($columnIndex) . $rowIndex;
-                $sheet->setCellValueExplicit(
-                    $coordinate,
-                    (string) $value,
-                    DataType::TYPE_STRING
-                );
+                if (($column['type'] ?? null) === 'number') {
+                    if (!is_numeric($value)) {
+                        throw new \UnexpectedValueException('Numeric XLSX export columns must contain numeric values.');
+                    }
+
+                    $sheet->setCellValueExplicit($coordinate, (float) $value, DataType::TYPE_NUMERIC);
+                    if (isset($column['numberFormat'])) {
+                        $numberFormat = is_callable($column['numberFormat'])
+                            ? $column['numberFormat']($row)
+                            : $column['numberFormat'];
+                        $sheet->getStyle($coordinate)->getNumberFormat()->setFormatCode((string) $numberFormat);
+                    }
+                } else {
+                    $sheet->setCellValueExplicit(
+                        $coordinate,
+                        (string) $value,
+                        DataType::TYPE_STRING
+                    );
+                }
 
                 $columnIndex++;
             }

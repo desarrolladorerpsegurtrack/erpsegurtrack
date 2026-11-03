@@ -20,12 +20,16 @@ class BancosService
             ->withQueryString();
     }
 
-    public function getStats(Request $request): array
+    public function getStats(Request $request, ?array $movementIds = null): array
     {
-        $pairedPaymentQuery = $this->annulledPairedPaymentQuery($request);
+        $applyAmountFilters = $movementIds === null;
+        $pairedPaymentQuery = $this->annulledPairedPaymentQuery($request, $applyAmountFilters);
         $balanceQuery = $this->applyOperationalMovementFilter(
-            $this->applyFilters($this->joinedQuery(), $request)
+            $this->applyFilters($this->joinedQuery(), $request, $applyAmountFilters)
         );
+        if ($movementIds !== null) {
+            $balanceQuery->whereIn('b.idbancos', $movementIds);
+        }
         $rows = (clone $balanceQuery)
             ->selectRaw("COALESCE(NULLIF(TRIM(m.simbolo), ''), 'S/') as moneda_simbolo")
             ->selectRaw("SUM(CASE WHEN b.tipoMov = 'I' THEN b.monto ELSE 0 END) as balance_positivo")
@@ -33,8 +37,9 @@ class BancosService
             ->selectRaw("SUM(CASE WHEN b.tipoMov = 'A' THEN b.monto WHEN b.tipoMov = 'C' THEN -b.monto ELSE 0 END) as saldo_a_favor")
             ->groupBy('m.simbolo')
             ->get();
-        $annulledRows = $this->applyFilters($this->joinedQuery(), $request)
+        $annulledRows = $this->applyFilters($this->joinedQuery(), $request, $applyAmountFilters)
             ->whereRaw('LTRIM(b.informacion) LIKE ?', ['[ANULADO]%'])
+            ->when($movementIds !== null, fn ($query) => $query->whereIn('b.idbancos', $movementIds))
             ->selectRaw("COALESCE(NULLIF(TRIM(m.simbolo), ''), 'S/') as moneda_simbolo")
             ->selectRaw("SUM(CASE
                 WHEN b.tipoMov = 'T'
@@ -73,9 +78,9 @@ class BancosService
         ];
     }
 
-    public function getExportRows(Request $request): Collection
+    public function getExportRows(Request $request, bool $applyAmountFilters = true): Collection
     {
-        return $this->applyFilters($this->baseQuery(), $request)
+        return $this->applyFilters($this->baseQuery(), $request, $applyAmountFilters)
             ->orderByDesc('b.fechaRegistro')
             ->orderByDesc('b.idbancos')
             ->get();
@@ -632,6 +637,7 @@ class BancosService
                 'b.tipoMov',
                 'cli.idcliente as cliente_ruc',
                 'cxc.idcuentasPorCobrar as cxc_id',
+                'movement_detail.cxc_ids',
                 'cxc.montoActual as cxc_monto_actual',
                 'cxc.estado as cxc_estado',
                 DB::raw('COALESCE(eb.razonSocial, eb.descripcion, CONCAT("Entidad #", b.entidadBancaria_identidadBancaria)) as entidad_bancaria_nombre'),
@@ -645,6 +651,7 @@ class BancosService
     {
         $detailByMovement = DB::table('detallecxc as detail')
             ->select('detail.bancos_idbancos')
+            ->selectRaw('GROUP_CONCAT(DISTINCT detail.cuentasPorCobrar_idcuentasPorCobrar) as cxc_ids')
             ->selectRaw("COALESCE(
                 MIN(CASE WHEN detail.estado = '1' THEN detail.iddetalleCXC END),
                 MIN(detail.iddetalleCXC)
@@ -674,7 +681,7 @@ class BancosService
             });
     }
 
-    private function annulledPairedPaymentQuery(Request $request)
+    private function annulledPairedPaymentQuery(Request $request, bool $applyAmountFilters = true)
     {
         $query = DB::table('detallecxc as paired_detail')
             ->join('bancos as paired_bank', 'paired_bank.idbancos', '=', 'paired_detail.bancos_idbancos')
@@ -731,10 +738,10 @@ class BancosService
         if (!empty($filters['fechaHasta'])) {
             $query->whereDate('paired_bank.fechaRegistro', '<=', $filters['fechaHasta']);
         }
-        if (isset($filters['montoDesde'])) {
+        if ($applyAmountFilters && isset($filters['montoDesde'])) {
             $query->where('paired_bank.monto', '>=', round((float) $filters['montoDesde'], 2));
         }
-        if (isset($filters['montoHasta'])) {
+        if ($applyAmountFilters && isset($filters['montoHasta'])) {
             $query->where('paired_bank.monto', '<=', round((float) $filters['montoHasta'], 2));
         }
         if (isset($filters['moneda'])) {
@@ -756,7 +763,7 @@ class BancosService
         return $query->selectRaw('1');
     }
 
-    private function applyFilters($query, Request $request)
+    private function applyFilters($query, Request $request, bool $applyAmountFilters = true)
     {
         $currencyFilters = $request->validate([
             'moneda' => ['nullable', 'in:S/,$'],
@@ -827,14 +834,16 @@ class BancosService
                 ->where('b.informacion', 'not like', '[ANULADO]%');
         }
 
-        $amountFrom = trim((string) ($rangeFilters['montoDesde'] ?? ''));
-        if ($amountFrom !== '') {
-            $query->where('b.monto', '>=', round((float) $amountFrom, 2));
-        }
+        if ($applyAmountFilters) {
+            $amountFrom = trim((string) ($rangeFilters['montoDesde'] ?? ''));
+            if ($amountFrom !== '') {
+                $query->where('b.monto', '>=', round((float) $amountFrom, 2));
+            }
 
-        $amountTo = trim((string) ($rangeFilters['montoHasta'] ?? ''));
-        if ($amountTo !== '') {
-            $query->where('b.monto', '<=', round((float) $amountTo, 2));
+            $amountTo = trim((string) ($rangeFilters['montoHasta'] ?? ''));
+            if ($amountTo !== '') {
+                $query->where('b.monto', '<=', round((float) $amountTo, 2));
+            }
         }
 
         return $query;

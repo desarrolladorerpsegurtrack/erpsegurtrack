@@ -641,7 +641,7 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertSame(1722, $novemberCxc->idcuentasPorCobrar);
     }
 
-    public function test_current_service_does_not_load_older_cxc_with_the_same_service_marker(): void
+    public function test_historical_cxc_remains_visible_after_the_service_advances_to_a_new_period(): void
     {
         $this->createSchema();
         $this->createOctoberService();
@@ -682,9 +682,20 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             $table->integer('tipoElemento_idtipoElemento')->nullable();
         });
         DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
-            'fecheVencimiento' => '2026-10-23',
+            'fechaInicio' => '2026-10-23',
+            'fecheVencimiento' => '2026-11-23',
         ]);
         $currentCxcId = DB::table('cuentasporcobrar')->insertGetId([
+            'cliente_idcliente' => 'CLIENTE-1',
+            'tipoCobro_idtipoCobros' => 5,
+            'moneda_idmoneda' => 1,
+            'descripcion' => 'REN-CXC-2 P 23/10/2026 a 23/11/2026 SC-41',
+            'montoOriginal' => 45,
+            'montoActual' => 45,
+            'fechaCancelacion' => '2026-11-23',
+            'estado' => '1',
+        ]);
+        $historicalCxcId = DB::table('cuentasporcobrar')->insertGetId([
             'cliente_idcliente' => 'CLIENTE-1',
             'tipoCobro_idtipoCobros' => 5,
             'moneda_idmoneda' => 1,
@@ -692,16 +703,6 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             'montoOriginal' => 45,
             'montoActual' => 45,
             'fechaCancelacion' => '2026-10-23',
-            'estado' => '1',
-        ]);
-        $historicalCxcId = DB::table('cuentasporcobrar')->insertGetId([
-            'cliente_idcliente' => 'CLIENTE-1',
-            'tipoCobro_idtipoCobros' => 5,
-            'moneda_idmoneda' => 1,
-            'descripcion' => 'CXC 23/08/2026 a 23/09/2026 SC-41',
-            'montoOriginal' => 900,
-            'montoActual' => 900,
-            'fechaCancelacion' => '2026-09-23',
             'estado' => '1',
         ]);
 
@@ -716,10 +717,15 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         ) ?: 0);
 
         $service = new CuentasPorCobrarService();
-        $services = (new \ReflectionMethod($service, 'loadServices'))->invoke($service);
+        $services = (new \ReflectionMethod($service, 'loadServices'))->invoke($service, [
+            'service_months' => ['octubre'],
+            'service_year' => '2026',
+        ]);
 
-        $this->assertSame([$currentCxcId], $services->pluck('idcuentasPorCobrar')->all());
-        $this->assertNotContains($historicalCxcId, $services->pluck('idcuentasPorCobrar')->all());
+        $this->assertSame([$historicalCxcId], $services->pluck('idcuentasPorCobrar')->all());
+        $this->assertNotContains($currentCxcId, $services->pluck('idcuentasPorCobrar')->all());
+        $this->assertSame('2026-09-23', $services->first()->fechaInicio);
+        $this->assertSame('2026-10-23', $services->first()->fecheVencimiento);
     }
 
     public function test_pending_withholding_cxc_joins_services_by_invoice_without_a_period_date(): void
@@ -1789,6 +1795,103 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertSame('2026-11-30', DB::table('serviciocliente')->value('fecheVencimiento'));
     }
 
+    public function test_historical_period_generation_does_not_change_original_pending_state(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        $octoberCxcId = $this->createCxc('REN-CXC-0 P 23/09/2026 a 23/10/2026 SC-41', '1');
+        Carbon::setTestNow('2026-11-04 10:00:00');
+
+        try {
+            $generated = (new CxcService())->generarPeriodosAutomaticos(
+                Carbon::parse('2026-10-01'),
+                false
+            );
+
+            $this->assertSame(1, $generated);
+            $this->assertSame(
+                '1',
+                DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $octoberCxcId)
+                    ->value('estado')
+            );
+            $this->assertSame(
+                '2026-11-30',
+                DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', '!=', $octoberCxcId)
+                    ->value('fechaCancelacion')
+            );
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_historical_generation_does_not_change_withholding_state_to_overdue(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        $octoberCxcId = $this->createCxc(
+            'REN-CXC-0 P 23/09/2026 a 23/10/2026 SC-41',
+            'Pendiente Autodetracción'
+        );
+        Carbon::setTestNow('2026-11-04 10:00:00');
+
+        try {
+            $generated = (new CxcService())->generarPeriodosAutomaticos(
+                Carbon::parse('2026-10-01'),
+                false
+            );
+
+            $this->assertSame(1, $generated);
+            $novemberCxcId = (int) DB::table('cuentasporcobrar')
+                ->where('idcuentasPorCobrar', '!=', $octoberCxcId)
+                ->value('idcuentasPorCobrar');
+            $this->assertSame(
+                '1',
+                DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $novemberCxcId)
+                    ->value('estado')
+            );
+            $this->assertSame(
+                'Pendiente Autodetracción',
+                DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $octoberCxcId)
+                    ->value('estado')
+            );
+
+            $generated = (new CxcService())->generarPeriodosAutomaticos(
+                Carbon::parse('2026-11-01'),
+                false
+            );
+
+            $this->assertSame(1, $generated);
+            $this->assertSame(
+                'Pendiente Autodetracción',
+                DB::table('cuentasporcobrar')
+                    ->where('idcuentasPorCobrar', $octoberCxcId)
+                    ->value('estado')
+            );
+            $this->assertSame(
+                3,
+                DB::table('cuentasporcobrar')->count()
+            );
+            $this->assertSame(
+                '2026-12-31',
+                DB::table('cuentasporcobrar')
+                    ->whereNotIn('idcuentasPorCobrar', [$octoberCxcId, $novemberCxcId])
+                    ->value('fechaCancelacion')
+            );
+            $this->assertSame(
+                '1',
+                DB::table('cuentasporcobrar')
+                    ->whereNotIn('idcuentasPorCobrar', [$octoberCxcId, $novemberCxcId])
+                    ->value('estado')
+            );
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_automatic_generation_only_advances_cxcs_ending_in_the_run_month(): void
     {
         $this->createSchema();
@@ -1798,7 +1901,10 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             'fecheVencimiento' => '2026-11-23',
         ]);
         $this->createCxc('CXC 23/09/2026 a 23/10/2026 SC-41', 'PENDIENTE');
-        $novemberCxcId = $this->createCxc('CXC 23/10/2026 a 23/11/2026 SC-41', 'FACTURADO');
+        $novemberCxcId = $this->createCxc(
+            'CXC 23/10/2026 a 23/11/2026 SC-41 - Comentario de facturación',
+            'FACTURADO'
+        );
         DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $novemberCxcId)->update([
             'fechaCancelacion' => '2026-11-23',
         ]);
@@ -1812,6 +1918,25 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertCount(1, $successors);
         $this->assertSame('2026-12-31', $successors->first()->fechaCancelacion);
         $this->assertSame(3, DB::table('cuentasporcobrar')->count());
+    }
+
+    public function test_automatic_generation_does_not_match_cxcs_by_invoice_when_description_has_no_service_identifier(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'docReferencia' => 'FF01-12515',
+        ]);
+        $cxcId = $this->createCxc('MES SETIEMBRE 2026 CONTRATO COMPRA 52871', '2');
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $cxcId)->update([
+            'docReferencia' => 'FF01-12515',
+        ]);
+
+        $generated = (new CxcService())->generarPeriodosAutomaticos(Carbon::parse('2026-10-01'));
+
+        $this->assertSame(0, $generated);
+        $this->assertSame(1, DB::table('cuentasporcobrar')->count());
+        $this->assertSame('2026-10-23', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('fecheVencimiento'));
     }
 
     public function test_automatic_generation_uses_the_service_interval_and_skips_credit_children(): void
@@ -3292,13 +3417,13 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             ],
         ]);
         $cxcIds = [
-            $this->createCxc('CXC octubre SC-41', '1'),
+            $this->createCxc('CXC 23/09/2026 a 23/10/2026 SC-41', '1'),
             DB::table('cuentasporcobrar')->insertGetId([
                 'cliente_idcliente' => 'CLIENTE-1',
                 'tipoCobro_idtipoCobros' => 5,
                 'moneda_idmoneda' => 1,
                 'docReferencia' => null,
-                'descripcion' => 'CXC octubre SC-42',
+                'descripcion' => 'CXC 23/09/2026 a 23/10/2026 SC-42',
                 'montoOriginal' => 50,
                 'montoActual' => 50,
                 'fechaCancelacion' => '2026-10-23',
@@ -3309,7 +3434,7 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
                 'tipoCobro_idtipoCobros' => 5,
                 'moneda_idmoneda' => 1,
                 'docReferencia' => null,
-                'descripcion' => 'CXC octubre SC-43',
+                'descripcion' => 'CXC 23/09/2026 a 23/10/2026 SC-43',
                 'montoOriginal' => 60,
                 'montoActual' => 60,
                 'fechaCancelacion' => '2026-10-23',
@@ -3328,14 +3453,20 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             'docReferencia' => 'F001-180',
             'realizar_cobro' => '0',
             'monto_factura' => '180.00',
+            'descripcionFactura' => 'MES SETIEMBRE 2026 CONTRATO DE COMPRA Nº 52871',
         ], [], [], ['HTTP_ACCEPT' => 'application/json']);
+        $request->setLaravelSession(app('session')->driver());
 
         $response = $controller->registrarFactura($request, (string) $cxcIds[0]);
         $cxcs = DB::table('cuentasporcobrar')->whereIn('idcuentasPorCobrar', $cxcIds)->orderBy('idcuentasPorCobrar')->get();
 
-        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(200, $response->getStatusCode(), (string) $response->getContent());
         $this->assertSame([50.0, 50.0, 60.0], $cxcs->pluck('montoOriginal')->map(fn ($amount): float => (float) $amount)->all());
         $this->assertSame(160.0, $cxcs->sum(fn ($cxc): float => (float) $cxc->montoOriginal));
+        $this->assertSame(
+            'CXC 23/09/2026 a 23/10/2026 SC-41 - MES SETIEMBRE 2026 CONTRATO DE COMPRA Nº 52871',
+            $cxcs->first()->descripcion
+        );
     }
 
     public function test_edited_next_period_end_updates_existing_successor_instead_of_duplicating_it(): void
@@ -4967,6 +5098,58 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertSame('CXC 23/09/2026 a 23/10/2026 SC-41', DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $cxcId)->value('descripcion'));
     }
 
+    public function test_new_service_cxc_keeps_system_identifier_before_invoice_comment(): void
+    {
+        $this->createSchema();
+
+        $cxcId = (new CxcService())->crearCobroDesdeServicio([
+            'cliente_idcliente' => 'CLIENTE-1',
+            'monto' => 45,
+            'moneda_idmoneda' => 1,
+            'tipoCobro_idtipoCobros' => 5,
+            'fechaInicio' => '2022-11-14',
+            'fecheVencimiento' => '2026-10-06',
+            'descripcion' => 'CXC 14/11/2022 a 06/10/2026 - MES SETIEMBRE 2026 CONTRATO DE COMPRA Nº 52871',
+            'idservicioCliente' => 5377,
+        ]);
+        $description = DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $cxcId)
+            ->value('descripcion');
+
+        $this->assertSame(
+            'CXC 14/11/2022 a 06/10/2026 SC-5377 - MES SETIEMBRE 2026 CONTRATO DE COMPRA Nº 52871',
+            $description
+        );
+        $this->assertSame(
+            'MES SETIEMBRE 2026 CONTRATO DE COMPRA Nº 52871',
+            CxcService::visibleServiceComment($description)
+        );
+    }
+
+    public function test_service_cxc_description_can_store_invoice_comment_without_losing_identifier(): void
+    {
+        $description = CxcService::descriptionWithServiceComment(
+            'CXC 14/11/2022 a 06/10/2026 SC-5377',
+            'MES SETIEMBRE 2026 CONTRATO DE COMPRA Nº 52871'
+        );
+
+        $this->assertSame(
+            'CXC 14/11/2022 a 06/10/2026 SC-5377 - MES SETIEMBRE 2026 CONTRATO DE COMPRA Nº 52871',
+            $description
+        );
+        $this->assertSame(
+            'MES SETIEMBRE 2026 CONTRATO DE COMPRA Nº 52871',
+            CxcService::visibleServiceComment($description)
+        );
+
+        $longDescription = CxcService::descriptionWithServiceComment(
+            'CXC 14/11/2022 a 06/10/2026 SC-5377',
+            str_repeat('Comentario ', 40)
+        );
+        $this->assertLessThanOrEqual(280, mb_strlen($longDescription, 'UTF-8'));
+        $this->assertStringStartsWith('CXC 14/11/2022 a 06/10/2026 SC-5377 - ', $longDescription);
+    }
+
     public function test_new_service_cxc_uses_the_service_period_type_instead_of_stale_type_id(): void
     {
         $this->createSchema();
@@ -5105,7 +5288,7 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             $table->integer('tipoCobro_idtipoCobros');
             $table->integer('moneda_idmoneda');
             $table->string('docReferencia')->nullable();
-            $table->string('descripcion', 50);
+            $table->string('descripcion', 280);
             $table->decimal('montoOriginal', 10, 2);
             $table->decimal('montoActual', 10, 2);
             $table->integer('canCuotas')->nullable();

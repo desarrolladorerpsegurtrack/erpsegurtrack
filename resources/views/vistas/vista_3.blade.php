@@ -17,7 +17,7 @@
 
 @section('content')
     <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h2 class="text-lg font-medium">{{ $title ?? 'Asignación de Placas y Servicios' }}</h2>
+        <h1 class="min-w-0 flex-1 truncate text-2xl font-semibold text-slate-900 mr-auto">{{ $title ?? 'Asignación de Placas y Servicios' }}</h1>
         @if(($vista->idvista ?? 0) >= 2 && ($vista->idvista ?? 0) <= 6)
             <form method="POST" action="{{ $advanceUrl ?? '#' }}" class="ml-auto" id="rechazar-form">
                 @csrf
@@ -285,16 +285,27 @@
                     <i data-lucide="x" class="h-5 w-5"></i>
                 </button>
             </div>
-            <div class="grid grid-cols-2 gap-4 bg-white p-7 md:grid-cols-2">
+            <form id="nueva-placa-form">
+                <div class="grid grid-cols-1 gap-4 bg-white p-7 md:grid-cols-2">
                 <div>
-                    <label for="nueva-placa-input" class="mb-2 block text-sm font-medium text-slate-700">Placa</label>
-                    <input id="nueva-placa-input" name="placa" type="text"
+                    <div class="mb-2 flex flex-wrap items-center gap-2">
+                        <label for="nueva-placa-input" class="text-sm font-medium text-slate-700">Placa <span class="text-red-600">*</span></label>
+                        <span class="text-xs text-slate-500">Identificador único del vehículo.</span>
+                        <button type="button" id="consultar-placa-btn"
+                            class="inline-flex items-center gap-1 rounded border border-red-600 px-2 py-1 text-xs font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70"
+                            style="background-color: #dc2626;" data-consult-label="Consultar">
+                            <i data-lucide="search" class="h-3 w-3"></i>
+                            <span id="consultar-placa-text">Consultar</span>
+                        </button>
+                    </div>
+                    <input id="nueva-placa-input" name="placa" type="text" maxlength="20" required
                         class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 focus:border-red-600 focus:ring-2 focus:ring-red-500/20"
                         placeholder="Ej: ABC-123">
+                    <p id="consulta-placa-error" class="mt-1 hidden text-xs text-red-600" role="alert"></p>
                 </div>
                 <div>
                     <label for="nuevo-cliente-select"
-                        class="mb-2 block text-sm font-medium text-slate-700">Cliente</label>
+                        class="mb-2 block text-sm font-medium text-slate-700">Cliente <span class="text-red-600">*</span></label>
                     <select id="nuevo-cliente-select" name="cliente_idcliente"
                         class="tom-select w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 focus:border-red-600 focus:ring-2 focus:ring-red-500/20"
                         data-placeholder="Selecciona cliente..." required>
@@ -307,11 +318,10 @@
                     </select>
                 </div>
                 <div>
-                    <label for="nuevo-tipo-vehiculo-select" class="mb-2 block text-sm font-medium text-slate-700">Tipo de
-                        Vehículo</label>
+                    <label for="nuevo-tipo-vehiculo-select" class="mb-2 block text-sm font-medium text-slate-700">Tipo de Vehículo <span class="text-red-600">*</span></label>
                     <select id="nuevo-tipo-vehiculo-select" name="tipoUnidad_idtable1"
                         class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 focus:border-red-600 focus:ring-2 focus:ring-red-500/20"
-                        data-placeholder="Selecciona tipo de vehículo...">
+                        data-placeholder="Selecciona tipo de vehículo..." required>
                         <option value="">Selecciona tipo de vehículo...</option>
                         @foreach($tipoVehiculos as $tipo)
                             <option value="{{ $tipo->idtipoVehiculo }}">{{ $tipo->nombre }}</option>
@@ -323,6 +333,13 @@
                     <input id="nuevo-anio-input" name="anio" type="number" min="1900" max="2100"
                         class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 focus:border-red-600 focus:ring-2 focus:ring-red-500/20"
                         placeholder="Ej: 2024">
+                </div>
+                <div class="relative">
+                    <label for="nuevo-color-input" class="mb-2 block text-sm font-medium text-slate-700">Color</label>
+                    <input id="nuevo-color-input" name="color" type="text"
+                        class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 focus:border-red-600 focus:ring-2 focus:ring-red-500/20"
+                        placeholder="Ej: Blanco" autocomplete="off">
+                    <div id="color-suggestions" class="suggestion-list hidden"></div>
                 </div>
                 <div class="relative">
                     <label for="nuevo-marca-input" class="mb-2 block text-sm font-medium text-slate-700">Marca</label>
@@ -338,13 +355,6 @@
                         placeholder="Ej: Hilux" autocomplete="off">
                     <div id="modelo-suggestions" class="suggestion-list hidden"></div>
                 </div>
-                <div class="relative">
-                    <label for="nuevo-color-input" class="mb-2 block text-sm font-medium text-slate-700">Color</label>
-                    <input id="nuevo-color-input" name="color" type="text"
-                        class="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm transition duration-200 focus:border-red-600 focus:ring-2 focus:ring-red-500/20"
-                        placeholder="Ej: Blanco" autocomplete="off">
-                    <div id="color-suggestions" class="suggestion-list hidden"></div>
-                </div>
                 <div>
                     <label for="nuevo-tracto-select" class="mb-2 block text-sm font-medium text-slate-700">Tracto</label>
                     <select id="nuevo-tracto-select" name="tracto"
@@ -352,11 +362,12 @@
                         data-placeholder="Selecciona tracto...">
                         <option value="">Selecciona tracto...</option>
                         <option value="Si">Si</option>
-                        <option value="No">No</option>
+                        <option value="No" selected>No</option>
                     </select>
                 </div>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+                <p id="nueva-placa-error" class="mr-auto hidden text-sm text-red-600" role="alert"></p>
                 <button type="button"
                     class="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-100"
                     onclick="cerrarModalPlaca()">Cancelar</button>
@@ -364,6 +375,7 @@
                     class="rounded-md border-0 px-4 py-2 text-xs font-semibold text-white shadow-sm transition duration-200"
                     style="background-color: #c1121f;" onclick="guardarNuevaPlaca()">Guardar</button>
             </div>
+            </form>
         </div>
     </div>
 
@@ -421,6 +433,7 @@
         // Referencias al DOM Modals
         const modalElement = document.getElementById('modalNuevaPlaca');
         const modalPlanesElement = document.getElementById('modalPlanes');
+        let placaConsultaController = null;
 
         document.addEventListener('DOMContentLoaded', function () {
             [modalElement, modalPlanesElement].forEach(modal => {
@@ -443,13 +456,98 @@
         }
 
         function cerrarModalPlaca() {
+            placaConsultaController?.abort();
+            placaConsultaController = null;
+            const form = document.getElementById('nueva-placa-form');
+            form?.reset();
+            form?.querySelectorAll('select').forEach(select => {
+                const tomSelect = select.tomselect || select.tomSelect || select._tomselect;
+                if (tomSelect && typeof tomSelect.setValue === 'function') {
+                    tomSelect.setValue(select.value);
+                }
+            });
+            document.getElementById('consulta-placa-error').textContent = '';
+            document.getElementById('consulta-placa-error').classList.add('hidden');
+            document.getElementById('nueva-placa-error').textContent = '';
+            document.getElementById('nueva-placa-error').classList.add('hidden');
+            document.querySelectorAll('#modalNuevaPlaca .suggestion-list').forEach(list => list.classList.add('hidden'));
+            const consultButton = document.getElementById('consultar-placa-btn');
+            consultButton.disabled = false;
+            document.getElementById('consultar-placa-text').textContent = consultButton.dataset.consultLabel;
             modalElement.classList.add('hidden');
             modalElement.classList.remove('flex');
             document.body.style.overflow = '';
-            document.getElementById('nueva-placa-input').value = '';
+        }
+
+        async function consultarNuevaPlaca() {
+            const button = document.getElementById('consultar-placa-btn');
+            const placa = document.getElementById('nueva-placa-input').value.trim();
+            const errorElement = document.getElementById('consulta-placa-error');
+            errorElement.textContent = '';
+            errorElement.classList.add('hidden');
+
+            if (!placa) {
+                document.getElementById('nueva-placa-input').reportValidity();
+                return;
+            }
+
+            placaConsultaController?.abort();
+            const controller = new AbortController();
+            placaConsultaController = controller;
+            button.disabled = true;
+            document.getElementById('consultar-placa-text').textContent = 'Consultando...';
+
+            try {
+                const response = await fetch(`{{ route('api.consultar.placa') }}?placa=${encodeURIComponent(placa)}`, {
+                    headers: { 'Accept': 'application/json' },
+                    signal: controller.signal
+                });
+                const data = await response.json();
+
+                if (response.ok && data?.status === 'success' && data?.data) {
+                    const result = data.data;
+                    ['anio', 'marca', 'modelo', 'tipoUnidad_idtable1'].forEach(fieldName => {
+                        const field = document.getElementById(fieldName === 'tipoUnidad_idtable1'
+                            ? 'nuevo-tipo-vehiculo-select'
+                            : `nuevo-${fieldName}-input`);
+                        if (!field) return;
+
+                        const value = result[fieldName] ?? result[fieldName.toLowerCase()] ?? '';
+                        const tomSelect = field.tomselect || field.tomSelect || field._tomselect;
+                        if (tomSelect && typeof tomSelect.setValue === 'function') {
+                            tomSelect.setValue(String(value));
+                        } else {
+                            field.value = value;
+                        }
+                        field.dispatchEvent(new Event('input', { bubbles: true }));
+                        field.dispatchEvent(new Event('change', { bubbles: true }));
+                    });
+                } else {
+                    errorElement.textContent = data?.message || 'No se pudo obtener información de la placa.';
+                    errorElement.classList.remove('hidden');
+                }
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    console.error('Error al consultar placa:', error);
+                    errorElement.textContent = 'No se pudo obtener información de la placa.';
+                    errorElement.classList.remove('hidden');
+                }
+            } finally {
+                if (placaConsultaController === controller) {
+                    button.disabled = false;
+                    document.getElementById('consultar-placa-text').textContent = button.dataset.consultLabel;
+                    placaConsultaController = null;
+                }
+            }
         }
 
         async function guardarNuevaPlaca() {
+            const form = document.getElementById('nueva-placa-form');
+            const errorElement = document.getElementById('nueva-placa-error');
+            errorElement.textContent = '';
+            errorElement.classList.add('hidden');
+            if (!form.reportValidity()) return;
+
             const placa = document.getElementById('nueva-placa-input').value.trim().toUpperCase();
             const ticketId = document.getElementById('erp-lock-id')?.value || '{{ $ticket->idticket ?? "" }}';
             const clienteId = document.getElementById('nuevo-cliente-select')?.value || '{{ $clienteId ?? "" }}';
@@ -503,7 +601,11 @@
                 }
 
                 if (!response.ok) {
-                    console.warn(data?.message || 'No se pudo guardar la placa. El servidor respondió con un error.');
+                    const validationMessage = data?.errors
+                        ? Object.values(data.errors).flat().join(' ')
+                        : '';
+                    errorElement.textContent = validationMessage || data?.message || 'No se pudo guardar la placa. El servidor respondió con un error.';
+                    errorElement.classList.remove('hidden');
                     return;
                 }
 
@@ -533,12 +635,17 @@
 
                     cerrarModalPlaca();
                 } else {
-                    console.warn(data?.message || 'Error al guardar la placa.');
+                    errorElement.textContent = data?.message || 'Error al guardar la placa.';
+                    errorElement.classList.remove('hidden');
                 }
             } catch (error) {
                 console.error('Error:', error);
+                errorElement.textContent = 'No se pudo guardar el vehículo. Inténtalo nuevamente.';
+                errorElement.classList.remove('hidden');
             }
         }
+
+        document.getElementById('consultar-placa-btn').addEventListener('click', consultarNuevaPlaca);
 
         // ==========================================
         // LÓGICA PARA EXCLUSIVIDAD DE PLACAS Y NÚMEROS

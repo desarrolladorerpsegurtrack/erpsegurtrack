@@ -1327,14 +1327,14 @@ class CxcPaymentBreakdownTest extends TestCase
             ->get();
         $this->assertSame(['2026-12-14', '2027-01-26'], $separatePeriodSuccessors->pluck('fechaCancelacion')->all());
 
-        DB::table('cliente')->where('idcliente', 'CLIENTE-1')->update(['detraccion' => '1']);
+        DB::table('cliente')->where('idcliente', 'CLIENTE-1')->update(['detraccion' => '0']);
         $partialCxcId = DB::table('cuentasporcobrar')->insertGetId([
             'cliente_idcliente' => 'CLIENTE-1',
             'tipoCobro_idtipoCobros' => 5,
             'moneda_idmoneda' => 1,
             'descripcion' => 'Cobro por servicio SC-41',
-            'montoOriginal' => 1000,
-            'montoActual' => 1000,
+            'montoOriginal' => 845,
+            'montoActual' => 845,
             'fechaCancelacion' => '2026-11-27',
             'estado' => 'FACTURADO',
         ]);
@@ -1344,17 +1344,17 @@ class CxcPaymentBreakdownTest extends TestCase
             'tipoCobro_idtipoCobros' => 5,
             'moneda_idmoneda' => 1,
             'modo_pago' => 'parcial',
-            'montoPago' => 50,
-            'monto_factura' => 1000,
+            'montoPago' => 700,
+            'monto_factura' => 845,
             'fechaPago' => '2026-11-02',
             'docReferencia' => 'F001-1000',
             'descripcion' => 'Abono parcial de servicio',
             'servicio_ids' => [41],
             'renewal_cxc_id' => $partialCxcId,
         ]);
-        $this->assertSame(950.0, (float) DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $partialCxcId)->value('montoActual'));
+        $this->assertSame(145.0, (float) DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $partialCxcId)->value('montoActual'));
         $this->assertSame('Pendiente Pago parcial', DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $partialCxcId)->value('estado'));
-        $this->assertSame(50.0, (float) DB::table('bancos')->where('informacion', 'Pago Servicio - PLACA-41 (Abono parcial de servicio)')->value('monto'));
+        $this->assertSame(700.0, (float) DB::table('bancos')->where('informacion', 'Pago Servicio - PLACA-41 (Abono parcial de servicio)')->value('monto'));
         $this->assertSame(0, DB::table('bancos')->where('tipoMov', 'T')->count());
 
         try {
@@ -1363,14 +1363,18 @@ class CxcPaymentBreakdownTest extends TestCase
                 'formaPago_idformaPago' => 1,
                 'moneda_idmoneda' => 1,
                 'modo_pago' => 'parcial',
-                'montoPago' => 949,
+                'montoPago' => 43.6,
                 'completar_pago_parcial' => true,
+                'withholding_decision' => 'paid',
                 'aplicar_deduccion' => false,
                 'fechaPago' => '2026-11-03',
             ]);
-            $this->fail('El pago pendiente debe rechazar montos menores al saldo total.');
+            $this->fail('El pago pendiente debe separar el efectivo de la detracción.');
         } catch (\RuntimeException $exception) {
-            $this->assertSame('El monto registrado debe coincidir con el saldo pendiente actual.', $exception->getMessage());
+            $this->assertSame(
+                'El efectivo pendiente debe ser S/ 44.00; la detracción/retención pendiente es S/ 101.00.',
+                $exception->getMessage()
+            );
         }
 
         (new CxcService())->procesarPagoGrupo([$partialCxcId], [
@@ -1378,13 +1382,217 @@ class CxcPaymentBreakdownTest extends TestCase
             'formaPago_idformaPago' => 1,
             'moneda_idmoneda' => 1,
             'modo_pago' => 'parcial',
-            'montoPago' => 950,
+            'montoPago' => 44,
             'completar_pago_parcial' => true,
+            'withholding_decision' => 'pending',
             'aplicar_deduccion' => false,
             'fechaPago' => '2026-11-03',
         ]);
-        $this->assertSame(0.0, (float) DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $partialCxcId)->value('montoActual'));
-        $this->assertSame('3', DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $partialCxcId)->value('estado'));
+        $this->assertSame(101.0, (float) DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $partialCxcId)->value('montoActual'));
+        $this->assertSame('Pendiente a Detracción', DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $partialCxcId)->value('estado'));
+        $cashPaymentAmount = DB::table('detallecxc as detalle')
+            ->join('bancos as banco', 'banco.idbancos', '=', 'detalle.bancos_idbancos')
+            ->where('detalle.cuentasPorCobrar_idcuentasPorCobrar', $partialCxcId)
+            ->where('banco.tipoMov', 'I')
+            ->orderByDesc('detalle.iddetalleCXC')
+            ->value('banco.monto');
+        $this->assertSame(44.0, (float) $cashPaymentAmount);
+        $this->assertSame(0.0, (float) DB::table('bancos')->where('tipoMov', 'T')->sum('monto'));
+        (new CxcService())->registrarDetraccionPendiente(
+            $partialCxcId,
+            null,
+            null,
+            '',
+            '2026-11-04'
+        );
+        $this->assertSame(0.0, (float) DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $partialCxcId)
+            ->value('montoActual'));
+        $this->assertSame('3', DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $partialCxcId)
+            ->value('estado'));
+        $this->assertSame(101.0, (float) DB::table('bancos')->where('tipoMov', 'T')->sum('monto'));
+
+        $groupPartialCxcIds = [];
+        for ($vehicleIndex = 0; $vehicleIndex < 13; $vehicleIndex++) {
+            $groupPartialCxcIds[] = DB::table('cuentasporcobrar')->insertGetId([
+                'cliente_idcliente' => 'CLIENTE-1',
+                'tipoCobro_idtipoCobros' => 5,
+                'moneda_idmoneda' => 1,
+                'docReferencia' => 'F001-GROUP',
+                'descripcion' => 'Servicio agrupado ' . ($vehicleIndex + 1),
+                'montoOriginal' => 65,
+                'montoActual' => 65,
+                'fechaCancelacion' => '2026-11-27',
+                'estado' => 'FACTURADO',
+            ]);
+        }
+        (new CxcService())->procesarPagoGrupo($groupPartialCxcIds, [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'tipoCobro_idtipoCobros' => 5,
+            'moneda_idmoneda' => 1,
+            'modo_pago' => 'parcial',
+            'montoPago' => 700,
+            'monto_factura' => 845,
+            'fechaPago' => '2026-11-02',
+            'docReferencia' => 'F001-GROUP',
+            'aplicar_deduccion' => false,
+        ]);
+        $openGroupCxcIds = DB::table('cuentasporcobrar')
+            ->whereIn('idcuentasPorCobrar', $groupPartialCxcIds)
+            ->where('montoActual', '>', 0)
+            ->pluck('idcuentasPorCobrar')
+            ->map(fn($id): int => (int) $id)
+            ->all();
+        $this->assertCount(13, $openGroupCxcIds);
+        $this->assertSame(
+            13,
+            DB::table('cuentasporcobrar')
+                ->whereIn('idcuentasPorCobrar', $groupPartialCxcIds)
+                ->where('estado', 'Pendiente Pago parcial')
+                ->count()
+        );
+        $groupPaidBalances = DB::table('cuentasporcobrar')
+            ->whereIn('idcuentasPorCobrar', $groupPartialCxcIds)
+            ->orderBy('idcuentasPorCobrar')
+            ->pluck('montoActual')
+            ->map(fn($balance): float => (float) $balance)
+            ->all();
+        $this->assertLessThanOrEqual(
+            0.01,
+            max($groupPaidBalances) - min($groupPaidBalances),
+            implode(', ', $groupPaidBalances)
+        );
+        $this->assertEquals(
+            700.0,
+            round((float) DB::table('detallecxc as detalle')
+                ->join('bancos as banco', 'banco.idbancos', '=', 'detalle.bancos_idbancos')
+                ->whereIn('detalle.cuentasPorCobrar_idcuentasPorCobrar', $groupPartialCxcIds)
+                ->where('banco.tipoMov', 'I')
+                ->sum('banco.monto'), 2)
+        );
+        $groupPartialBalance = DB::table('cuentasporcobrar')
+            ->whereIn('idcuentasPorCobrar', $openGroupCxcIds)
+            ->sum('montoActual');
+        $this->assertSame(145.0, (float) $groupPartialBalance);
+        (new CxcService())->procesarPagoGrupo($openGroupCxcIds, [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'moneda_idmoneda' => 1,
+            'modo_pago' => 'parcial',
+            'montoPago' => 44,
+            'completar_pago_parcial' => true,
+            'partial_payment_original_gross' => 845,
+            'withholding_decision' => 'pending',
+            'fechaPago' => '2026-11-03',
+        ]);
+        $this->assertSame(101.0, round((float) DB::table('cuentasporcobrar')
+            ->whereIn('idcuentasPorCobrar', $openGroupCxcIds)
+            ->sum('montoActual'), 2));
+        $this->assertSame(
+            13,
+            DB::table('cuentasporcobrar')
+                ->whereIn('idcuentasPorCobrar', $openGroupCxcIds)
+                ->where('estado', 'Pendiente a Detracción')
+                ->count()
+        );
+
+        $pendingWithholdingCxcId = DB::table('cuentasporcobrar')->insertGetId([
+            'cliente_idcliente' => 'CLIENTE-1',
+            'tipoCobro_idtipoCobros' => 5,
+            'moneda_idmoneda' => 1,
+            'descripcion' => 'Cobro con detracción pendiente',
+            'montoOriginal' => 1000,
+            'montoActual' => 1000,
+            'fechaCancelacion' => '2026-11-27',
+            'estado' => 'FACTURADO',
+        ]);
+        (new CxcService())->procesarPagoGrupo([$pendingWithholdingCxcId], [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'moneda_idmoneda' => 1,
+            'modo_pago' => 'parcial',
+            'montoPago' => 500,
+            'fechaPago' => '2026-11-02',
+        ]);
+        (new CxcService())->procesarPagoGrupo([$pendingWithholdingCxcId], [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'moneda_idmoneda' => 1,
+            'modo_pago' => 'parcial',
+            'montoPago' => 380,
+            'completar_pago_parcial' => true,
+            'withholding_decision' => 'pending',
+            'fechaPago' => '2026-11-03',
+        ]);
+        $this->assertSame(120.0, (float) DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $pendingWithholdingCxcId)
+            ->value('montoActual'));
+        $this->assertSame('Pendiente a Detracción', DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $pendingWithholdingCxcId)
+            ->value('estado'));
+        (new CxcService())->registrarDetraccionPendiente(
+            $pendingWithholdingCxcId,
+            null,
+            null,
+            '',
+            '2026-11-04'
+        );
+        $this->assertSame(0.0, (float) DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $pendingWithholdingCxcId)
+            ->value('montoActual'));
+        $this->assertSame('3', DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $pendingWithholdingCxcId)
+            ->value('estado'));
+        $this->assertSame(221.0, (float) DB::table('bancos')->where('tipoMov', 'T')->sum('monto'));
+
+        DB::table('cliente')->where('idcliente', 'CLIENTE-1')->update(['detraccion' => '1']);
+        $pendingRetentionCxcId = DB::table('cuentasporcobrar')->insertGetId([
+            'cliente_idcliente' => 'CLIENTE-1',
+            'tipoCobro_idtipoCobros' => 5,
+            'moneda_idmoneda' => 1,
+            'descripcion' => 'Cobro con retención pendiente',
+            'montoOriginal' => 1000,
+            'montoActual' => 1000,
+            'fechaCancelacion' => '2026-11-27',
+            'estado' => 'FACTURADO',
+        ]);
+        (new CxcService())->procesarPagoGrupo([$pendingRetentionCxcId], [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'moneda_idmoneda' => 1,
+            'modo_pago' => 'parcial',
+            'montoPago' => 500,
+            'fechaPago' => '2026-11-02',
+        ]);
+        (new CxcService())->procesarPagoGrupo([$pendingRetentionCxcId], [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'moneda_idmoneda' => 1,
+            'modo_pago' => 'parcial',
+            'montoPago' => 470,
+            'completar_pago_parcial' => true,
+            'withholding_decision' => 'pending',
+            'fechaPago' => '2026-11-03',
+        ]);
+        $this->assertSame(30.0, (float) DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $pendingRetentionCxcId)
+            ->value('montoActual'));
+        $this->assertSame('Pendiente a Retención', DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $pendingRetentionCxcId)
+            ->value('estado'));
+        (new CxcService())->registrarDetraccionPendiente(
+            $pendingRetentionCxcId,
+            null,
+            null,
+            '',
+            '2026-11-04'
+        );
+        $this->assertSame('3', DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $pendingRetentionCxcId)
+            ->value('estado'));
+        $this->assertSame(251.0, (float) DB::table('bancos')->where('tipoMov', 'T')->sum('monto'));
 
         DB::table('cliente')->where('idcliente', 'CLIENTE-1')->update(['detraccion' => '0']);
         DB::table('moneda')->insert(['idmoneda' => 2, 'detalle' => 'Dolar', 'simbolo' => '$']);

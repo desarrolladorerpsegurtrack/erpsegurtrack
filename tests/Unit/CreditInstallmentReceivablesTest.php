@@ -67,6 +67,45 @@ class CreditInstallmentReceivablesTest extends TestCase
         $this->assertSame(['CCXC:10:2 SC-101', 'CCXC:10:3 SC-101'], $installments->pluck('descripcion')->all());
     }
 
+    public function test_credit_paid_amount_includes_initial_payment_and_paid_installments(): void
+    {
+        DB::table('cuentasporcobrar')->insert([
+            [
+                'idcuentasPorCobrar' => 10,
+                'cliente_idcliente' => 'C-1',
+                'moneda_idmoneda' => 1,
+                'descripcion' => 'Servicio SC-101',
+                'montoOriginal' => 150,
+                'montoActual' => 100,
+                'estado' => 'Pendiente a credito',
+            ],
+            [
+                'idcuentasPorCobrar' => 11,
+                'cliente_idcliente' => 'C-1',
+                'moneda_idmoneda' => 1,
+                'descripcion' => 'CCXC:10:2 SC-101',
+                'montoOriginal' => 40,
+                'montoActual' => 15,
+                'estado' => 'Pendiente cuota crédito',
+            ],
+            [
+                'idcuentasPorCobrar' => 12,
+                'cliente_idcliente' => 'C-1',
+                'moneda_idmoneda' => 1,
+                'descripcion' => 'CCXC:10:3 SC-101',
+                'montoOriginal' => 60,
+                'montoActual' => 60,
+                'estado' => 'Pendiente cuota crédito',
+            ],
+        ]);
+        $method = new \ReflectionMethod(CuentasPorCobrarService::class, 'creditPaidAmountsByParent');
+        $method->setAccessible(true);
+
+        $paidByParent = $method->invoke(new CuentasPorCobrarService(), [10]);
+
+        $this->assertSame([10 => 75.0], $paidByParent);
+    }
+
     public function test_month_filter_limits_visible_installments_but_preserves_all_parent_installments(): void
     {
         DB::table('cuentasporcobrar')->insert([
@@ -161,11 +200,15 @@ class CreditInstallmentReceivablesTest extends TestCase
             new Collection(),
             [],
             new Collection(),
-            [10 => [['id' => 11, 'number' => 2, 'amount' => 50, 'date' => '2026-09-10']]]
+            [10 => [['id' => 11, 'number' => 2, 'amount' => 50, 'date' => '2026-09-10']]],
+            [],
+            [10 => 50.0]
         );
 
         $this->assertCount(1, $groups);
         $this->assertSame(200.0, $groups[0]['monto_total']);
+        $this->assertSame(50.0, $groups[0]['monto_pagado']);
+        $this->assertSame(50.0, $groups[0]['tipos_servicios'][0]['monto_pagado']);
     }
 
     public function test_grouped_credit_first_installment_is_distributed_across_receivables(): void

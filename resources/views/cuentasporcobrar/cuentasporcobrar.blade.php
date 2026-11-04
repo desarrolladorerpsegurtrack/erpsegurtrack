@@ -718,7 +718,9 @@
                                                             data-client-retention="{{ !empty($clientGroup['es_retencion']) ? '1' : '0' }}"
                                                             data-client-name="{{ $clientGroup['cliente_nombre'] }}"
                                                             data-amount="{{ $clientGroup['monto_factura'] ?? $clientGroup['monto_total'] }}"
+                                                            data-withholding-gross="{{ $clientGroup['monto_servicios'] ?? $clientGroup['monto_total'] }}"
                                                             data-payment-amount="{{ $isWithholdingPendingGroup || mb_strtolower(trim((string) ($clientGroup['cxc_estado'] ?? '')), 'UTF-8') === 'pendiente pago parcial' ? ($clientGroup['monto_saldo'] ?? 0) : ($clientGroup['monto_factura'] ?? $clientGroup['monto_saldo']) }}"
+                                                            data-paid-amount="{{ preg_match('/^pendiente a cr[eé]dito/i', trim((string) ($clientGroup['cxc_estado'] ?? ''))) === 1 ? ($clientGroup['monto_pagado'] ?? 0) : max(0, (float) ($clientGroup['monto_servicios'] ?? 0) - (float) ($clientGroup['monto_saldo'] ?? 0)) }}"
                                                             data-amount-display="{{ $clientGroup['monto_total_display'] }}"
                                                             data-tipo-cobro-id="{{ $clientGroup['tipo_cobro_id'] ?? '' }}"
                                                             data-moneda-id="{{ $clientGroup['moneda_idmoneda'] ?? 1 }}"
@@ -864,13 +866,16 @@
                                                                                     data-client-retention="{{ !empty($clientGroup['es_retencion']) ? '1' : '0' }}"
                                                                                     data-client-name="{{ $clientGroup['cliente_nombre'] }}"
                                                                                     data-amount="{{ $typeGroup['monto_factura'] ?? $typeGroup['monto_subtotal'] }}"
+                                                                                    data-withholding-gross="{{ $typeGroup['monto_subtotal'] }}"
                                                                                     data-payment-amount="{{ $isTypeWithholdingPending || mb_strtolower(trim((string) ($typeGroup['cxc_estado'] ?? '')), 'UTF-8') === 'pendiente pago parcial' ? ($typeGroup['monto_saldo'] ?? 0) : ($typeGroup['monto_factura'] ?? $typeGroup['monto_saldo']) }}"
+                                                                                    data-paid-amount="{{ preg_match('/^pendiente a cr[eé]dito/i', trim((string) ($typeGroup['cxc_estado'] ?? ''))) === 1 ? ($typeGroup['monto_pagado'] ?? 0) : max(0, (float) ($typeGroup['monto_subtotal'] ?? 0) - (float) ($typeGroup['monto_saldo'] ?? 0)) }}"
                                                                                     data-amount-display="{{ $typeGroup['monto_subtotal_display'] }}"
                                                                                     data-tipo-cobro-id="{{ $typeGroup['tipo_cobro_id'] ?? ($clientGroup['tipo_cobro_id'] ?? '') }}"
                                                                                     data-moneda-id="{{ $clientGroup['moneda_idmoneda'] ?? 1 }}"
                                                                                     data-currency-symbol="{{ $clientGroup['moneda_simbolo'] ?? '$' }}"
                                                                                     data-cxc-id="{{ $typeGroup['cxc_id'] ?: $clientGroup['cxc_id'] }}"
                                                                                     data-cxc-ids="{{ $typeCxcIdsStr }}"
+                                                                                    data-payment-detail-cxc-ids="{{ implode(',', $typeGroup['payment_detail_cxc_ids'] ?? $clientGroup['payment_detail_cxc_ids'] ?? []) }}"
                                                                                     data-cxc-estado="{{ $typeGroup['cxc_estado'] }}"
                                                                                     data-advance-months="{{ $clientGroup['adelanto_meses'] ?? 0 }}"
                                                                                     data-credit-installment="{{ !empty($veh['service_credit_installment']) ? '1' : '0' }}"
@@ -981,7 +986,9 @@
                                                                                                                 value="{{ $veh['cxc_ids'][0] }}">
                                                                                                         @endif
                                                                                                         <span class="stair-vehicle-plate-text">{{ $veh['placa'] }}</span>
-                                                                                                        @if(in_array((string) ($veh['cxc_estado'] ?? ''), ['3', 'CANCELADO'], true))
+                                                                                                        @if(in_array((string) ($veh['cxc_estado'] ?? ''), ['3', 'CANCELADO'], true)
+                                                                                                            && mb_strtolower(trim((string) ($clientGroup['cxc_estado'] ?? '')), 'UTF-8') !== 'pendiente pago parcial'
+                                                                                                            && mb_strtolower(trim((string) ($typeGroup['cxc_estado'] ?? '')), 'UTF-8') !== 'pendiente pago parcial')
                                                                                                             <span
                                                                                                                 class="stair-vehicle-status inline-flex items-center rounded-full bg-danger px-1.5 py-0.5 text-[9px] font-bold text-white">Pagado</span>
                                                                                                         @elseif(in_array((string) ($veh['cxc_estado'] ?? ''), ['Pendiente a Detracción', 'Pendiente Autodetracción', 'Cancelado Detracción'], true))
@@ -1041,13 +1048,16 @@
                                                                                                         data-client-name="{{ $clientGroup['cliente_nombre'] }}"
                                                                                                         data-placa="{{ $veh['placa'] }}"
                                                                                                         data-amount="{{ $veh['monto'] }}"
+                                                                                                        data-withholding-gross="{{ $veh['monto'] }}"
                                                                                                         data-payment-amount="{{ $veh['monto_saldo'] }}"
+                                                                                                        data-paid-amount="{{ preg_match('/^pendiente a cr[eé]dito/i', trim((string) ($veh['cxc_estado'] ?? ''))) === 1 ? ($veh['monto_pagado'] ?? 0) : max(0, (float) $veh['monto'] - (float) $veh['monto_saldo']) }}"
                                                                                                         data-amount-display="{{ $veh['monto_display'] }}"
                                                                                                         data-tipo-cobro-id="{{ $veh['tipo_cobro_id'] ?? ($typeGroup['tipo_cobro_id'] ?? ($clientGroup['tipo_cobro_id'] ?? '')) }}"
                                                                                                         data-moneda-id="{{ $clientGroup['moneda_idmoneda'] ?? 1 }}"
                                                                                                         data-currency-symbol="{{ $clientGroup['moneda_simbolo'] ?? '$' }}"
                                                                                                         data-cxc-id="{{ $veh['cxc_ids'][0] ?? $clientGroup['cxc_id'] }}"
                                                                                                         data-cxc-ids="{{ implode(',', $veh['cxc_ids'] ?? []) }}"
+                                                                                                        data-payment-detail-cxc-ids="{{ implode(',', $veh['cxc_ids'] ?? []) }}"
                                                                                                         data-cxc-estado="{{ $veh['cxc_estado'] }}"
                                                                                                         data-advance-months="{{ $clientGroup['adelanto_meses'] ?? 0 }}"
                                                                                                         data-period-end="{{ $veh['fecha_fin_siguiente_iso'] ?? '' }}"
@@ -6824,11 +6834,18 @@
             document.getElementById('credit-note-selector-clear')?.addEventListener('click', clearCreditNoteSelection);
             document.getElementById('credit-note-selector-confirm')?.addEventListener('click', confirmCreditNoteSelection);
 
-            function openPartialPaymentModal(cxcId, cxcIds, serviceIds, clientName, balance, docRef, currencySymbol, monedaId, tipoCobroId = '', clientId = '', periodEnd = '') {
+            function openPartialPaymentModal(cxcId, cxcIds, serviceIds, clientName, balance, docRef, currencySymbol, monedaId, tipoCobroId = '', clientId = '', periodEnd = '', paidAmount = 0, grossAmount = 0, isRetention = false, originalCxcIds = []) {
                 const outstanding = Number(balance || 0);
+                const paid = Number(paidAmount || 0);
+                const gross = Number(grossAmount || 0);
+                const deductionPrecision = isRetention ? 100 : 1;
+                const deduction = (isRetention || gross >= 700)
+                    ? Math.round(gross * (isRetention ? 0.03 : 0.12) * deductionPrecision) / deductionPrecision
+                    : 0;
+                const cashDue = Math.max(0, outstanding - deduction);
                 const modal = document.getElementById('partial-payment-modal');
                 const form = document.getElementById('partial-payment-form');
-                if (!Number.isFinite(outstanding) || outstanding <= 0) {
+                if (!Number.isFinite(outstanding) || outstanding <= 0 || !Number.isFinite(paid) || !Number.isFinite(gross)) {
                     showServiceMessage('No se encontró un saldo pendiente válido para completar el pago.');
                     return;
                 }
@@ -6842,8 +6859,16 @@
                     document.getElementById('payment-date')?.value || '';
                 document.getElementById('partial-payment-period-end').value = periodEnd || '';
                 document.getElementById('partial-payment-reference').value = docRef || '-';
-                document.getElementById('partial-payment-amount').value = outstanding.toFixed(2);
+                document.getElementById('partial-payment-amount').value = cashDue.toFixed(2);
                 document.getElementById('partial-payment-currency').textContent = currencySymbol || 'S/';
+                document.getElementById('partial-payment-paid-amount').value = paid.toFixed(2);
+                document.getElementById('partial-payment-paid-currency').textContent = currencySymbol || 'S/';
+                const withholdingMessage = document.getElementById('partial-payment-withholding-message');
+                withholdingMessage.textContent = deduction > 0
+                    ? `${isRetention ? 'Retención' : 'Detracción'} pendiente: ${currencySymbol || 'S/'} ${deduction.toFixed(2)}`
+                    : '';
+                withholdingMessage.classList.toggle('hidden', deduction <= 0);
+                document.getElementById('partial-payment-withholding-decision').value = deduction > 0 ? 'pending' : '';
                 document.getElementById('partial-payment-description').value = '';
                 document.getElementById('partial-payment-comprobante').value = '';
                 document.getElementById('partial-payment-comprobante-name').textContent = '';
@@ -6861,6 +6886,15 @@
                         const input = document.createElement('input');
                         input.type = 'hidden';
                         input.name = 'servicio_ids[]';
+                        input.value = id;
+                        return input;
+                    })
+                );
+                document.getElementById('partial-payment-original-cxc').replaceChildren(
+                    ...[...new Set([...(originalCxcIds || []), ...(cxcIds || []), cxcId].filter(Boolean))].map(id => {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = 'partial_original_cxc_ids[]';
                         input.value = id;
                         return input;
                     })
@@ -7740,6 +7774,8 @@
                         ))];
                         const amount = vehicles.reduce((total, { action }) =>
                             total + Number(action.dataset.paymentAmount || action.dataset.amount || 0), 0);
+                        const paidAmount = vehicles.reduce((total, { action }) =>
+                            total + Number(action.dataset.paidAmount || 0), 0);
                         const withholdingStates = [
                             'CANCELADO DETRACCIÓN',
                             'PENDIENTE AUTODETRACCIÓN',
@@ -7782,7 +7818,11 @@
                                 firstAction.dataset.monedaId || '',
                                 firstAction.dataset.tipoCobroId || '',
                                 firstAction.dataset.clientId || '',
-                                firstAction.dataset.nextPeriodEnd || firstAction.dataset.periodEnd || ''
+                                firstAction.dataset.nextPeriodEnd || firstAction.dataset.periodEnd || '',
+                                vehicles.reduce((total, { action }) => total + Number(action.dataset.paidAmount || 0), 0),
+                                vehicles.reduce((total, { action }) => total + Number(action.dataset.withholdingGross || action.dataset.amount || 0), 0),
+                                firstAction.dataset.clientRetention === '1',
+                                (firstAction.dataset.paymentDetailCxcIds || '').split(',').filter(Boolean)
                             );
                             return;
                         }
@@ -7830,7 +7870,12 @@
                                 clientId,
                                 firstPeriodEnd,
                                 cxcIds,
-                                0
+                                0,
+                                false,
+                                'detracción',
+                                [],
+                                paidAmount,
+                                firstAction.dataset.cxcEstado || ''
                             );
                         }
                     });
@@ -7875,10 +7920,10 @@
                         const tipoCobroId = this.dataset.tipoCobroId || '';
                         if (openNextCreditInstallmentPayment(this, clientName)) return;
                         if (isWithholdingPending) {
-                            openCustomPaymentModal(serviceIds, cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, 0, true, withholdingType);
+                            openCustomPaymentModal(serviceIds, cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, 0, true, withholdingType, [], Number(this.dataset.paidAmount || 0), cxcEstado);
                         } else if (isCancelado) {
                             const paymentDetailCxcIds = (this.dataset.paymentDetailCxcIds || '').split(',').filter(Boolean);
-                            openCustomPaymentModal(serviceIds, cxcId, clientName, amount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', true, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0), false, 'detracción', paymentDetailCxcIds);
+                            openCustomPaymentModal(serviceIds, cxcId, clientName, amount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', true, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0), false, 'detracción', paymentDetailCxcIds, Number(this.dataset.paidAmount || 0), cxcEstado);
                         } else if (cxcEstado === 'PENDIENTE PAGO PARCIAL') {
                             openPartialPaymentModal(
                                 cxcId,
@@ -7891,12 +7936,16 @@
                                 this.dataset.monedaId || '',
                                 tipoCobroId,
                                 clientId,
-                                this.dataset.nextPeriodEnd || this.dataset.periodEnd || ''
+                                this.dataset.nextPeriodEnd || this.dataset.periodEnd || '',
+                                Number(this.dataset.paidAmount || 0),
+                                Number(this.dataset.withholdingGross || this.dataset.amount || 0),
+                                this.dataset.clientRetention === '1',
+                                (this.dataset.paymentDetailCxcIds || '').split(',').filter(Boolean)
                             );
                         } else if (['1', '4', 'PENDIENTE', 'VENCIDO'].includes(cxcEstado) || !docRef) {
                             openFacturaModal(cxcId, clientName, amount, docRef, '', this.dataset.amountDisplay || '', this.dataset.monedaId || '', this.dataset.currencySymbol || '', serviceIds, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds);
                         } else {
-                            openCustomPaymentModal(serviceIds, cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0));
+                            openCustomPaymentModal(serviceIds, cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0), false, 'detracción', [], Number(this.dataset.paidAmount || 0), cxcEstado);
                         }
                     });
                 });
@@ -8085,7 +8134,12 @@
                     '',
                     '',
                     targetCxcIds,
-                    0
+                    0,
+                    false,
+                    'detracción',
+                    [],
+                    Number(button.dataset.paidAmount || 0),
+                    button.dataset.cxcEstado || ''
                 );
                 const modal = document.getElementById('service-payment-modal');
                 const fixedMethod = document.getElementById('payment-fixed-method');
@@ -8227,9 +8281,9 @@
                         const tipoCobroId = this.dataset.tipoCobroId || '';
                         if (openNextCreditInstallmentPayment(this, clientName)) return;
                         if (isWithholdingPending) {
-                            openCustomPaymentModal(serviceIds, cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, 0, true, withholdingType);
+                            openCustomPaymentModal(serviceIds, cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, 0, true, withholdingType, [], Number(this.dataset.paidAmount || 0), cxcEstado);
                         } else if (isCancelado) {
-                            openCustomPaymentModal(serviceIds, cxcId, clientName, amount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', true, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0));
+                            openCustomPaymentModal(serviceIds, cxcId, clientName, amount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', true, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0), false, 'detracción', [], Number(this.dataset.paidAmount || 0), cxcEstado);
                         } else if (cxcEstado === 'PENDIENTE PAGO PARCIAL') {
                             openPartialPaymentModal(
                                 cxcId,
@@ -8242,12 +8296,16 @@
                                 this.dataset.monedaId || '',
                                 tipoCobroId,
                                 clientId,
-                                this.dataset.nextPeriodEnd || this.dataset.periodEnd || ''
+                                this.dataset.nextPeriodEnd || this.dataset.periodEnd || '',
+                                Number(this.dataset.paidAmount || 0),
+                                Number(this.dataset.withholdingGross || this.dataset.amount || 0),
+                                this.dataset.clientRetention === '1',
+                                (this.dataset.paymentDetailCxcIds || '').split(',').filter(Boolean)
                             );
                         } else if (['1', '4', 'PENDIENTE', 'VENCIDO'].includes(cxcEstado) || !docRef) {
                             openFacturaModal(cxcId, clientName, amount, docRef, '', this.dataset.amountDisplay || '', this.dataset.monedaId || '', this.dataset.currencySymbol || '', serviceIds, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds);
                         } else {
-                            openCustomPaymentModal(serviceIds, cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0));
+                            openCustomPaymentModal(serviceIds, cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0), false, 'detracción', [], Number(this.dataset.paidAmount || 0), cxcEstado);
                         }
                     });
                 });
@@ -8271,9 +8329,9 @@
                         const tipoCobroId = this.dataset.tipoCobroId || '';
                         if (openNextCreditInstallmentPayment(this, clientName)) return;
                         if (isWithholdingPending) {
-                            openCustomPaymentModal(serviceId ? [serviceId] : [], cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, 0, true, withholdingType);
+                            openCustomPaymentModal(serviceId ? [serviceId] : [], cxcId, clientName, paymentAmount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, 0, true, withholdingType, [], Number(this.dataset.paidAmount || 0), cxcEstado);
                         } else if (isCancelado) {
-                            openCustomPaymentModal(serviceId ? [serviceId] : [], cxcId, clientName, amount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', true, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0));
+                            openCustomPaymentModal(serviceId ? [serviceId] : [], cxcId, clientName, amount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', true, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0), false, 'detracción', [], Number(this.dataset.paidAmount || 0), cxcEstado);
                         } else if (cxcEstado === 'PENDIENTE PAGO PARCIAL') {
                             openPartialPaymentModal(
                                 cxcId,
@@ -8286,12 +8344,16 @@
                                 this.dataset.monedaId || '',
                                 tipoCobroId,
                                 clientId,
-                                this.dataset.nextPeriodEnd || this.dataset.periodEnd || ''
+                                this.dataset.nextPeriodEnd || this.dataset.periodEnd || '',
+                                Number(this.dataset.paidAmount || 0),
+                                Number(this.dataset.withholdingGross || this.dataset.amount || 0),
+                                this.dataset.clientRetention === '1',
+                                (this.dataset.paymentDetailCxcIds || '').split(',').filter(Boolean)
                             );
                         } else if (['1', '4', 'PENDIENTE', 'VENCIDO', 'PENDIENTE A CREDITO'].includes(cxcEstado) || !docRef) {
                             openFacturaModal(cxcId, clientName, amount, docRef, '', this.dataset.amountDisplay || '', this.dataset.monedaId || '', this.dataset.currencySymbol || '', serviceId ? [serviceId] : [], tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds);
                         } else if (serviceId) {
-                            openCustomPaymentModal([serviceId], cxcId, clientName, amount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0));
+                            openCustomPaymentModal([serviceId], cxcId, clientName, amount, docRef, this.dataset.amountDisplay || '', this.dataset.monedaId || '', false, tipoCobroId, clientId, this.dataset.nextPeriodEnd || this.dataset.periodEnd || '', cxcIds, Number(this.dataset.advanceMonths || 0), false, 'detracción', [], Number(this.dataset.paidAmount || 0), cxcEstado);
                         }
                     });
                 });
@@ -8639,7 +8701,7 @@
                 });
             }
 
-            async function openCustomPaymentModal(serviceIds, cxcId, clientName, amount, docRef = '', amountDisplay = '', monedaId = '', isViewOnly = false, tipoCobroId = '', clientId = '', periodEnd = '', cxcIds = [], advanceMonths = 0, isPendingWithholding = false, withholdingType = 'detracción', paymentDetailCxcIds = []) {
+            async function openCustomPaymentModal(serviceIds, cxcId, clientName, amount, docRef = '', amountDisplay = '', monedaId = '', isViewOnly = false, tipoCobroId = '', clientId = '', periodEnd = '', cxcIds = [], advanceMonths = 0, isPendingWithholding = false, withholdingType = 'detracción', paymentDetailCxcIds = [], paidAmount = 0, cxcState = '') {
                 const servicePaymentModal = document.getElementById('service-payment-modal');
                 if (!servicePaymentModal) return;
                 const requestToken = ++paymentDetailsRequestToken;
@@ -8690,6 +8752,18 @@
                 if (paymentOriginal) paymentOriginal.value = Number(amount || 0).toFixed(2);
                 if (paymentOriginalCurrency) paymentOriginalCurrency.textContent = resolvedCurrencySymbol || 'S/';
                 if (paymentAmountCurrency) paymentAmountCurrency.textContent = resolvedCurrencySymbol || 'S/';
+                const paymentAlreadyPaid = document.getElementById('payment-already-paid');
+                const paymentAlreadyPaidCurrency = document.getElementById('payment-already-paid-currency');
+                const paymentAlreadyPaidField = document.getElementById('payment-already-paid-field');
+                const paymentAmountsRow = document.getElementById('payment-amounts-row');
+                const normalizedCxcState = String(cxcState || '').trim().toUpperCase();
+                const isInvoiced = normalizedCxcState === '2' || normalizedCxcState === 'FACTURADO';
+                const hasPreviousPayment = !isViewOnly && !isInvoiced && Number(paidAmount) > 0.009;
+                paymentAlreadyPaidField?.classList.toggle('hidden', !hasPreviousPayment);
+                paymentAmountsRow?.classList.toggle('grid-cols-2', hasPreviousPayment);
+                paymentAmountsRow?.classList.toggle('grid-cols-1', !hasPreviousPayment);
+                if (paymentAlreadyPaid) paymentAlreadyPaid.textContent = Number(paidAmount || 0).toFixed(2);
+                if (paymentAlreadyPaidCurrency) paymentAlreadyPaidCurrency.textContent = resolvedCurrencySymbol || 'S/';
                 servicePaymentModal.dataset.paymentDisplayAmount = amountDisplay || formatMoney(amount, resolvedCurrencySymbol);
                 servicePaymentModal.dataset.expectedCashDue = String(amount || 0);
                 setPaymentType(tipoCobroId);
@@ -9889,7 +9963,14 @@
                 const grossDueInPaymentCurrency = isOtherCurrency
                     ? gestionConvertAmount(grossDueAfterCredits, paymentCurrencyOption, exchangeRate)
                     : grossDueAfterCredits;
-                if (netDueInPaymentCurrency === null || grossDueInPaymentCurrency === null) {
+                const withholdingDueInPaymentCurrency = isOtherCurrency
+                    ? gestionConvertAmount(gestionDeductionAmount, paymentCurrencyOption, exchangeRate)
+                    : gestionDeductionAmount;
+                if (
+                    netDueInPaymentCurrency === null
+                    || grossDueInPaymentCurrency === null
+                    || withholdingDueInPaymentCurrency === null
+                ) {
                     gestionBalanceSummary.replaceChildren();
                     gestionBalanceSummary.classList.add('hidden');
                     return;
@@ -9914,7 +9995,7 @@
                 }
                 gestionBalanceSummary.replaceChildren();
                 const remainingLabel = document.createElement('span');
-                remainingLabel.textContent = `Saldo restante: ${formatMoney(remaining, currencySymbol)}`;
+                remainingLabel.textContent = `Saldo pendiente: ${formatMoney(remaining, currencySymbol)}`;
                 gestionBalanceSummary.append(remainingLabel);
                 if (remaining <= 0.005 && newCredit > 0.005) {
                     const separator = document.createElement('span');
@@ -11588,19 +11669,30 @@
                                     Saldo a favor
                                 </button>
                             </div>
-                            <div id="payment-original-input-shell" class="flex items-center gap-2">
-                                <div
-                                    class="flex min-w-0 flex-1 items-center rounded-lg border border-slate-300 bg-white px-2.5 focus-within:border-red-600 focus-within:ring-2 focus-within:ring-red-600/20">
-                                    <span id="payment-original-currency"
-                                        class="mr-1.5 shrink-0 text-sm font-bold text-slate-700">S/</span>
-                                    <input id="payment-original" type="number" min="0.01" step="0.01" required
-                                        class="w-full min-w-0 border-0 bg-transparent p-2 text-sm font-bold text-slate-900 outline-none focus:border-0 focus:ring-0">
+                            <div id="payment-amounts-row" class="grid grid-cols-1 gap-2">
+                                <div id="payment-original-input-shell" class="flex min-w-0 items-center gap-2">
+                                    <div
+                                        class="flex min-w-0 flex-1 items-center rounded-lg border border-slate-300 bg-white px-2.5 focus-within:border-red-600 focus-within:ring-2 focus-within:ring-red-600/20">
+                                        <span id="payment-original-currency"
+                                            class="mr-1.5 shrink-0 text-sm font-bold text-slate-700">S/</span>
+                                        <input id="payment-original" type="number" min="0.01" step="0.01" required
+                                            class="w-full min-w-0 border-0 bg-transparent p-2 text-sm font-bold text-slate-900 outline-none focus:border-0 focus:ring-0">
+                                    </div>
+                                    <button type="button" id="btn-payment-advance-toggle"
+                                        class="shrink-0 rounded-md px-2.5 py-1 text-xs font-bold text-white transition-all hover:opacity-90 shadow-sm"
+                                        style="background-color: #334155;" aria-expanded="false">
+                                        Pagar adelantado
+                                    </button>
                                 </div>
-                                <button type="button" id="btn-payment-advance-toggle"
-                                    class="shrink-0 rounded-md px-2.5 py-1 text-xs font-bold text-white transition-all hover:opacity-90 shadow-sm"
-                                    style="background-color: #334155;" aria-expanded="false">
-                                    Pagar adelantado
-                                </button>
+                                <div id="payment-already-paid-field" class="hidden block min-w-0 text-xs font-semibold text-slate-600">
+                                    Monto ya pagado
+                                    <div class="mt-1 flex items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5">
+                                        <span id="payment-already-paid-currency"
+                                            class="mr-1.5 shrink-0 text-sm font-bold text-slate-700">S/</span>
+                                        <span id="payment-already-paid"
+                                            class="w-full min-w-0 p-2 text-sm font-bold text-slate-800">0.00</span>
+                                    </div>
+                                </div>
                             </div>
                             <p id="payment-amount-summary" class="hidden mt-1 text-xs font-medium text-danger"
                                 aria-live="polite"></p>
@@ -11860,6 +11952,7 @@
                 @csrf
                 <input type="hidden" name="idcuentasPorCobrar" id="partial-payment-cxc-id">
                 <input type="hidden" name="moneda_idmoneda" id="partial-payment-moneda-id">
+                <div id="partial-payment-original-cxc"></div>
                 <input type="hidden" name="completar_pago_parcial" value="1">
                 <input type="hidden" name="modo_pago" value="parcial">
                 <input type="hidden" name="payment_currency_mode" value="same">
@@ -11882,6 +11975,7 @@
                 </select>
                 <div id="partial-payment-selected-cxc"></div>
                 <div id="partial-payment-selected-services"></div>
+                <input id="partial-payment-withholding-decision" name="withholding_decision" type="hidden" value="">
                 <div class="erp-modal-body p-6">
                     <label class="block text-xs font-semibold text-slate-600 partial-payment-full">
                         Cliente
@@ -11899,7 +11993,7 @@
                             value="{{ now()->format('Y-m-d') }}"
                             class="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-700">
                     </label>
-                    <label for="partial-payment-reference" class="block text-xs font-semibold text-slate-600">
+                    <label for="partial-payment-reference" class="block text-xs font-semibold text-slate-600 partial-payment-full">
                         Documento de referencia
                         <input id="partial-payment-reference" name="docReferencia" readonly
                             class="mt-1 w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm font-bold text-slate-800">
@@ -11909,6 +12003,16 @@
                         <div class="mt-1 flex items-center rounded-lg border border-slate-200 bg-slate-50 px-2">
                             <span id="partial-payment-currency" class="mr-1.5 shrink-0 text-sm font-bold text-slate-700">S/</span>
                             <input id="partial-payment-amount" name="montoPago" type="number" step="0.01" readonly
+                                class="w-full border-0 bg-transparent p-2 text-sm font-bold text-slate-800 outline-none">
+                        </div>
+                        <span id="partial-payment-withholding-message"
+                            class="mt-1 block text-xs font-semibold text-danger hidden"></span>
+                    </label>
+                    <label for="partial-payment-paid-amount" class="block text-xs font-semibold text-slate-600">
+                        Monto ya pagado
+                        <div class="mt-1 flex items-center rounded-lg border border-slate-200 bg-slate-50 px-2">
+                            <span id="partial-payment-paid-currency" class="mr-1.5 shrink-0 text-sm font-bold text-slate-700">S/</span>
+                            <input id="partial-payment-paid-amount" type="number" step="0.01" readonly
                                 class="w-full border-0 bg-transparent p-2 text-sm font-bold text-slate-800 outline-none">
                         </div>
                     </label>
@@ -12465,7 +12569,7 @@
                             </div>
                             <p id="erp-gestion-withholding-summary" class="mt-1 hidden rounded-lg text-xs text-danger"
                                 aria-live="polite"></p>
-                            <p id="erp-gestion-balance-summary" class="mt-1 text-xs font-semibold text-slate-600"
+                            <p id="erp-gestion-balance-summary" class="mt-1 text-xs font-bold text-slate-800"
                                 aria-live="polite"></p>
                         </div>
                         <input type="checkbox" id="gestion-use-credit" name="usar_saldo_favor" value="1" class="hidden">

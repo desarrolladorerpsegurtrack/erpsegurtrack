@@ -1393,6 +1393,50 @@ class CxcLargeFleetGestionTest extends TestCase
         $this->assertSame([], $group['payment_service_ids']);
     }
 
+    public function test_factured_service_with_recorded_partial_payment_is_shown_as_partial(): void
+    {
+        Carbon::setTestNow('2026-10-24 12:00:00');
+
+        try {
+            $clientId = 'CLI-PARTIAL-FACTURED';
+            DB::table('cliente')->insert([
+                'idcliente' => $clientId,
+                'detraccion' => '0',
+                'flag_integrador' => 0,
+                'razonSocial' => 'Cliente con pago parcial',
+            ]);
+
+            $fleet = $this->seedFleet($clientId, 1, 0, 1000.0);
+            DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $fleet['cxcId'])->update([
+                'estado' => 'FACTURADO',
+                'docReferencia' => 'F001-500',
+                'montoActual' => 500.0,
+            ]);
+            DB::table('detallecxc')->insert([
+                'formaPago_idformaPago' => 1,
+                'cuentasPorCobrar_idcuentasPorCobrar' => $fleet['cxcId'],
+                'moneda_idmoneda' => 1,
+                'descripcion' => 'Abono parcial',
+                'fechaPagoProgramada' => '2026-10-24 12:00:00',
+                'fechaPago' => '2026-10-24 12:00:00',
+                'nCuota' => null,
+                'bancos_idbancos' => 1,
+                'estado' => '1',
+            ]);
+
+            $group = collect((new CuentasPorCobrarService())->prepareServicesIndex()['serviciosPorVencerGrouped'])
+                ->firstWhere('cliente_id', $clientId);
+
+            $this->assertNotNull($group);
+            $this->assertSame('Pendiente Pago parcial', $group['cxc_estado']);
+            $this->assertSame('Pendiente Pago parcial', $group['estado_pago']);
+            $this->assertSame(500.0, (float) $group['monto_saldo']);
+            $this->assertSame('Pendiente Pago parcial', $group['tipos_servicios'][0]['cxc_estado']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     #[DataProvider('documentedProcessStates')]
     public function test_50_vehicles_and_10_services_keep_their_process_when_20_new_vehicles_are_added(
         string $storedState,

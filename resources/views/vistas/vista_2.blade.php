@@ -16,7 +16,7 @@
 @endsection
 @section('content')
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3 border-b pb-2">
-        <h2 class="text-lg font-medium mr-auto">Confirmación de Asignación de Equipamiento</h2>
+        <h1 class="min-w-0 flex-1 truncate text-2xl font-semibold text-slate-900 mr-auto">Confirmación de Equipamiento</h1>
         @if(($vista->idvista ?? 0) >= 2 && ($vista->idvista ?? 0) <= 6)
             <form method="POST" action="{{ $advanceUrl ?? '#' }}" class="ml-auto" id="rechazar-form">
                 @csrf

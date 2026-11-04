@@ -13,7 +13,7 @@
     </nav>
 @endsection
 @section('content')
-    <h2 class="text-lg font-medium mb-5">{{ $title ?? 'Indicar Elementos' }}</h2>
+    <h1 class="min-w-0 flex-1 truncate text-2xl font-semibold text-slate-900 mb-5">{{ $title ?? 'Indicar Elementos' }}</h1>
     <div class="box box--stacked grid grid-cols-12">
         <div class="col-span-12">
             <!-- Bloque 1: Información de Cotizaciones -->

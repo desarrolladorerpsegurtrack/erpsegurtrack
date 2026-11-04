@@ -1291,7 +1291,7 @@ class TicketsController extends Controller
             'ticket_id' => 'required|integer|exists:ticket,idticket',
             'placa' => 'required|string|max:20',
             'cliente_idcliente' => 'required|string|max:20',
-            'tipoUnidad_idtable1' => 'nullable|exists:tipovehiculo,idtipoVehiculo',
+            'tipoUnidad_idtable1' => 'required|exists:tipovehiculo,idtipoVehiculo',
             'anio' => 'nullable|integer|min:1900|max:2100',
             'marca' => 'nullable|string|max:100',
             'modelo' => 'nullable|string|max:100',

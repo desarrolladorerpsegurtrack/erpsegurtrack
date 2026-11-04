@@ -225,14 +225,23 @@ class CuentasPorCobrarController extends Controller
                         'cxc_moneda.simbolo as cxc_moneda_simbolo',
                     ]);
             $quoteCxcById = [];
+            $fallbackQuoteCxcById = [];
             foreach ($quoteCxcRows as $cxc) {
-                $quoteId = str_starts_with((string) $cxc->descripcion, 'COTIZACION:')
-                    ? substr((string) $cxc->descripcion, strlen('COTIZACION:'))
-                    : trim((string) substr((string) $cxc->descripcion, strrpos((string) $cxc->descripcion, ' ') ?: 0));
-                if (in_array($quoteId, $quoteIds, true) && !isset($quoteCxcById[$quoteId])) {
+                $description = (string) $cxc->descripcion;
+                $isExactMarker = str_starts_with($description, 'COTIZACION:');
+                $quoteId = $isExactMarker
+                    ? substr($description, strlen('COTIZACION:'))
+                    : trim((string) substr($description, strrpos($description, ' ') ?: 0));
+                if (!in_array($quoteId, $quoteIds, true)) {
+                    continue;
+                }
+                if ($isExactMarker && !isset($quoteCxcById[$quoteId])) {
                     $quoteCxcById[$quoteId] = $cxc;
+                } elseif (!$isExactMarker && !isset($fallbackQuoteCxcById[$quoteId])) {
+                    $fallbackQuoteCxcById[$quoteId] = $cxc;
                 }
             }
+            $quoteCxcById += $fallbackQuoteCxcById;
             $cotizacionesPendientes->transform(function ($row) use ($quoteCxcById): mixed {
                 $cxc = $quoteCxcById[(string) $row->nroCotizacion] ?? null;
                 $row->cxc_id = $cxc->idcuentasPorCobrar ?? null;
@@ -445,8 +454,9 @@ class CuentasPorCobrarController extends Controller
         );
         $serviceStats = [
             ['label' => 'Total de grupos', 'value' => 0],
-            ['label' => 'Servicios activos', 'value' => 0],
+            ['label' => 'Servicios pendientes', 'value' => 0],
             ['label' => 'Servicios vencidos', 'value' => 0],
+            ['label' => 'Servicios cancelados', 'value' => 0],
         ];
         $serviceDataLoaded = $activeTab !== 'servicios' || $request->ajax();
 
@@ -456,10 +466,18 @@ class CuentasPorCobrarController extends Controller
             $serviciosPorVencerGrouped = $serviceIndexData['serviciosPorVencerGrouped'];
 
             $serviciosPorVencerGrouped = $this->filterServiceGroups($serviciosPorVencerGrouped, $serviceFilters);
+            $serviceGroups = collect($serviciosPorVencerGrouped);
+            $isCancelled = fn(array $group): bool =>
+                mb_strtolower(trim((string) ($group['estado_pago'] ?? ''))) === 'cancelado';
             $serviceStats = [
-                ['label' => 'Total de grupos', 'value' => count($serviciosPorVencerGrouped)],
-                ['label' => 'Servicios activos', 'value' => collect($serviciosPorVencerGrouped)->where('estado_servicio', 'activo')->count()],
-                ['label' => 'Servicios vencidos', 'value' => collect($serviciosPorVencerGrouped)->where('estado_servicio', 'vencido')->count()],
+                ['label' => 'Total de grupos', 'value' => $serviceGroups->count()],
+                ['label' => 'Servicios pendientes', 'value' => $serviceGroups->filter(
+                    fn(array $group): bool => !$isCancelled($group) && ($group['estado_servicio'] ?? '') === 'activo'
+                )->count()],
+                ['label' => 'Servicios vencidos', 'value' => $serviceGroups->filter(
+                    fn(array $group): bool => !$isCancelled($group) && ($group['estado_servicio'] ?? '') === 'vencido'
+                )->count()],
+                ['label' => 'Servicios cancelados', 'value' => $serviceGroups->filter($isCancelled)->count()],
             ];
 
             $serviciosPorVencerGrouped = new LengthAwarePaginator(
@@ -1426,6 +1444,7 @@ class CuentasPorCobrarController extends Controller
                 $marker = 'COTIZACION:' . $id;
                 $cxc = DB::table('cuentasporcobrar')
                     ->where('descripcion', $marker)
+                    ->orderByDesc('idcuentasPorCobrar')
                     ->lockForUpdate()
                     ->first();
                 if (!$cxc) {
@@ -1626,7 +1645,10 @@ class CuentasPorCobrarController extends Controller
                         $withholdingPreview['net'] - $selectedCreditNoteApplied - $selectedBankCreditApplied,
                         2
                     );
-                    if (($validated['modo_pago'] ?? 'total') === 'parcial') {
+                    if (!$hasInitialCreditPlan && $submittedAmount + 0.01 < $cashAfterWithholding) {
+                        $validated['modo_pago'] = 'parcial';
+                        $withholdingDecision = 'partial_pending';
+                    } elseif (($validated['modo_pago'] ?? 'total') === 'parcial') {
                         if ($submittedAmount + 0.01 >= $cashAfterWithholding) {
                             abort(422, 'El pago cubre el saldo neto de la cotización; regístralo como pago total y confirma la retención.');
                         }
@@ -1908,6 +1930,11 @@ class CuentasPorCobrarController extends Controller
         }
 
         $rows = $query->orderByDesc('c.fechaRegistro')->get();
+        $rows->transform(function ($row) {
+            $row->descripcion = CxcService::visibleServiceComment($row->descripcion);
+
+            return $row;
+        });
         $columns = [
             ['key' => 'idcuentasPorCobrar', 'label' => 'ID'],
             ['key' => 'cliente_idcliente', 'label' => 'Cliente'],
@@ -2896,12 +2923,19 @@ class CuentasPorCobrarController extends Controller
                         || ((int) $targetCxcId === (int) $id && !$realizarCobro && (int) ($validated['adelanto_meses'] ?? 0) > 1)
                     ) {
                         $description = $validated['descripcionFactura'] ?? '';
-                        $invoiceDescription = (int) $targetCxcId === (int) $id && !$realizarCobro
+                        $invoiceComment = (int) $targetCxcId === (int) $id && !$realizarCobro
                             ? CxcService::descriptionWithAdvanceMonths(
                                 $description,
                                 (int) ($validated['adelanto_meses'] ?? 0)
                             )
                             : mb_substr($description, 0, 100);
+                        $currentDescription = DB::table('cuentasporcobrar')
+                            ->where('idcuentasPorCobrar', $targetCxcId)
+                            ->value('descripcion');
+                        $invoiceDescription = CxcService::descriptionWithServiceComment(
+                            $currentDescription,
+                            $invoiceComment
+                        );
                         DB::table('cuentasporcobrar')
                             ->where('idcuentasPorCobrar', $targetCxcId)
                             ->update(['descripcion' => $invoiceDescription]);
@@ -3007,6 +3041,8 @@ class CuentasPorCobrarController extends Controller
         $validated = $request->validate([
             'cxc_ids' => ['nullable', 'array'],
             'cxc_ids.*' => ['integer', 'exists:cuentasporcobrar,idcuentasPorCobrar'],
+            'partial_original_cxc_ids' => ['nullable', 'array', 'max:500'],
+            'partial_original_cxc_ids.*' => ['integer', 'distinct', 'exists:cuentasporcobrar,idcuentasPorCobrar'],
             'period_cxc_ids' => ['nullable', 'array', 'max:50'],
             'period_cxc_ids.*' => ['integer', 'distinct', 'exists:cuentasporcobrar,idcuentasPorCobrar'],
             'nota_credito_ids' => ['nullable', 'array', 'max:1'],
@@ -3079,6 +3115,7 @@ class CuentasPorCobrarController extends Controller
             }
         }
 
+        $partialPaymentOriginalGross = null;
         try {
             if ($isWithholdingCompletion) {
                 $pendingCxcIds = array_values(array_unique(array_merge(
@@ -3126,15 +3163,76 @@ class CuentasPorCobrarController extends Controller
                 $partialCxcs = DB::table('cuentasporcobrar')
                     ->whereIn('idcuentasPorCobrar', $partialCxcIds)
                     ->lockForUpdate()
-                    ->get(['idcuentasPorCobrar', 'estado', 'montoActual']);
+                    ->get([
+                        'idcuentasPorCobrar',
+                        'cliente_idcliente',
+                        'moneda_idmoneda',
+                        'fechaCancelacion',
+                        'docReferencia',
+                        'estado',
+                        'montoOriginal',
+                        'montoActual',
+                    ]);
+                $allowedPartialGroupStates = [
+                    'pendiente pago parcial',
+                    'facturado',
+                    'vencido',
+                    'pendiente',
+                    '1',
+                    '2',
+                ];
                 if (
                     $partialCxcs->count() !== count($partialCxcIds)
                     || $partialCxcs->contains(fn($cxc): bool =>
-                        mb_strtolower(trim((string) $cxc->estado), 'UTF-8') !== 'pendiente pago parcial'
+                        !in_array(mb_strtolower(trim((string) $cxc->estado), 'UTF-8'), $allowedPartialGroupStates, true)
+                        || trim((string) $cxc->docReferencia) === ''
                         || (float) $cxc->montoActual <= 0
                     )
                 ) {
                     abort(422, 'La cuenta ya no tiene un saldo pendiente de pago parcial.');
+                }
+                $partialOriginalCxcIds = array_values(array_unique(array_map('intval', array_merge(
+                    $partialCxcIds,
+                    $validated['partial_original_cxc_ids'] ?? []
+                ))));
+                $partialOriginalCxcs = DB::table('cuentasporcobrar')
+                    ->whereIn('idcuentasPorCobrar', $partialOriginalCxcIds)
+                    ->get([
+                        'idcuentasPorCobrar',
+                        'cliente_idcliente',
+                        'moneda_idmoneda',
+                        'fechaCancelacion',
+                        'docReferencia',
+                        'montoOriginal',
+                    ]);
+                $firstPartialCxc = $partialCxcs->first();
+                if (
+                    !$firstPartialCxc
+                    || $partialOriginalCxcs->count() !== count($partialOriginalCxcIds)
+                    || $partialOriginalCxcs->contains(fn($cxc): bool =>
+                        (string) $cxc->cliente_idcliente !== (string) $firstPartialCxc->cliente_idcliente
+                        || (int) $cxc->moneda_idmoneda !== (int) $firstPartialCxc->moneda_idmoneda
+                        || substr((string) $cxc->fechaCancelacion, 0, 10) !== substr((string) $firstPartialCxc->fechaCancelacion, 0, 10)
+                        || trim((string) $cxc->docReferencia) !== trim((string) $firstPartialCxc->docReferencia)
+                    )
+                ) {
+                    abort(422, 'No se pudo verificar el monto original de las cuentas del pago parcial.');
+                }
+                $hasPriorPayment = DB::table('detallecxc')
+                    ->whereIn('cuentasPorCobrar_idcuentasPorCobrar', $partialOriginalCxcIds)
+                    ->where('estado', '1')
+                    ->exists();
+                if (!$hasPriorPayment) {
+                    abort(422, 'No se encontró un abono anterior para completar este pago parcial.');
+                }
+                $partialPaymentOriginalGross = round((float) $partialOriginalCxcs->sum(
+                    fn($cxc): float => max(0, (float) $cxc->montoOriginal)
+                ), 2);
+                $partialCurrentBalance = round((float) $partialCxcs->sum(
+                    fn($cxc): float => max(0, (float) $cxc->montoActual)
+                ), 2);
+                if ($partialPaymentOriginalGross + 0.005 < $partialCurrentBalance) {
+                    abort(422, 'El monto original de las cuentas no puede ser menor que el saldo pendiente.');
                 }
                 $currentCxcIds = $partialCxcIds;
             }
@@ -3216,6 +3314,7 @@ class CuentasPorCobrarController extends Controller
                 'withholding_description' => $validated['withholding_description'] ?? '',
                 'aplicar_deduccion' => !$isPartialPaymentCompletion,
                 'completar_pago_parcial' => $isPartialPaymentCompletion,
+                'partial_payment_original_gross' => $partialPaymentOriginalGross,
                 'canCuotas' => $validated['canCuotas'] ?? null,
                 'cuotas_montos' => $request->input('cuotas_montos', []),
                 'cuotas_fechas' => $request->input('cuotas_fechas', []),
@@ -3432,6 +3531,7 @@ class CuentasPorCobrarController extends Controller
                 $cxc->periodo_fin = $m[2];
             }
             $cxc->rango_display = $range ?: $desc;
+            $cxc->descripcion = CxcService::visibleServiceComment($desc);
             $periodEndDate = null;
             if ($cxc->fechaCancelacion) {
                 try {

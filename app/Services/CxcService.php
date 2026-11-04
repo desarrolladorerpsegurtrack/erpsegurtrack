@@ -14,6 +14,7 @@ use Illuminate\Support\Str;
 class CxcService
 {
     private const BANK_INFORMATION_MAX_LENGTH = 250;
+    private const CXC_DESCRIPTION_MAX_LENGTH = 280;
 
     private const SCHEDULED_DEACTIVATION_REASON = 'Baja programada al finalizar periodo';
     private const CXC_SERVICE_LINK_TABLE = 'cuentasporcobrar_serviciocliente';
@@ -669,12 +670,27 @@ class CxcService
             : 'Cobro por servicio ' . ($dataServicio['vehiculo_placa'] ?? ''))));
         $serviceId = (int) ($dataServicio['idservicioCliente'] ?? 0);
         $serviceMarkerPattern = '/(^|[^A-Za-z0-9])SC-' . $serviceId . '([^0-9]|$)/';
-        if ($serviceId > 0 && preg_match($serviceMarkerPattern, $descripcion) !== 1) {
+        if ($serviceId > 0 && $periodo !== '' && !str_contains($descripcion, 'REN-CXC-')) {
+            $periodRange = trim($periodo);
+            $comment = preg_replace(
+                ['/^\s*CXC\s*/iu', '/' . preg_quote($periodRange, '/') . '/iu', '/\s*SC-[0-9,]+/iu'],
+                '',
+                $descripcion
+            );
+            $comment = trim((string) preg_replace('/^[\s\-–—:]+|[\s\-–—:]+$/u', '', (string) $comment));
+            $identifier = 'CXC ' . $periodRange . ' SC-' . $serviceId;
+            $descripcion = self::appendServiceDescriptionComment($identifier, $comment);
+        } elseif ($serviceId > 0 && preg_match($serviceMarkerPattern, $descripcion) !== 1) {
             $serviceMarker = ' SC-' . $serviceId;
-            $descripcion = rtrim(mb_substr($descripcion, 0, 255 - mb_strlen($serviceMarker, 'UTF-8'), 'UTF-8')) . $serviceMarker;
+            $descripcion = rtrim(mb_substr(
+                $descripcion,
+                0,
+                self::CXC_DESCRIPTION_MAX_LENGTH - mb_strlen($serviceMarker, 'UTF-8'),
+                'UTF-8'
+            )) . $serviceMarker;
         }
-        if (mb_strlen($descripcion) > 255) {
-            $descripcion = mb_substr($descripcion, 0, 255);
+        if (mb_strlen($descripcion, 'UTF-8') > self::CXC_DESCRIPTION_MAX_LENGTH) {
+            $descripcion = mb_substr($descripcion, 0, self::CXC_DESCRIPTION_MAX_LENGTH, 'UTF-8');
         }
 
         $docRef = trim((string) ($dataServicio['docReferencia'] ?? ''));
@@ -1656,6 +1672,60 @@ class CxcService
         return rtrim($prefix) . $suffix;
     }
 
+    public static function descriptionWithServiceComment(?string $description, ?string $comment): string
+    {
+        $description = trim((string) $description);
+        $comment = trim((string) $comment);
+        $advanceMonthsSuffix = '';
+        if (preg_match('/^-\s+(\d{1,3})$/u', $comment, $advanceMatches) === 1) {
+            $advanceMonthsSuffix = ' - ' . $advanceMatches[1];
+            $comment = '';
+        }
+        if (preg_match(
+            '/^((?:CXC\s+\d{2}\/\d{2}\/\d{4}\s+a\s+\d{2}\/\d{2}\/\d{4}|REN-CXC-\d+\s+P\s+\d{2}\/\d{2}\/\d{4}\s+a\s+\d{2}\/\d{2}\/\d{4})\s+SC-[0-9,]+)(?:\s+-\s+.*)?$/iu',
+            $description,
+            $matches
+        ) !== 1) {
+            return mb_substr($comment, 0, self::CXC_DESCRIPTION_MAX_LENGTH, 'UTF-8');
+        }
+
+        return self::appendServiceDescriptionComment($matches[1], $comment) . $advanceMonthsSuffix;
+    }
+
+    public static function visibleServiceComment(?string $description): string
+    {
+        $description = trim((string) $description);
+        if (preg_match(
+            '/^(?:CXC\s+\d{2}\/\d{2}\/\d{4}\s+a\s+\d{2}\/\d{2}\/\d{4}|REN-CXC-\d+\s+P\s+\d{2}\/\d{2}\/\d{4}\s+a\s+\d{2}\/\d{2}\/\d{4})\s+SC-[0-9,]+(?:\s+-\s+(.*))?$/iu',
+            $description,
+            $matches
+        ) === 1) {
+            return trim((string) ($matches[1] ?? ''));
+        }
+
+        return $description;
+    }
+
+    private static function appendServiceDescriptionComment(string $identifier, string $comment): string
+    {
+        $identifier = trim($identifier);
+        $comment = trim($comment);
+        if ($comment === '') {
+            return mb_substr($identifier, 0, self::CXC_DESCRIPTION_MAX_LENGTH, 'UTF-8');
+        }
+
+        $availableLength = max(
+            0,
+            self::CXC_DESCRIPTION_MAX_LENGTH - mb_strlen($identifier, 'UTF-8') - 3
+        );
+        if ($availableLength === 0) {
+            return mb_substr($identifier, 0, self::CXC_DESCRIPTION_MAX_LENGTH, 'UTF-8');
+        }
+
+        $comment = mb_substr($comment, 0, $availableLength, 'UTF-8');
+        return $identifier . ' - ' . rtrim($comment);
+    }
+
     public static function isPreviousBillingPeriod(?Carbon $periodEnd, ?Carbon $today = null): bool
     {
         if (!$periodEnd) {
@@ -1863,8 +1933,25 @@ class CxcService
                     $pagoData['completar_pago_parcial'] ?? false,
                     FILTER_VALIDATE_BOOLEAN
                 );
+                $partialPaymentOriginalGross = round(
+                    max(0, (float) ($pagoData['partial_payment_original_gross'] ?? 0)),
+                    2
+                );
+                $partialGroupStates = [
+                    'pendiente pago parcial',
+                    'facturado',
+                    'vencido',
+                    'pendiente',
+                    '1',
+                    '2',
+                ];
                 if ($isPartialPaymentCompletion && $cxcs->contains(
                     fn ($cxc): bool => mb_strtolower(trim((string) $cxc->estado), 'UTF-8') !== 'pendiente pago parcial'
+                        && (
+                            $partialPaymentOriginalGross <= 0
+                            || !in_array(mb_strtolower(trim((string) $cxc->estado), 'UTF-8'), $partialGroupStates, true)
+                            || trim((string) ($cxc->docReferencia ?? '')) === ''
+                        )
                 )) {
                     throw new \RuntimeException('Una de las cuentas ya no está pendiente de completar su pago.');
                 }
@@ -1973,18 +2060,43 @@ class CxcService
                     $isPartialPaymentCompletion
                     && (
                         ($pagoData['modo_pago'] ?? null) !== 'parcial'
-                        || abs(round((float) ($pagoData['montoPago'] ?? 0), 2) - $currentDebt) > 0.005
                         || filter_var($pagoData['usar_saldo_favor'] ?? false, FILTER_VALIDATE_BOOLEAN)
                         || !empty($pagoData['nota_credito_ids'])
                     )
                 ) {
-                    throw new \RuntimeException('El monto registrado debe coincidir con el saldo pendiente actual.');
+                    throw new \RuntimeException('El pago pendiente debe registrarse en efectivo, sin saldo a favor ni notas de crédito.');
                 }
                 $gross = round($currentDebt + $advancePeriodAmount, 2);
                 $isRetention = $quotationOperation
                     && array_key_exists('is_retention_por_tipo_servicio', $pagoData)
                     ? filter_var($pagoData['is_retention_por_tipo_servicio'], FILTER_VALIDATE_BOOLEAN)
                     : (string) ($client->detraccion ?? '') === '1';
+                $partialCompletionDeduction = 0.0;
+                if ($isPartialPaymentCompletion) {
+                    $originalDebt = $partialPaymentOriginalGross > 0
+                        ? $partialPaymentOriginalGross
+                        : round((float) $cxcs->sum(
+                        fn ($cxc): float => max(0, (float) $cxc->montoOriginal)
+                        ), 2);
+                    $partialCompletionDeduction = self::calculatePaymentBreakdown(
+                        $originalDebt,
+                        $isRetention,
+                        0,
+                        false,
+                        0,
+                        true
+                    )['deduction'];
+                    $partialCompletionDeduction = round(min($currentDebt, $partialCompletionDeduction), 2);
+                    $withholdingDecision = $partialCompletionDeduction > 0 ? 'pending' : '';
+                    $expectedCashPayment = round($currentDebt - $partialCompletionDeduction, 2);
+                    if (abs(round((float) ($pagoData['montoPago'] ?? 0), 2) - $expectedCashPayment) > 0.005) {
+                        throw new \RuntimeException(sprintf(
+                            'El efectivo pendiente debe ser S/ %s; la detracción/retención pendiente es S/ %s.',
+                            number_format($expectedCashPayment, 2, '.', ','),
+                            number_format($partialCompletionDeduction, 2, '.', ',')
+                        ));
+                    }
+                }
                 $applyDeduction = filter_var($pagoData['aplicar_deduccion'] ?? true, FILTER_VALIDATE_BOOLEAN);
                 $selectedCreditNotes = $this->lockAvailableCreditNotes(
                     (array) ($pagoData['nota_credito_ids'] ?? []),
@@ -2005,13 +2117,39 @@ class CxcService
                 $applyCredit = $useCredit || $selectedNoteCredit > 0;
                 $mode = ($pagoData['modo_pago'] ?? 'total') === 'parcial' ? 'parcial' : 'total';
                 $currencyMode = ($pagoData['payment_currency_mode'] ?? 'same') === 'other' ? 'other' : 'same';
-                $withholdingDecision = strtolower(trim((string) ($pagoData['withholding_decision'] ?? '')));
+                $withholdingDecision = $isPartialPaymentCompletion
+                    ? ($partialCompletionDeduction > 0 ? 'pending' : '')
+                    : strtolower(trim((string) ($pagoData['withholding_decision'] ?? '')));
+                $partialWithholdingPayment = $quotationOperation && $withholdingDecision === 'partial_pending';
+                $existingPendingWithholdingAmount = 0.0;
+                if (
+                    $quotationOperation
+                    && mb_strtolower(trim((string) ($cxcs->first()->estado ?? '')), 'UTF-8') === 'pendiente pago parcial'
+                ) {
+                    $pendingDetail = DB::table('detallecxc')
+                        ->where('cuentasPorCobrar_idcuentasPorCobrar', $cxcs->first()->idcuentasPorCobrar)
+                        ->where('estado', '0')
+                        ->where(function ($query): void {
+                            $query->where('descripcion', 'like', 'Detracción pendiente:%')
+                                ->orWhere('descripcion', 'like', 'Retención pendiente:%');
+                        })
+                        ->orderByDesc('iddetalleCXC')
+                        ->first(['descripcion']);
+                    if ($pendingDetail && preg_match(
+                        '/:\s*([0-9]+(?:\.[0-9]{1,2})?)/',
+                        (string) $pendingDetail->descripcion,
+                        $pendingAmountMatch
+                    ) === 1) {
+                        $existingPendingWithholdingAmount = round((float) $pendingAmountMatch[1], 2);
+                    }
+                }
                 $serviceGrossRetentionPayment = !$quotationOperation
                     && $mode === 'total'
                     && $isRetention
                     && $withholdingDecision === 'full_pending';
                 $applyDeductionToPayment = $applyDeduction
                     && !$serviceGrossRetentionPayment
+                    && !$partialWithholdingPayment
                     && ($quotationOperation || $mode === 'total' || $withholdingDecision !== '');
                 $preview = self::calculatePaymentBreakdown(
                     $gross,
@@ -2019,9 +2157,13 @@ class CxcService
                     $availableCredit,
                     $applyCredit,
                     0,
-                    $applyDeductionToPayment,
+                    $applyDeductionToPayment || $partialWithholdingPayment,
                     $quotationOperation
                 );
+                if ($isPartialPaymentCompletion) {
+                    $preview['deduction'] = $partialCompletionDeduction;
+                    $preview['cash_due'] = round($currentDebt - $partialCompletionDeduction, 2);
+                }
 
                 if ($currencyMode === 'other') {
                     $received = round((float) ($pagoData['monto_cancelado'] ?? 0), 2);
@@ -2048,8 +2190,24 @@ class CxcService
                     }
                 }
 
+                if ($existingPendingWithholdingAmount > 0) {
+                    $cashAvailableBeforeWithholding = round(max(
+                        0,
+                        $gross - $preview['credit_applied'] - $existingPendingWithholdingAmount
+                    ), 2);
+                    if ($cashReceived > $cashAvailableBeforeWithholding + 0.01) {
+                        throw new \RuntimeException(
+                            'El monto en efectivo supera el saldo pendiente sin incluir la detracción/retención.'
+                        );
+                    }
+                    if ($cashReceived + 0.01 < $cashAvailableBeforeWithholding) {
+                        $mode = 'parcial';
+                    }
+                }
+
                 if (
                     $preview['deduction'] > 0
+                    && !$partialWithholdingPayment
                     && ($mode === 'total' || $withholdingDecision !== '')
                     && !($mode === 'parcial' && $withholdingDecision === 'paid')
                     && $cashReceived + 0.01 < $preview['cash_due']
@@ -2059,7 +2217,33 @@ class CxcService
 
                 $withholdingPending = 0.0;
                 $cashHeldForWithholding = 0.0;
-                if ($preview['deduction'] > 0 && in_array($withholdingDecision, ['paid', 'pending', 'full_pending'], true)) {
+                if ($isPartialPaymentCompletion) {
+                    $withholdingPending = $partialCompletionDeduction;
+                    $breakdown = [
+                        'gross' => $currentDebt,
+                        'deduction_rate' => $isRetention ? 0.03 : 0.12,
+                        'deduction' => 0.0,
+                        'after_deduction' => round($currentDebt - $partialCompletionDeduction, 2),
+                        'credit_available' => 0.0,
+                        'credit_applied' => 0.0,
+                        'cash_due' => round($currentDebt - $partialCompletionDeduction, 2),
+                        'cash_received' => $cashReceived,
+                        'cash_applied' => $cashReceived,
+                        'new_credit' => 0.0,
+                        'remaining_debt' => $withholdingPending,
+                    ];
+                } elseif ($partialWithholdingPayment) {
+                    $breakdown = self::calculatePaymentBreakdown(
+                        $gross,
+                        $isRetention,
+                        $availableCredit,
+                        $applyCredit,
+                        $cashReceived,
+                        false,
+                        $quotationOperation
+                    );
+                    $withholdingPending = $preview['deduction'];
+                } elseif ($preview['deduction'] > 0 && in_array($withholdingDecision, ['paid', 'pending', 'full_pending'], true)) {
                     if ($withholdingDecision === 'paid') {
                         $breakdown = self::calculatePaymentBreakdown(
                             $gross,
@@ -2114,6 +2298,12 @@ class CxcService
                         $quotationOperation
                     );
                 }
+                if (
+                    $existingPendingWithholdingAmount > 0
+                    && $breakdown['remaining_debt'] <= $existingPendingWithholdingAmount + 0.01
+                ) {
+                    $withholdingPending = $existingPendingWithholdingAmount;
+                }
 
                 if ($advancePeriods > 0 && $breakdown['remaining_debt'] > 0) {
                     throw new \RuntimeException('El monto ingresado no cubre las cuentas seleccionadas y los periodos adelantados.');
@@ -2130,7 +2320,11 @@ class CxcService
                 ) {
                     throw new \RuntimeException('El monto de pago, detracción/retención y saldo a favor no cubren ninguna parte de la deuda.');
                 }
-                if ($mode === 'total' && $cashReceived + 0.01 < $preview['cash_due']) {
+                if (
+                    $mode === 'total'
+                    && $existingPendingWithholdingAmount <= 0
+                    && $cashReceived + 0.01 < $preview['cash_due']
+                ) {
                     throw new \RuntimeException(sprintf(
                         'El efectivo ingresado (S/ %s) no cubre el saldo pendiente de S/ %s. Deuda seleccionada: S/ %s; detracción/retención: S/ %s; créditos: S/ %s. Periodos vencidos explícitamente seleccionados: %d.',
                         number_format($cashReceived, 2, '.', ','),
@@ -2222,6 +2416,30 @@ class CxcService
                         $pendingWithholdingByCxc
                     )
                     : [];
+                $allocatePartialCashProportionally = !$isGroupedCreditPlan
+                    && $cxcs->count() > 1
+                    && (
+                        $isPartialPaymentCompletion
+                        || (
+                            $mode === 'parcial'
+                            && $breakdown['deduction'] <= 0.005
+                            && $breakdown['credit_applied'] <= 0.005
+                        )
+                    );
+                if ($allocatePartialCashProportionally) {
+                    $cashCapacitiesByCxc = [];
+                    foreach ($cxcs as $cxc) {
+                        $cxcId = (int) $cxc->idcuentasPorCobrar;
+                        $cashCapacitiesByCxc[$cxcId] = max(
+                            0,
+                            (float) $cxc->montoActual - (float) ($pendingWithholdingByCxc[$cxcId] ?? 0)
+                        );
+                    }
+                    $cashAppliedByCxc = $this->allocateAmountProportionally(
+                        $cashCapacitiesByCxc,
+                        (float) $breakdown['cash_applied']
+                    );
+                }
                 $results = [];
                 $paymentItems = [];
                 $cashReceivedInPaymentCurrencyAllocated = 0.0;
@@ -2243,7 +2461,9 @@ class CxcService
                     $cashLimit = round(max(0, $afterCredit - $pendingWithholdingForCxc), 2);
                     $cashApplied = $isGroupedCreditPlan && $installments !== []
                         ? round((float) ($cashAppliedByCxc[(int) $cxc->idcuentasPorCobrar] ?? 0), 2)
-                        : round(min($cashLimit, $cashAppliedRemaining), 2);
+                        : ($allocatePartialCashProportionally
+                            ? round((float) ($cashAppliedByCxc[(int) $cxc->idcuentasPorCobrar] ?? 0), 2)
+                            : round(min($cashLimit, $cashAppliedRemaining), 2));
                     $cashAppliedRemaining = round($cashAppliedRemaining - $cashApplied, 2);
                     $excess = $index === $cxcs->count() - 1 ? $newCreditRemaining : 0.0;
                     $isRenewalCxc = (int) $cxc->idcuentasPorCobrar === (int) ($pagoData['renewal_cxc_id'] ?? (count($ids) === 1 ? $ids[0] : 0));
@@ -2514,6 +2734,50 @@ class CxcService
         }
 
         return array_map(fn (int $amount): float => (float) ($amount / 100), $allocations);
+    }
+
+    private function allocateAmountProportionally(array $capacities, float $amount): array
+    {
+        $capacityCents = array_map(
+            fn ($capacity): int => max(0, $this->amountToCents((float) $capacity)),
+            $capacities
+        );
+        $totalCapacity = array_sum($capacityCents);
+        $target = $this->amountToCents(max(0, $amount));
+        if ($target > $totalCapacity) {
+            throw new \RuntimeException('El pago parcial supera el saldo distribuible entre las cuentas.');
+        }
+        $allocations = array_fill_keys(array_keys($capacityCents), 0);
+
+        if ($target === 0 || $totalCapacity === 0) {
+            return array_map(fn (int $cents): float => $cents / 100, $allocations);
+        }
+
+        $remainders = [];
+        foreach ($capacityCents as $id => $capacity) {
+            if ($capacity === 0) {
+                continue;
+            }
+            $weightedShare = $target * $capacity;
+            $allocations[$id] = min($capacity, intdiv($weightedShare, $totalCapacity));
+            $remainders[$id] = $weightedShare % $totalCapacity;
+        }
+
+        $unallocated = $target - array_sum($allocations);
+        arsort($remainders);
+        foreach (array_keys($remainders) as $id) {
+            if ($unallocated <= 0) {
+                break;
+            }
+            $additional = min(1, $unallocated, $capacityCents[$id] - $allocations[$id]);
+            $allocations[$id] += $additional;
+            $unallocated -= $additional;
+        }
+        if ($unallocated > 0) {
+            throw new \RuntimeException('No se pudo distribuir por completo el pago parcial entre las cuentas.');
+        }
+
+        return array_map(fn (int $cents): float => $cents / 100, $allocations);
     }
 
     private function distributeCreditInstallmentsAcrossReceivables(array $installments, array $paymentItems): array
@@ -3604,14 +3868,18 @@ class CxcService
                 ($pagoData['modo_pago'] ?? 'total') === 'parcial'
             );
             if ($montoDeduccionPendiente > 0) {
-                if (abs($deudaPendiente - $montoDeduccionPendiente) > 0.01) {
+                if ($deudaPendiente + 0.01 < $montoDeduccionPendiente) {
                     throw new \RuntimeException('El saldo pendiente de detracción/retención no coincide con el monto restante de la cuenta.');
                 }
-                $isAutodetraccionPending = !$isRetention
-                    && ($pagoData['withholding_decision'] ?? null) === 'full_pending';
-                $nuevoEstado = $isRetention
-                    ? 'Pendiente a Retención'
-                    : ($isAutodetraccionPending ? 'Pendiente Autodetracción' : 'Pendiente a Detracción');
+                if (abs($deudaPendiente - $montoDeduccionPendiente) <= 0.01) {
+                    $isAutodetraccionPending = !$isRetention
+                        && ($pagoData['withholding_decision'] ?? null) === 'full_pending';
+                    $nuevoEstado = $isRetention
+                        ? 'Pendiente a Retención'
+                        : ($isAutodetraccionPending ? 'Pendiente Autodetracción' : 'Pendiente a Detracción');
+                } elseif (($pagoData['withholding_decision'] ?? null) !== 'partial_pending') {
+                    throw new \RuntimeException('El saldo pendiente de detracción/retención no coincide con el monto restante de la cuenta.');
+                }
             }
             $persistedState = str_contains(mb_strtolower((string) $nuevoEstado, 'UTF-8'), 'pendiente a credito')
                 ? 'Pendiente a credito'
@@ -3706,18 +3974,28 @@ class CxcService
                 if ($paymentBankMovementId === null) {
                     throw new \RuntimeException('No se encontró el movimiento bancario que respalda el pago con detracción/retención pendiente.');
                 }
-                $pendingWithholdingLabel = $isRetention ? 'Retención pendiente: ' : 'Detracción pendiente: ';
-                DB::table('detallecxc')->insert([
-                    'formaPago_idformaPago' => $formaPagoId,
-                    'cuentasPorCobrar_idcuentasPorCobrar' => $idCxc,
-                    'moneda_idmoneda' => $monedaBaseId,
-                    'descripcion' => mb_substr($pendingWithholdingLabel . number_format($montoDeduccionPendiente, 2, '.', ''), 0, 50),
-                    'fechaPagoProgramada' => $fechaPago,
-                    'fechaPago' => null,
-                    'nCuota' => null,
-                    'bancos_idbancos' => $paymentBankMovementId,
-                    'estado' => '0',
-                ]);
+                $existingPendingWithholding = DB::table('detallecxc')
+                    ->where('cuentasPorCobrar_idcuentasPorCobrar', $idCxc)
+                    ->where('estado', '0')
+                    ->where(function ($query): void {
+                        $query->where('descripcion', 'like', 'Detracción pendiente:%')
+                            ->orWhere('descripcion', 'like', 'Retención pendiente:%');
+                    })
+                    ->exists();
+                if (!$existingPendingWithholding) {
+                    $pendingWithholdingLabel = $isRetention ? 'Retención pendiente: ' : 'Detracción pendiente: ';
+                    DB::table('detallecxc')->insert([
+                        'formaPago_idformaPago' => $formaPagoId,
+                        'cuentasPorCobrar_idcuentasPorCobrar' => $idCxc,
+                        'moneda_idmoneda' => $monedaBaseId,
+                        'descripcion' => mb_substr($pendingWithholdingLabel . number_format($montoDeduccionPendiente, 2, '.', ''), 0, 50),
+                        'fechaPagoProgramada' => $fechaPago,
+                        'fechaPago' => null,
+                        'nCuota' => null,
+                        'bancos_idbancos' => $paymentBankMovementId,
+                        'estado' => '0',
+                    ]);
+                }
             }
 
             if ($montoFavorAplicado > 0) {
@@ -5270,11 +5548,13 @@ class CxcService
         }
     }
 
-    public function generarPeriodosAutomaticos(?Carbon $hoy = null): int
+    public function generarPeriodosAutomaticos(?Carbon $hoy = null, bool $verificarVencidos = true): int
     {
         $hoy ??= Carbon::today();
         $generados = 0;
-        $this->verificarYActualizarVencidos($hoy);
+        if ($verificarVencidos) {
+            $this->verificarYActualizarVencidos();
+        }
         $serviciosQuery = DB::table('serviciocliente as sc')
             ->leftJoin('almacen as a', 'a.idalmacen', '=', 'sc.almacen_idalmacen')
             ->whereRaw('LOWER(COALESCE(sc.estado, "")) = ?', ['activo'])
@@ -5397,7 +5677,7 @@ class CxcService
                 throw new \RuntimeException('No se encontró una fecha de pago activa para revertir.');
             }
             $cancelledAt = Carbon::parse($cancelledAt);
-            if (Carbon::now()->startOfDay()->gt($cancelledAt->copy()->addDays(7)->startOfDay())) {
+            if (Carbon::now()->startOfDay()->gt($cancelledAt->copy()->addDays(35)->startOfDay())) {
                 throw new \RuntimeException('El plazo de reversión de 7 días ya venció.');
             }
 

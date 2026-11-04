@@ -4,11 +4,62 @@ namespace Tests\Feature;
 
 use App\Services\CxcService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
 use Mockery\MockInterface;
 use Tests\TestCase;
 
 class ReceivablesCommandsTest extends TestCase
 {
+    public function test_generar_periodos_command_keeps_its_current_month_default(): void
+    {
+        $this->mock(CxcService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('generarPeriodosAutomaticos')
+                ->once()
+                ->with(null, true)
+                ->andReturn(2);
+        });
+
+        $this->artisan('cxc:generar-periodos')
+            ->expectsOutput('Se generaron 2 periodos de cuentas por cobrar.')
+            ->assertExitCode(Command::SUCCESS);
+    }
+
+    public function test_generar_periodos_command_accepts_a_historical_reference_month(): void
+    {
+        Carbon::setTestNow('2026-11-04 10:00:00');
+
+        try {
+            $this->mock(CxcService::class, function (MockInterface $mock): void {
+                $mock->shouldReceive('generarPeriodosAutomaticos')
+                    ->once()
+                    ->withArgs(static function (?Carbon $period, bool $verificarVencidos): bool {
+                        return $period?->format('Y-m-d') === '2026-10-01'
+                            && !$verificarVencidos;
+                    })
+                    ->andReturn(12);
+            });
+
+            $this->artisan('cxc:generar-periodos', ['--periodo' => '2026-10'])
+                ->expectsOutput('Periodo de referencia: octubre 2026. Se generará el periodo siguiente para los servicios elegibles.')
+                ->expectsOutput('Esta ejecución manual no verificará vencimientos ni cambiará el estado de las CXC origen.')
+                ->expectsOutput('Se generaron 12 periodos de cuentas por cobrar.')
+                ->assertExitCode(Command::SUCCESS);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_generar_periodos_command_rejects_an_invalid_reference_month(): void
+    {
+        $this->mock(CxcService::class, function (MockInterface $mock): void {
+            $mock->shouldNotReceive('generarPeriodosAutomaticos');
+        });
+
+        $this->artisan('cxc:generar-periodos', ['--periodo' => '2026-13'])
+            ->expectsOutput('El parámetro --periodo debe tener el formato YYYY-MM y ser una fecha válida.')
+            ->assertExitCode(Command::FAILURE);
+    }
+
     public function test_verificar_vencidos_command_reports_the_updated_count(): void
     {
         $this->mock(CxcService::class, function (MockInterface $mock): void {

@@ -23,6 +23,7 @@ class CuentasPorCobrarService
             ->keyBy('idtipoCobros');
 
         $services = $this->decorateServices($services, $maps);
+        $services = $this->markScheduledDeactivations($services);
         $services = $this->appendHistoricalPeriods($services, $historicalByClient);
         [$services, $creditChildrenByParent] = $this->appendCreditInstallmentReceivables($services, $filters);
         $creditParentIds = collect(array_keys($creditChildrenByParent))
@@ -39,6 +40,8 @@ class CuentasPorCobrarService
             ->all();
         $creditPaidByParent = $this->creditPaidAmountsByParent($creditParentIds);
         $linkedServiceIdsByCxc = $this->loadLinkedServiceIdsByCxc($services);
+        $paidAmountsByCxc = $this->loadPaidAmountsByCxc($services);
+        $balanceCreditAmountsByCxc = $this->loadBalanceCreditAmountsByCxc($services);
         $grouped = $this->groupServices(
             $services,
             $historicalByClient,
@@ -46,7 +49,9 @@ class CuentasPorCobrarService
             $tipoCobroDetails,
             $creditChildrenByParent,
             $linkedServiceIdsByCxc,
-            $creditPaidByParent
+            $creditPaidByParent,
+            $paidAmountsByCxc,
+            $balanceCreditAmountsByCxc
         );
         $this->sortGroups($grouped);
 
@@ -54,6 +59,52 @@ class CuentasPorCobrarService
             'serviciosPorVencer' => $services,
             'serviciosPorVencerGrouped' => $grouped,
         ];
+    }
+
+    private function markScheduledDeactivations(Collection $services): Collection
+    {
+        $serviceIds = $services->pluck('idservicioCliente')
+            ->filter()
+            ->map(fn($id): int => (int) $id)
+            ->unique()
+            ->values();
+        if ($serviceIds->isEmpty() || !Schema::hasTable('historial_servicio')) {
+            return $services;
+        }
+
+        $latestHistoryIds = DB::table('historial_servicio')
+            ->whereIn('servicioCliente_idservicioCliente', $serviceIds)
+            ->whereIn('motivo', CxcService::SCHEDULED_DEACTIVATION_MOTIVES)
+            ->selectRaw('MAX(idhistorial_servicio)')
+            ->groupBy('servicioCliente_idservicioCliente');
+        $scheduledHistories = DB::table('historial_servicio as hs')
+            ->join('serviciocliente as sc', 'sc.idservicioCliente', '=', 'hs.servicioCliente_idservicioCliente')
+            ->whereIn('hs.idhistorial_servicio', $latestHistoryIds)
+            ->whereRaw('LOWER(COALESCE(sc.estado, "")) = ?', ['activo'])
+            ->get([
+                'hs.servicioCliente_idservicioCliente',
+                'hs.fecha_accion',
+            ])
+            ->mapWithKeys(function (object $history): array {
+                $effectiveDate = Carbon::parse($history->fecha_accion)->endOfMonth()->toDateString();
+
+                return [
+                    (int) $history->servicioCliente_idservicioCliente => [
+                        'hasta' => Carbon::parse($effectiveDate)->format('d/m/Y'),
+                        'solicitada' => Carbon::parse($history->fecha_accion)->toDateString(),
+                    ],
+                ];
+            })
+            ->all();
+
+        return $services->transform(function ($service) use ($scheduledHistories) {
+            $serviceId = (int) ($service->idservicioCliente ?? 0);
+            $scheduled = $scheduledHistories[$serviceId] ?? null;
+            $service->baja_programada_hasta = $scheduled['hasta'] ?? null;
+            $service->baja_programada_solicitada = $scheduled['solicitada'] ?? null;
+
+            return $service;
+        });
     }
 
     private function loadServices(array $filters = []): Collection
@@ -71,6 +122,7 @@ class CuentasPorCobrarService
                 'sc_total.fecheVencimiento',
                 'sc_total.moneda_idmoneda'
             );
+        $this->applyPeriodFilters($activeServiceTotals, 'sc_total.fecheVencimiento', $filters);
 
         $services = DB::table('cuentasporcobrar as c')
             ->leftJoinSub($activeServiceTotals, 'sc_totals', function ($join): void {
@@ -105,6 +157,10 @@ class CuentasPorCobrarService
                                 'Pendiente a Detracción',
                                 'Pendiente a Retención',
                             ])
+                                ->where(function ($markerlessCharge): void {
+                                    $markerlessCharge->whereNull('c.descripcion')
+                                        ->orWhere('c.descripcion', 'not like', '%SC-%');
+                                })
                                 ->whereNotNull('c.docReferencia')
                                 ->where('c.docReferencia', '<>', '')
                                 ->whereColumn('c.docReferencia', 'sc.docReferencia');
@@ -165,8 +221,31 @@ class CuentasPorCobrarService
             ])
             ->where(function ($query): void {
                 $query->whereRaw('LOWER(COALESCE(sc.estado, "")) = ?', ['activo'])
-                    ->orWhereIn('c.estado', ['3', 'CANCELADO']);
-            })
+                        ->orWhereIn('c.estado', ['3', 'CANCELADO'])
+                        ->orWhere(function ($documentedCharge): void {
+                            $documentedCharge->whereNotNull('c.docReferencia')
+                                ->where('c.docReferencia', '<>', '');
+                        });
+                    if (Schema::hasColumn('cuentasporcobrar', 'docFactura')) {
+                        $query->orWhere(function ($documentFile): void {
+                            $documentFile->whereNotNull('c.docFactura')
+                                ->where('c.docFactura', '<>', '');
+                        });
+                    }
+                    if (Schema::hasTable('detallecxc')) {
+                        $query->orWhereExists(function ($payment): void {
+                            $payment->selectRaw('1')
+                                ->from('detallecxc as dc')
+                                ->whereColumn('dc.cuentasPorCobrar_idcuentasPorCobrar', 'c.idcuentasPorCobrar');
+                            if (Schema::hasColumn('detallecxc', 'estado')) {
+                                $payment->where('dc.estado', '1');
+                            }
+                            if (Schema::hasColumn('detallecxc', 'fechaPago')) {
+                                $payment->whereNotNull('dc.fechaPago');
+                            }
+                        });
+                    }
+                })
             ->whereIn('c.estado', ['1', '2', '3', '4', 'NUEVO', 'PagoCredito', 'Pendiente cuota crédito', 'PENDIENTE', 'FACTURADO', 'CANCELADO', 'VENCIDO', 'Pendiente Pago parcial', 'Pendiente a credito', 'Cancelado Detracción', 'Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención'])
             ->where(function ($query): void {
                 $query->whereNull('c.descripcion')
@@ -179,6 +258,9 @@ class CuentasPorCobrarService
             ->whereNotNull('sc.fecheVencimiento');
         if (Schema::hasColumn('cuentasporcobrar', 'mod_monto')) {
             $services->addSelect('c.mod_monto as cxc_mod_monto');
+        }
+        if (Schema::hasColumn('cuentasporcobrar', 'docFactura')) {
+            $services->addSelect('c.docFactura as cxc_docFactura');
         }
 
         $clientFilter = trim((string) ($filters['service_client'] ?? ''));
@@ -331,7 +413,21 @@ class CuentasPorCobrarService
     {
         $query->where('c.descripcion', 'like', '%SC-%')
             ->whereColumn('c.fechaCancelacion', 'sc.fecheVencimiento')
-            ->whereColumn('c.montoOriginal', 'sc_totals.total_monto');
+            ->whereColumn('c.montoOriginal', 'sc_totals.total_monto')
+            ->whereNotExists(function ($inactiveMarker): void {
+                $inactiveMarker->selectRaw('1')
+                    ->from('serviciocliente as inactive_sc')
+                    ->whereColumn('inactive_sc.cliente_idcliente', 'c.cliente_idcliente')
+                    ->whereRaw('LOWER(COALESCE(inactive_sc.estado, "")) IN (?, ?, ?, ?)', [
+                        'inactivo',
+                        'inactive',
+                        '0',
+                        'false',
+                    ])
+                    ->whereRaw(
+                        "c.descripcion REGEXP CONCAT('(^|[^A-Za-z0-9])SC-([0-9]+,)*', inactive_sc.idservicioCliente, '([^0-9]|$)')"
+                    );
+            });
     }
 
     private function loadDeviceMaps(Collection $services): array
@@ -582,6 +678,9 @@ class CuentasPorCobrarService
             if (!empty($row->cxc_fechaCancelacion)) {
                 $row->fecheVencimiento = Carbon::parse($row->cxc_fechaCancelacion)->toDateString();
             }
+            if (!$this->isScheduledDeactivationCharge($row)) {
+                $row->baja_programada_hasta = null;
+            }
             $row->fecha_inicio_display = $row->fechaInicio ? Carbon::parse($row->fechaInicio)->format('d/m/Y') : '-';
             $row->fecha_vencimiento_display = $row->fecheVencimiento ? Carbon::parse($row->fecheVencimiento)->format('d/m/Y') : '-';
             $cxcId = (int) ($row->idcuentasPorCobrar ?? 0);
@@ -627,6 +726,19 @@ class CuentasPorCobrarService
             $row->is_integrador = $this->isTruthy($row->flag_integrador ?? '');
             return $row;
         });
+    }
+
+    private function isScheduledDeactivationCharge(object $service): bool
+    {
+        $requestedAt = $service->baja_programada_solicitada ?? null;
+        if ($requestedAt === null || empty($service->fechaInicio) || empty($service->fecheVencimiento)) {
+            return false;
+        }
+
+        $requestedAt = Carbon::parse($requestedAt)->toDateString();
+
+        return Carbon::parse($service->fechaInicio)->toDateString() <= $requestedAt
+            && Carbon::parse($service->fecheVencimiento)->toDateString() >= $requestedAt;
     }
 
     private function allocateChargeAmountToServices(
@@ -745,6 +857,14 @@ class CuentasPorCobrarService
             ->unique()
             ->values();
         $historicalCxcLookup = array_fill_keys($historicalCxcIds->all(), true);
+        $historicalCxcIdsWithServiceMarker = $historicalCharges
+            ->filter(fn($charge): bool => preg_match('/SC-([0-9,]+)/', (string) ($charge->descripcion ?? '')) === 1)
+            ->pluck('idcuentasPorCobrar')
+            ->map(fn($id): int => (int) $id)
+            ->filter()
+            ->unique()
+            ->values();
+        $historicalCxcServiceMarkerLookup = array_fill_keys($historicalCxcIdsWithServiceMarker->all(), true);
         if (Schema::hasTable('cuentasporcobrar_serviciocliente')) {
             if ($historicalCxcIds->isNotEmpty()) {
                 $linksByCxc = DB::table('cuentasporcobrar_serviciocliente')
@@ -799,6 +919,10 @@ class CuentasPorCobrarService
                 }
 
                 $parentCxcId = (int) $parentMatch[1];
+                if (isset($historicalCxcServiceMarkerLookup[$parentCxcId])) {
+                    continue;
+                }
+
                 $linkedServiceIdsByCxc[$parentCxcId] = array_values(array_unique(array_merge(
                     $linkedServiceIdsByCxc[$parentCxcId] ?? [],
                     array_filter(array_map('intval', explode(',', $serviceMatch[1])))
@@ -837,6 +961,7 @@ class CuentasPorCobrarService
                 )
                 : collect();
             $isAggregateCxc = $hasServiceMarker
+                && $markedServices->isNotEmpty()
                 && abs((float) $candidateServices->sum('monto') - (float) ($historical->montoOriginal ?? 0)) < 0.005;
 
             if ($linkedServices->isNotEmpty()) {
@@ -845,6 +970,8 @@ class CuentasPorCobrarService
                 $matchedServices = $candidateServices;
             } elseif ($markedServices->isNotEmpty()) {
                 $matchedServices = $markedServices;
+            } elseif ($hasServiceMarker) {
+                $matchedServices = collect();
             } else {
                 $amountMatches = $candidateServices->filter(
                     fn($service): bool =>
@@ -961,7 +1088,9 @@ class CuentasPorCobrarService
         Collection $tipoCobroDetails,
         array $creditChildrenByParent = [],
         array $linkedServiceIdsByCxc = [],
-        array $creditPaidByParent = []
+        array $creditPaidByParent = [],
+        array $paidAmountsByCxc = [],
+        array $balanceCreditAmountsByCxc = []
     ): array {
         $groups = [];
         $historicalIndexes = $this->indexHistoricalCharges($historicalByClient);
@@ -980,12 +1109,7 @@ class CuentasPorCobrarService
                     : 'cxc-' . ($service->idcuentasPorCobrar ?? spl_object_id($service))
             );
 
-            // A deactivated service must never be counted as payable debt again,
-            // even if an old CXC or linked-row join still carries the service.
-            $unique = $unique->filter(function ($service): bool {
-                $state = mb_strtolower(trim((string) ($service->estado ?? $service->cxc_estado ?? '')));
-                return !in_array($state, ['inactivo', 'inactive', '0', 'false'], true);
-            });
+            $unique = $unique->reject(fn($service): bool => $this->isInactiveUnbilledReceivable($service));
             if ($unique->isEmpty()) {
                 continue;
             }
@@ -1040,15 +1164,18 @@ class CuentasPorCobrarService
                 );
             $groupCharges = $clientServices
                 ->filter(fn($service): bool => (int) ($service->idcuentasPorCobrar ?? 0) > 0
+                    && !$this->isInactiveUnbilledReceivable($service)
                     && in_array((string) ($service->cxc_estado ?? ''), $activeStates, true)
                     && $this->hasOutstandingOrZeroValueReceivable($service, $linkedServiceIdsByCxc))
                 ->unique('idcuentasPorCobrar')
-                ->sortByDesc('idcuentasPorCobrar')
+                ->sortBy('idcuentasPorCobrar')
                 ->values();
             $inProgressCharges = $groupCharges
                 ->filter(fn($charge): bool => $this->isDocumentedInProgressCharge($charge))
                 ->values();
-            $primaryCharges = $inProgressCharges->isNotEmpty() ? $inProgressCharges : $groupCharges;
+            $primaryCharges = $this->currentInvoiceCharges(
+                $inProgressCharges->isNotEmpty() ? $inProgressCharges : $groupCharges
+            );
             $pendingWithholdingCxc = $primaryCharges->first(
                 fn($charge): bool => in_array((string) ($charge->cxc_estado ?? ''), $withholdingStates, true)
             );
@@ -1153,7 +1280,7 @@ class CuentasPorCobrarService
                     ? $servicesAmount
                     : ($financialGroupCharges->isNotEmpty()
                         // Cap at active services sum: CXC may not have been updated after vehicle deactivations
-                        ? round(
+                            ? round(
                             $hasPeriodSpecificPriceCharge
                                 ? $groupBalance + $creditInstallmentTotal
                                 : min($groupBalance + $creditInstallmentTotal, $servicesAmount),
@@ -1191,9 +1318,21 @@ class CuentasPorCobrarService
                     ->all(),
                 $creditPaidByParent
             );
+            $pendingWithholdingPaidAmount = round((float) $pendingWithholdingCharges->sum(
+                fn($charge): float => (float) ($paidAmountsByCxc[(int) ($charge->idcuentasPorCobrar ?? 0)] ?? 0)
+            ), 2);
             $nextPeriodEnds = $unique
                 ->map(fn($service): ?string => $this->nextServicePeriodEnd($service, $tipoCobroDetails))
                 ->filter()
+                ->unique()
+                ->values();
+            $balanceCreditDisplays = $this->balanceCreditDisplaysForCharges(
+                $unique,
+                $balanceCreditAmountsByCxc
+            );
+            $documentReferences = $unique
+                ->map(fn($service): string => trim((string) ($service->cxc_docReferencia ?? '')))
+                ->filter(fn(string $document): bool => $document !== '')
                 ->unique()
                 ->values();
 
@@ -1222,7 +1361,9 @@ class CuentasPorCobrarService
                 'fecha_fin' => $periodEnd->format('d/m/Y'),
                 'fecha_fin_iso' => $periodEnd->format('Y-m-d'),
                 'fecha_fin_siguiente_iso' => (string) ($nextPeriodEnds->first() ?? ''),
-                'documento' => trim((string) ($cxc->cxc_docReferencia ?? '')) ?: '-',
+                'documento' => $documentReferences->isNotEmpty()
+                    ? $documentReferences->implode(', ')
+                    : '-',
                 'cxc_estado' => $state,
                 'cxc_doc' => trim((string) ($cxc->cxc_docReferencia ?? '')),
                 'cxc_reversion_ids' => $cancelledGroupCxc
@@ -1245,6 +1386,9 @@ class CuentasPorCobrarService
                 'monto_servicios' => $servicesAmount,
                 'monto_servicios_display' => $this->currency($servicesAmount, $currency),
                 'monto_pagado' => $creditPaid,
+                'monto_pagado_periodo' => $pendingWithholdingPaidAmount,
+                'saldo_a_favor_generado_display' => $balanceCreditDisplays['saldo_a_favor_generado_display'],
+                'saldo_a_favor_aplicado_display' => $balanceCreditDisplays['saldo_a_favor_aplicado_display'],
                 'cxc_ids' => ($pendingWithholdingCharges->isNotEmpty() ? $pendingWithholdingCharges : $primaryCharges)
                     ->reject(fn($charge): bool => (bool) ($charge->service_credit_installment ?? false))
                     ->pluck('idcuentasPorCobrar')
@@ -1276,12 +1420,28 @@ class CuentasPorCobrarService
                     $creditChildrenByParent,
                     $tipoCobroDetails,
                     $linkedServiceIdsByCxc,
-                    $creditPaidByParent
+                    $creditPaidByParent,
+                    $paidAmountsByCxc
                 ),
             ];
         }
 
         return $groups;
+    }
+
+    private function isInactiveUnbilledReceivable(object $service): bool
+    {
+        $serviceState = mb_strtolower(trim((string) ($service->estado ?? '')));
+        if (!in_array($serviceState, ['inactivo', 'inactive', '0', 'false'], true)) {
+            return false;
+        }
+
+        $chargeState = mb_strtoupper(trim((string) ($service->cxc_estado ?? '')));
+
+        return !in_array($chargeState, ['3', 'CANCELADO'], true)
+            && trim((string) ($service->cxc_docReferencia ?? '')) === ''
+            && trim((string) ($service->cxc_docFactura ?? '')) === ''
+            && empty($service->cxc_fecha_pago);
     }
 
     private function indexHistoricalCharges(Collection $historicalByClient): array
@@ -1373,8 +1533,10 @@ class CuentasPorCobrarService
             ->map(fn($id): int => (int) $id)
             ->unique()
             ->values();
+        /** @var Collection<int, array{id: int, parent_id: int, number: int, amount: float, date: string}> $installments */
         $installments = $parentIds
-            ->flatMap(fn(int $parentId): array => $creditChildrenByParent[$parentId] ?? [])
+            ->flatMap(fn(int $parentId): array => $creditChildrenByParent[$parentId] ?? []);
+        $installments = $installments
             ->filter(fn(array $installment): bool => $installment['amount'] > 0.01)
             ->groupBy(fn(array $installment): string => $installment['number'] . '|' . $installment['date'])
             ->map(function (Collection $installments): array {
@@ -1459,7 +1621,8 @@ class CuentasPorCobrarService
         array $creditChildrenByParent,
         Collection $tipoCobroDetails,
         array $linkedServiceIdsByCxc = [],
-        array $creditPaidByParent = []
+        array $creditPaidByParent = [],
+        array $paidAmountsByCxc = []
     ): array
     {
         $result = [];
@@ -1484,7 +1647,8 @@ class CuentasPorCobrarService
                 $tipoCobroDetails,
                 $serviceCountsByCxc,
                 $linkedServiceIdsByCxc,
-                $creditPaidByParent
+                $creditPaidByParent,
+                $paidAmountsByCxc
             ): array {
                 $cxcId = (int) ($service->idcuentasPorCobrar ?? 0);
                 $creditParentId = (int) ($service->credit_parent_cxc_id ?? $cxcId);
@@ -1509,12 +1673,14 @@ class CuentasPorCobrarService
                     'tipo_cobro_id' => $this->tipoCobroIdFromPeriod($service->servicio_periodo ?? null) ?: (int) ($service->cxc_tipoCobro_idtipoCobros ?? 0),
                     'id_dispositivo' => $service->id_dispositivo ?? '-',
                     'numero' => $service->numero_sim ?? '-',
+                    'baja_programada_hasta' => $service->baja_programada_hasta ?? null,
                     'tipo' => $service->tipo_vehiculo ?: '-',
                     'marca' => $service->vehiculo_marca ?: '-',
                     'modelo' => $service->vehiculo_modelo ?: '-',
                     'tracto' => $service->vehiculo_tracto ?: '-',
                     'monto' => $amount,
                     'monto_pagado' => (float) ($creditPaidByParent[$creditParentId] ?? 0),
+                    'monto_pagado_periodo' => (float) ($paidAmountsByCxc[$cxcId] ?? 0),
                     'monto_display' => $this->currency($amount, $currency),
                     'monto_saldo' => (float) ($service->service_cxc_monto_actual ?? $service->cxc_montoActual ?? $service->cxc_montoOriginal ?? $service->monto ?? 0),
                     'cxc_ids' => (int) ($service->idcuentasPorCobrar ?? 0) > 0 ? [(int) $service->idcuentasPorCobrar] : [],
@@ -1544,12 +1710,14 @@ class CuentasPorCobrarService
                     && in_array((string) ($service->cxc_estado ?? ''), $activeStates, true)
                     && $this->hasOutstandingOrZeroValueReceivable($service, $linkedServiceIdsByCxc))
                 ->unique('idcuentasPorCobrar')
-                ->sortByDesc('idcuentasPorCobrar')
+                ->sortBy('idcuentasPorCobrar')
                 ->values();
             $inProgressTypeCharges = $typeCharges
                 ->filter(fn($charge): bool => $this->isDocumentedInProgressCharge($charge))
                 ->values();
-            $primaryTypeCharges = $inProgressTypeCharges->isNotEmpty() ? $inProgressTypeCharges : $typeCharges;
+            $primaryTypeCharges = $this->currentInvoiceCharges(
+                $inProgressTypeCharges->isNotEmpty() ? $inProgressTypeCharges : $typeCharges
+            );
             $financialTypeCharges = $primaryTypeCharges->reject(
                 fn($charge): bool => (bool) ($charge->service_credit_installment ?? false)
                     || isset($creditChildrenByParent[(int) $charge->idcuentasPorCobrar])
@@ -1598,6 +1766,9 @@ class CuentasPorCobrarService
                     ->all(),
                 $creditPaidByParent
             );
+            $typePaidAmount = round((float) $primaryTypeCharges
+                ->filter(fn($charge): bool => in_array((string) ($charge->cxc_estado ?? ''), $withholdingStates, true))
+                ->sum(fn($charge): float => (float) ($paidAmountsByCxc[(int) ($charge->idcuentasPorCobrar ?? 0)] ?? 0)), 2);
             $typeChargeIds = $primaryTypeCharges->pluck('idcuentasPorCobrar')
                 ->map(fn($id): int => (int) $id)
                 ->all();
@@ -1626,6 +1797,7 @@ class CuentasPorCobrarService
                 'monto_subtotal' => $subtotal,
                 'monto_subtotal_display' => $this->currency($subtotal, $currency),
                 'monto_pagado' => $typeCreditPaid,
+                'monto_pagado_periodo' => $typePaidAmount,
                 'monto_factura' => $typeOutstanding,
                 'monto_saldo' => $typeOutstanding,
                 'monto_saldo_display' => $this->currency($typeOutstanding, $currency),
@@ -1696,6 +1868,139 @@ class CuentasPorCobrarService
         }
 
         return $linkedServiceIdsByCxc;
+    }
+
+    private function loadPaidAmountsByCxc(Collection $services): array
+    {
+        $cxcIds = $services
+            ->filter(fn($service): bool => in_array((string) ($service->cxc_estado ?? ''), [
+                'Cancelado Detracción',
+                'Pendiente Autodetracción',
+                'Pendiente Autoretención',
+                'Pendiente a Detracción',
+                'Pendiente a Retención',
+            ], true))
+            ->pluck('idcuentasPorCobrar')
+            ->filter(fn($id): bool => (int) $id > 0)
+            ->map(fn($id): int => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($cxcIds->isEmpty() || !Schema::hasTable('detallecxc') || !Schema::hasTable('bancos')) {
+            return [];
+        }
+
+        $paidAmountsByCxc = [];
+        foreach ($cxcIds->chunk(500) as $cxcIdChunk) {
+            $paidAmountsByCxc += DB::table('detallecxc as dc')
+                ->join('bancos as b', 'b.idbancos', '=', 'dc.bancos_idbancos')
+                ->whereIn('dc.cuentasPorCobrar_idcuentasPorCobrar', $cxcIdChunk)
+                ->where('dc.estado', '1')
+                ->whereNotNull('dc.fechaPago')
+                ->where('b.tipoMov', 'I')
+                ->where(function ($query): void {
+                    $query->whereNull('b.informacion')
+                        ->orWhere('b.informacion', 'not like', '[ANULADO]%');
+                })
+                ->selectRaw('dc.cuentasPorCobrar_idcuentasPorCobrar as cxc_id, SUM(b.monto) as paid_amount')
+                ->groupBy('dc.cuentasPorCobrar_idcuentasPorCobrar')
+                ->get()
+                ->mapWithKeys(fn($row): array => [
+                    (int) $row->cxc_id => round((float) $row->paid_amount, 2),
+                ])
+                ->all();
+        }
+
+        return $paidAmountsByCxc;
+    }
+
+    private function loadBalanceCreditAmountsByCxc(Collection $services): array
+    {
+        $cxcIds = $services
+            ->pluck('idcuentasPorCobrar')
+            ->filter(fn($id): bool => (int) $id > 0)
+            ->map(fn($id): int => (int) $id)
+            ->unique()
+            ->values();
+
+        if (
+            $cxcIds->isEmpty()
+            || !Schema::hasTable('detallecxc')
+            || !Schema::hasTable('bancos')
+            || !Schema::hasTable('moneda')
+        ) {
+            return [];
+        }
+
+        $amountsByCxc = [];
+        foreach ($cxcIds->chunk(500) as $cxcIdChunk) {
+            $rows = DB::table('detallecxc as dc')
+                ->join('bancos as b', 'b.idbancos', '=', 'dc.bancos_idbancos')
+                ->leftJoin('moneda as m', 'm.idmoneda', '=', 'dc.moneda_idmoneda')
+                ->whereIn('dc.cuentasPorCobrar_idcuentasPorCobrar', $cxcIdChunk)
+                ->whereIn('dc.estado', ['1', 'A'])
+                ->whereNotNull('dc.fechaPago')
+                ->whereIn('b.tipoMov', ['A', 'C'])
+                ->where(function ($query): void {
+                    $query->whereNull('b.informacion')
+                        ->orWhere('b.informacion', 'not like', '[ANULADO]%');
+                })
+                ->select([
+                    'dc.cuentasPorCobrar_idcuentasPorCobrar as cxc_id',
+                    'b.tipoMov',
+                    'm.simbolo as moneda_simbolo',
+                ])
+                ->selectRaw('SUM(b.monto) as amount')
+                ->groupBy('dc.cuentasPorCobrar_idcuentasPorCobrar', 'b.tipoMov', 'm.simbolo')
+                ->get();
+
+            foreach ($rows as $row) {
+                $cxcId = (int) $row->cxc_id;
+                $type = strtoupper(trim((string) $row->tipoMov));
+                $symbol = $this->currencySymbol($row->moneda_simbolo ?? null);
+                $amountsByCxc[$cxcId][$type][$symbol] = round(
+                    (float) ($amountsByCxc[$cxcId][$type][$symbol] ?? 0) + (float) $row->amount,
+                    2
+                );
+            }
+        }
+
+        return $amountsByCxc;
+    }
+
+    private function balanceCreditDisplaysForCharges(Collection $charges, array $amountsByCxc): array
+    {
+        $totals = ['A' => [], 'C' => []];
+        $cxcIds = $charges
+            ->pluck('idcuentasPorCobrar')
+            ->filter(fn($id): bool => (int) $id > 0)
+            ->map(fn($id): int => (int) $id)
+            ->unique();
+
+        foreach ($cxcIds as $cxcId) {
+            foreach ($amountsByCxc[$cxcId] ?? [] as $type => $currencies) {
+                if (!isset($totals[$type])) {
+                    continue;
+                }
+
+                foreach ($currencies as $symbol => $amount) {
+                    $totals[$type][$symbol] = round(
+                        (float) ($totals[$type][$symbol] ?? 0) + (float) $amount,
+                        2
+                    );
+                }
+            }
+        }
+
+        $format = fn(array $currencies): string => collect($currencies)
+            ->filter(fn($amount): bool => (float) $amount > 0)
+            ->map(fn($amount, $symbol): string => $this->currency((float) $amount, (string) $symbol))
+            ->implode(', ');
+
+        return [
+            'saldo_a_favor_generado_display' => $format($totals['A']),
+            'saldo_a_favor_aplicado_display' => $format($totals['C']),
+        ];
     }
 
     private function nextServicePeriodEnd(object $service, Collection $tipoCobroDetails): ?string
@@ -2081,6 +2386,27 @@ class CuentasPorCobrarService
         ], true)
             || str_starts_with($state, 'PENDIENTE A CREDITO')
             || str_starts_with($state, 'PENDIENTE A CRÉDITO');
+    }
+
+    private function currentInvoiceCharges(Collection $charges): Collection
+    {
+        $orderedCharges = $charges->sortBy('idcuentasPorCobrar')->values();
+        $firstCharge = $orderedCharges->first();
+        if (!$firstCharge) {
+            return $orderedCharges;
+        }
+
+        $documentReference = trim((string) ($firstCharge->cxc_docReferencia ?? ''));
+
+        if ($documentReference === '') {
+            return $orderedCharges;
+        }
+
+        return $orderedCharges
+            ->filter(fn($charge): bool =>
+                trim((string) ($charge->cxc_docReferencia ?? '')) === $documentReference
+            )
+            ->values();
     }
 
     private function hasPartialPaymentInGroup(Collection $outstandingCharges): bool

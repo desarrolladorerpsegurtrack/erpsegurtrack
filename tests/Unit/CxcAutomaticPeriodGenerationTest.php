@@ -123,6 +123,94 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertSame(0, preg_match(sprintf($pattern, 456), 'CXC SC-4567'));
     }
 
+    public function test_historical_cxc_marker_for_missing_service_is_not_matched_by_amount(): void
+    {
+        $currentService = $this->serviceCxcRow(
+            0,
+            'Current period',
+            '2026-10-08',
+            '1',
+            null
+        );
+        $currentService->idservicioCliente = 42;
+        $currentService->monto = 60;
+        $currentService->fechaInicio = '2026-09-08';
+        $currentService->fecheVencimiento = '2026-10-08';
+
+        $historicalCharge = (object) [
+            'idcuentasPorCobrar' => 900,
+            'cliente_idcliente' => 'CLIENTE-1',
+            'estado' => '4',
+            'descripcion' => 'CXC 01/07/2026 a 08/10/2026 SC-41',
+            'fechaCancelacion' => '2026-10-08',
+            'montoOriginal' => 60,
+            'montoActual' => 60,
+            'moneda_idmoneda' => 1,
+            'docReferencia' => null,
+            'fechaRegistro' => null,
+        ];
+        $service = new CuentasPorCobrarService();
+        $rows = (new \ReflectionMethod($service, 'appendHistoricalPeriods'))->invoke(
+            $service,
+            collect([$currentService]),
+            collect(['CLIENTE-1' => collect([$historicalCharge])])
+        );
+
+        $this->assertSame([0], $rows->pluck('idcuentasPorCobrar')->all());
+    }
+
+    public function test_historical_service_marker_takes_priority_over_successor_service_ids(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'estado' => 'inactivo',
+            'monto' => 60,
+            'fecheVencimiento' => '2026-10-08',
+        ]);
+        $parentCxcId = $this->createCxc('CXC 01/07/2026 a 08/10/2026 SC-41', '4');
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $parentCxcId)->update([
+            'montoOriginal' => 60,
+            'montoActual' => 60,
+            'fechaCancelacion' => '2026-10-08',
+        ]);
+        $this->createCxc(
+            'REN-CXC-' . $parentCxcId . ' P 08/10/2026 a 30/11/2026 SC-41,42',
+            '1'
+        );
+
+        $currentService = $this->serviceCxcRow(
+            0,
+            'Current period',
+            '2026-11-30',
+            '1',
+            null
+        );
+        $currentService->idservicioCliente = 42;
+        $currentService->fecheVencimiento = '2026-11-30';
+        $currentService->monto = 60;
+        $historicalCharge = (object) [
+            'idcuentasPorCobrar' => $parentCxcId,
+            'cliente_idcliente' => 'CLIENTE-1',
+            'estado' => '4',
+            'descripcion' => 'CXC 01/07/2026 a 08/10/2026 SC-41',
+            'fechaCancelacion' => '2026-10-08',
+            'montoOriginal' => 60,
+            'montoActual' => 60,
+            'moneda_idmoneda' => 1,
+            'docReferencia' => null,
+            'fechaRegistro' => null,
+        ];
+        $service = new CuentasPorCobrarService();
+        $rows = (new \ReflectionMethod($service, 'appendHistoricalPeriods'))->invoke(
+            $service,
+            collect([$currentService]),
+            collect(['CLIENTE-1' => collect([$historicalCharge])])
+        );
+
+        $this->assertSame([0], $rows->pluck('idcuentasPorCobrar')->all());
+    }
+
     public function test_decorated_service_balances_are_allocated_by_linked_service_amount(): void
     {
         Schema::create('detallecxc', function (Blueprint $table): void {
@@ -608,12 +696,85 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             ['idservicioCliente' => 43, 'cliente_idcliente' => 'CLIENTE-1', 'estado' => 'activo', 'fecheVencimiento' => '2026-12-27', 'moneda_idmoneda' => 1, 'monto' => 60],
         ]);
 
+        if (DB::getDriverName() === 'sqlite') {
+            $pdo = DB::connection()->getPdo();
+            $pdo->sqliteCreateFunction('CONCAT', static fn (...$parts): string => implode('', $parts), -1);
+            $pdo->sqliteCreateFunction('REGEXP', static fn (string $pattern, string $value): int =>
+                preg_match('/' . $pattern . '/', $value) === 1 ? 1 : 0, 2);
+        }
+
+        $activeServiceTotals = DB::table('serviciocliente as sc_total')
+            ->where('sc_total.estado', 'activo')
+            ->select(['sc_total.cliente_idcliente', 'sc_total.fecheVencimiento', 'sc_total.moneda_idmoneda'])
+            ->selectRaw('SUM(sc_total.monto) as total_monto')
+            ->groupBy('sc_total.cliente_idcliente', 'sc_total.fecheVencimiento', 'sc_total.moneda_idmoneda');
         $service = new CuentasPorCobrarService();
         $query = DB::table('period_group_cxc as c')
-            ->join('serviciocliente as sc', 'sc.cliente_idcliente', '=', 'c.cliente_idcliente');
+            ->join('serviciocliente as sc', 'sc.cliente_idcliente', '=', 'c.cliente_idcliente')
+            ->leftJoinSub($activeServiceTotals, 'sc_totals', function ($join): void {
+                $join->on('sc_totals.cliente_idcliente', '=', 'c.cliente_idcliente')
+                    ->on('sc_totals.fecheVencimiento', '=', 'c.fechaCancelacion')
+                    ->on('sc_totals.moneda_idmoneda', '=', 'c.moneda_idmoneda');
+            });
         (new \ReflectionMethod($service, 'matchAggregateCxcServices'))->invoke($service, $query);
 
         $this->assertSame([41, 42, 43], $query->orderBy('sc.idservicioCliente')->pluck('sc.idservicioCliente')->all());
+    }
+
+    public function test_aggregate_cxc_match_does_not_attach_inactive_marked_service_to_active_service(): void
+    {
+        Schema::create('period_group_cxc', function (Blueprint $table): void {
+            $table->increments('idcuentasPorCobrar');
+            $table->string('cliente_idcliente');
+            $table->string('descripcion');
+            $table->date('fechaCancelacion');
+            $table->integer('moneda_idmoneda');
+            $table->decimal('montoOriginal', 10, 2);
+        });
+        Schema::create('serviciocliente', function (Blueprint $table): void {
+            $table->increments('idservicioCliente');
+            $table->string('cliente_idcliente');
+            $table->string('estado');
+            $table->date('fecheVencimiento');
+            $table->integer('moneda_idmoneda');
+            $table->decimal('monto', 10, 2);
+        });
+        DB::table('period_group_cxc')->insert([
+            'cliente_idcliente' => 'CLIENTE-1',
+            'descripcion' => 'CXC 01/07/2026 a 08/10/2026 SC-41',
+            'fechaCancelacion' => '2026-10-08',
+            'moneda_idmoneda' => 1,
+            'montoOriginal' => 60,
+        ]);
+        DB::table('serviciocliente')->insert([
+            ['idservicioCliente' => 41, 'cliente_idcliente' => 'CLIENTE-1', 'estado' => 'inactivo', 'fecheVencimiento' => '2026-10-08', 'moneda_idmoneda' => 1, 'monto' => 60],
+            ['idservicioCliente' => 42, 'cliente_idcliente' => 'CLIENTE-1', 'estado' => 'activo', 'fecheVencimiento' => '2026-10-08', 'moneda_idmoneda' => 1, 'monto' => 60],
+        ]);
+
+        if (DB::getDriverName() === 'sqlite') {
+            $pdo = DB::connection()->getPdo();
+            $pdo->sqliteCreateFunction('CONCAT', static fn (...$parts): string => implode('', $parts), -1);
+            $pdo->sqliteCreateFunction('REGEXP', static fn (string $pattern, string $value): int =>
+                preg_match('/' . $pattern . '/', $value) === 1 ? 1 : 0, 2);
+        }
+
+        $activeServiceTotals = DB::table('serviciocliente as sc_total')
+            ->where('sc_total.estado', 'activo')
+            ->select(['sc_total.cliente_idcliente', 'sc_total.fecheVencimiento', 'sc_total.moneda_idmoneda'])
+            ->selectRaw('SUM(sc_total.monto) as total_monto')
+            ->groupBy('sc_total.cliente_idcliente', 'sc_total.fecheVencimiento', 'sc_total.moneda_idmoneda');
+        $query = DB::table('period_group_cxc as c')
+            ->join('serviciocliente as sc', 'sc.cliente_idcliente', '=', 'c.cliente_idcliente')
+            ->leftJoinSub($activeServiceTotals, 'sc_totals', function ($join): void {
+                $join->on('sc_totals.cliente_idcliente', '=', 'c.cliente_idcliente')
+                    ->on('sc_totals.fecheVencimiento', '=', 'c.fechaCancelacion')
+                    ->on('sc_totals.moneda_idmoneda', '=', 'c.moneda_idmoneda');
+            });
+
+        (new \ReflectionMethod(new CuentasPorCobrarService(), 'matchAggregateCxcServices'))
+            ->invoke(new CuentasPorCobrarService(), $query);
+
+        $this->assertSame([], $query->pluck('sc.idservicioCliente')->all());
     }
 
     public function test_period_matching_does_not_use_a_document_shared_with_future_periods(): void
@@ -1203,7 +1364,11 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             collect([$invoicedService, $pendingService]),
             collect(),
             [],
-            collect()
+            collect(),
+            [],
+            [],
+            [],
+            [901 => 2250.0, 902 => 2217.5]
         );
 
         $this->assertSame('Pendiente Autodetracción', $groups[0]['estado_pago']);
@@ -1212,6 +1377,65 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertSame(12.0, $groups[0]['monto_saldo']);
         $this->assertSame(12.0, $groups[0]['monto_total']);
         $this->assertSame('S/ 12.00', $groups[0]['monto_total_display']);
+        $this->assertSame(2217.5, $groups[0]['monto_pagado_periodo']);
+        $this->assertSame(2217.5, $groups[0]['tipos_servicios'][0]['monto_pagado_periodo']);
+        $pendingVehicle = collect($groups[0]['tipos_servicios'][0]['vehiculos'])
+            ->firstWhere('cxc_estado', 'Pendiente Autodetracción');
+        $this->assertSame(2217.5, $pendingVehicle['monto_pagado_periodo']);
+    }
+
+    public function test_pending_withholding_paid_amount_uses_only_active_customer_payments_for_its_cxc(): void
+    {
+        Schema::create('bancos', function (Blueprint $table): void {
+            $table->increments('idbancos');
+            $table->string('tipoMov')->nullable();
+            $table->string('informacion')->nullable();
+            $table->decimal('monto', 10, 2)->default(0);
+        });
+        Schema::create('detallecxc', function (Blueprint $table): void {
+            $table->increments('iddetalleCXC');
+            $table->integer('cuentasPorCobrar_idcuentasPorCobrar');
+            $table->integer('bancos_idbancos')->nullable();
+            $table->string('estado')->nullable();
+            $table->date('fechaPago')->nullable();
+        });
+        DB::table('bancos')->insert([
+            ['idbancos' => 1, 'tipoMov' => 'I', 'informacion' => 'Pago anterior', 'monto' => 2250],
+            ['idbancos' => 2, 'tipoMov' => 'I', 'informacion' => 'Pago actual', 'monto' => 2217.5],
+            ['idbancos' => 3, 'tipoMov' => 'S', 'informacion' => 'Autodetracción', 'monto' => 266],
+            ['idbancos' => 4, 'tipoMov' => 'I', 'informacion' => '[ANULADO] Pago revertido', 'monto' => 500],
+            ['idbancos' => 5, 'tipoMov' => 'I', 'informacion' => 'Pago de noviembre', 'monto' => 123.45],
+            ['idbancos' => 6, 'tipoMov' => 'C', 'informacion' => 'Aplicación saldo a favor a CXC #902', 'monto' => 40],
+        ]);
+        DB::table('detallecxc')->insert([
+            ['cuentasPorCobrar_idcuentasPorCobrar' => 901, 'bancos_idbancos' => 1, 'estado' => '1', 'fechaPago' => '2026-10-29'],
+            ['cuentasPorCobrar_idcuentasPorCobrar' => 902, 'bancos_idbancos' => 2, 'estado' => '1', 'fechaPago' => '2026-11-16'],
+            ['cuentasPorCobrar_idcuentasPorCobrar' => 902, 'bancos_idbancos' => 3, 'estado' => '1', 'fechaPago' => '2026-11-16'],
+            ['cuentasPorCobrar_idcuentasPorCobrar' => 902, 'bancos_idbancos' => 4, 'estado' => '1', 'fechaPago' => '2026-11-16'],
+            ['cuentasPorCobrar_idcuentasPorCobrar' => 902, 'bancos_idbancos' => 2, 'estado' => '0', 'fechaPago' => null],
+            ['cuentasPorCobrar_idcuentasPorCobrar' => 902, 'bancos_idbancos' => 6, 'estado' => '1', 'fechaPago' => '2026-11-16'],
+            ['cuentasPorCobrar_idcuentasPorCobrar' => 903, 'bancos_idbancos' => 5, 'estado' => '1', 'fechaPago' => '2026-11-16'],
+            ['cuentasPorCobrar_idcuentasPorCobrar' => 904, 'bancos_idbancos' => 5, 'estado' => '1', 'fechaPago' => '2026-11-16'],
+            ['cuentasPorCobrar_idcuentasPorCobrar' => 905, 'bancos_idbancos' => 5, 'estado' => '1', 'fechaPago' => '2026-11-16'],
+        ]);
+
+        $service = new CuentasPorCobrarService();
+        $paidAmounts = (new \ReflectionMethod($service, 'loadPaidAmountsByCxc'))->invoke(
+            $service,
+            collect([
+                (object) ['idcuentasPorCobrar' => 901, 'cxc_estado' => 'Pendiente Autodetracción'],
+                (object) ['idcuentasPorCobrar' => 902, 'cxc_estado' => 'Pendiente Autodetracción'],
+                (object) ['idcuentasPorCobrar' => 903, 'cxc_estado' => 'Pendiente a Detracción'],
+                (object) ['idcuentasPorCobrar' => 904, 'cxc_estado' => 'Pendiente a Retención'],
+                (object) ['idcuentasPorCobrar' => 905, 'cxc_estado' => 'Cancelado Detracción'],
+            ])
+        );
+
+        $this->assertSame(2250.0, $paidAmounts[901]);
+        $this->assertSame(2217.5, $paidAmounts[902]);
+        $this->assertSame(123.45, $paidAmounts[903]);
+        $this->assertSame(123.45, $paidAmounts[904]);
+        $this->assertSame(123.45, $paidAmounts[905]);
     }
 
     public function test_deferred_monthly_proration_is_not_capped_at_service_base_price_in_group_total(): void
@@ -1262,6 +1486,82 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         } finally {
             Carbon::setTestNow();
         }
+    }
+
+    public function test_cxc_groups_show_generated_and_applied_balance_credit_with_its_currency(): void
+    {
+        Schema::create('bancos', function (Blueprint $table): void {
+            $table->increments('idbancos');
+            $table->string('tipoMov')->nullable();
+            $table->string('informacion')->nullable();
+            $table->decimal('monto', 10, 2)->default(0);
+        });
+        Schema::create('moneda', function (Blueprint $table): void {
+            $table->increments('idmoneda');
+            $table->string('simbolo')->nullable();
+        });
+        Schema::create('detallecxc', function (Blueprint $table): void {
+            $table->increments('iddetalleCXC');
+            $table->integer('cuentasPorCobrar_idcuentasPorCobrar');
+            $table->integer('bancos_idbancos')->nullable();
+            $table->integer('moneda_idmoneda')->nullable();
+            $table->string('estado')->nullable();
+            $table->date('fechaPago')->nullable();
+        });
+        DB::table('moneda')->insert([
+            ['idmoneda' => 1, 'simbolo' => 'S/'],
+            ['idmoneda' => 2, 'simbolo' => '$'],
+        ]);
+        DB::table('bancos')->insert([
+            ['idbancos' => 1, 'tipoMov' => 'A', 'informacion' => 'Saldo a favor por sobrepago', 'monto' => 40],
+            ['idbancos' => 2, 'tipoMov' => 'C', 'informacion' => 'Aplicación saldo a favor a CXC #902', 'monto' => 30],
+            ['idbancos' => 3, 'tipoMov' => 'A', 'informacion' => 'Saldo a favor anulado', 'monto' => 50],
+        ]);
+        DB::table('detallecxc')->insert([
+            ['cuentasPorCobrar_idcuentasPorCobrar' => 901, 'bancos_idbancos' => 1, 'moneda_idmoneda' => 1, 'estado' => 'A', 'fechaPago' => '2026-11-16'],
+            ['cuentasPorCobrar_idcuentasPorCobrar' => 902, 'bancos_idbancos' => 2, 'moneda_idmoneda' => 2, 'estado' => '1', 'fechaPago' => '2026-11-16'],
+            ['cuentasPorCobrar_idcuentasPorCobrar' => 903, 'bancos_idbancos' => 3, 'moneda_idmoneda' => 1, 'estado' => '0', 'fechaPago' => '2026-11-16'],
+        ]);
+
+        $service = new CuentasPorCobrarService();
+        $creditAmounts = (new \ReflectionMethod($service, 'loadBalanceCreditAmountsByCxc'))->invoke(
+            $service,
+            collect([
+                (object) ['idcuentasPorCobrar' => 901],
+                (object) ['idcuentasPorCobrar' => 902],
+                (object) ['idcuentasPorCobrar' => 903],
+            ])
+        );
+        $generatedService = $this->serviceCxcRow(901, 'October charge', '2026-11-23', '3', 'FAC-901');
+        $appliedService = $this->serviceCxcRow(902, 'November charge', '2026-11-23', '3', 'FAC-902');
+        $generatedService->dias_restantes = 0;
+        $appliedService->dias_restantes = 0;
+        $appliedService->idservicioCliente = 42;
+        $appliedService->moneda_idmoneda = 2;
+        $appliedService->servicio_moneda_id = 2;
+        $appliedService->moneda_simbolo = '$';
+
+        $groups = (new \ReflectionMethod($service, 'groupServices'))->invoke(
+            $service,
+            collect([$generatedService, $appliedService]),
+            collect(),
+            [],
+            collect(),
+            [],
+            [],
+            [],
+            [],
+            $creditAmounts
+        );
+        $groupsByCxc = collect($groups)->keyBy('cxc_id');
+
+        $this->assertArrayNotHasKey(903, $creditAmounts);
+        $this->assertSame('S/ 40.00', $groupsByCxc[901]['saldo_a_favor_generado_display']);
+        $this->assertSame('', $groupsByCxc[901]['saldo_a_favor_aplicado_display']);
+        $this->assertSame('', $groupsByCxc[902]['saldo_a_favor_generado_display']);
+        $this->assertSame('$ 30.00', $groupsByCxc[902]['saldo_a_favor_aplicado_display']);
+        $this->assertSame(45.0, $groupsByCxc[901]['monto_total']);
+        $this->assertSame(45.0, $groupsByCxc[902]['monto_total']);
     }
 
     public function test_service_groups_keep_the_requested_payment_status_order_after_filtering(): void
@@ -1638,7 +1938,7 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertSame(125, $groups[0]['cxc_id']);
     }
 
-    public function test_inactive_services_keep_cancelled_group_cxc_total_without_duplicating_vehicle_amounts(): void
+    public function test_cancelled_period_keeps_inactive_vehicles_but_unbilled_inactive_services_are_hidden(): void
     {
         Schema::create('detallecxc', function (Blueprint $table): void {
             $table->increments('iddetalleCXC');
@@ -1660,12 +1960,22 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $second = clone $first;
         $second->idservicioCliente = 42;
         $second->vehiculo_placa = 'XYZ-987';
+        $unbilled = clone $first;
+        $unbilled->idcuentasPorCobrar = 301;
+        $unbilled->idservicioCliente = 43;
+        $unbilled->cxc_estado = '1';
+        $unbilled->cxc_docReferencia = null;
+        $unbilled->cxc_montoOriginal = 45;
+        $unbilled->cxc_montoActual = 45;
+        $unbilled->vehiculo_placa = 'DEF-456';
         $rows = (new \ReflectionMethod(new CuentasPorCobrarService(), 'decorateServices'))
-            ->invoke(new CuentasPorCobrarService(), collect([$first, $second]), [[], [], []]);
+            ->invoke(new CuentasPorCobrarService(), collect([$first, $second, $unbilled]), [[], [], []]);
         $groups = (new \ReflectionMethod(new CuentasPorCobrarService(), 'groupServices'))
             ->invoke(new CuentasPorCobrarService(), $rows, collect(), [], collect());
 
-        $this->assertCount(0, $groups);
+        $this->assertCount(1, $groups);
+        $this->assertSame(45.0, $groups[0]['tipos_servicios'][0]['monto_subtotal']);
+        $this->assertSame([41, 42], array_column($groups[0]['tipos_servicios'][0]['vehiculos'], 'idservicioCliente'));
     }
 
     public function test_group_omits_stale_cxc_with_zero_balance_but_keeps_payable_receivables(): void
@@ -1707,6 +2017,47 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertSame([41, 43], $groups[0]['payment_service_ids']);
         $this->assertSame([41, 43], $groups[0]['tipos_servicios'][0]['service_ids']);
         $this->assertSame(45.0, (float) $groups[0]['monto_saldo']);
+    }
+
+    public function test_group_total_omits_unbilled_receivables_for_inactive_services(): void
+    {
+        $activeService = $this->serviceCxcRow(
+            301,
+            'CXC 23/09/2026 a 23/10/2026 SC-41',
+            '2026-10-23',
+            '4',
+            null
+        );
+        $activeService->monto = 100;
+        $activeService->cxc_montoOriginal = 100;
+        $activeService->cxc_montoActual = 100;
+        $activeService->cxc_mod_monto = 'Si mantener precio pasado';
+        $activeService->dias_restantes = 1;
+
+        $inactiveService = clone $activeService;
+        $inactiveService->idcuentasPorCobrar = 302;
+        $inactiveService->idservicioCliente = 42;
+        $inactiveService->estado = 'inactivo';
+        $inactiveService->monto = 60;
+        $inactiveService->cxc_montoOriginal = 60;
+        $inactiveService->cxc_montoActual = 60;
+        $inactiveService->cxc_mod_monto = null;
+        $inactiveService->cxc_descripcion = 'CXC 23/09/2026 a 23/10/2026 SC-42';
+
+        $service = new CuentasPorCobrarService();
+        $groups = (new \ReflectionMethod($service, 'groupServices'))->invoke(
+            $service,
+            collect([$activeService, $inactiveService]),
+            collect(),
+            [],
+            collect()
+        );
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(100.0, (float) $groups[0]['monto_total']);
+        $this->assertSame(100.0, (float) $groups[0]['monto_saldo']);
+        $this->assertSame([301], $groups[0]['cxc_ids']);
+        $this->assertSame(100.0, (float) $groups[0]['tipos_servicios'][0]['monto_subtotal']);
     }
 
     public function test_cancelled_group_preserves_each_service_price_instead_of_allocating_cxc_total(): void
@@ -2031,7 +2382,7 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             ->where('descripcion', 'like', 'REN-CXC-' . $sourceCxcId . ' P %SC-42')
             ->first();
         $this->assertSame(3, DB::table('cuentasporcobrar')->count());
-        $this->assertSame('2026-11-10', $existingSuccessor->fechaRegistro);
+        $this->assertSame('2026-11-01', $existingSuccessor->fechaRegistro);
         $this->assertSame('2026-12-31', $existingSuccessor->fechaCancelacion);
         $this->assertSame('F001-0001', $existingSuccessor->docReferencia);
         $this->assertSame('Pendiente Pago parcial', $existingSuccessor->estado);
@@ -2044,7 +2395,7 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertSame('2026-11-10', $newSuccessor->fechaRegistro);
     }
 
-    public function test_payment_updates_amount_of_grouped_successor_without_resetting_payments(): void
+    public function test_payment_preserves_existing_grouped_successor_amounts_and_links(): void
     {
         $this->createSchema();
         $this->createOctoberService();
@@ -2078,6 +2429,28 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             'montoOriginal' => 110,
             'montoActual' => 80,
             'fechaCancelacion' => '2026-12-31',
+            'fechaRegistro' => '2026-11-01',
+            'tipoCobro_idtipoCobros' => 6,
+            'mod_monto' => CxcService::MONTHLY_PRORATION_PRICE_MARKER,
+            'docReferencia' => 'F001-0001',
+        ]);
+        Schema::create('cuentasporcobrar_serviciocliente', function (Blueprint $table): void {
+            $table->integer('cuentasPorCobrar_idcuentasPorCobrar');
+            $table->integer('servicioCliente_idservicioCliente');
+            $table->decimal('montoServicio', 12, 2)->nullable();
+            $table->primary(['cuentasPorCobrar_idcuentasPorCobrar', 'servicioCliente_idservicioCliente']);
+        });
+        DB::table('cuentasporcobrar_serviciocliente')->insert([
+            [
+                'cuentasPorCobrar_idcuentasPorCobrar' => $successorId,
+                'servicioCliente_idservicioCliente' => 41,
+                'montoServicio' => 50,
+            ],
+            [
+                'cuentasPorCobrar_idcuentasPorCobrar' => $successorId,
+                'servicioCliente_idservicioCliente' => 42,
+                'montoServicio' => 60,
+            ],
         ]);
 
         $returnedId = (new CxcService())->renovarServicioVinculado(
@@ -2095,11 +2468,35 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $successor = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $successorId)->first();
         $this->assertSame($successorId, $returnedId);
         $this->assertSame(2, DB::table('cuentasporcobrar')->count());
-        $this->assertSame(120.0, (float) $successor->montoOriginal);
-        $this->assertSame(90.0, (float) $successor->montoActual);
+        $this->assertSame(110.0, (float) $successor->montoOriginal);
+        $this->assertSame(80.0, (float) $successor->montoActual);
         $this->assertSame('Pendiente a credito', $successor->estado);
-        $this->assertSame('2026-11-10', $successor->fechaRegistro);
+        $this->assertSame('2026-11-01', $successor->fechaRegistro);
         $this->assertSame('2026-12-31', $successor->fechaCancelacion);
+        $this->assertSame(
+            'REN-CXC-' . $sourceCxcId . ' P 15/11/2026 a 31/12/2026 SC-41,42',
+            $successor->descripcion
+        );
+        $this->assertSame(6, (int) $successor->tipoCobro_idtipoCobros);
+        $this->assertSame(CxcService::MONTHLY_PRORATION_PRICE_MARKER, $successor->mod_monto);
+        $this->assertSame('F001-0001', $successor->docReferencia);
+        $this->assertSame(
+            [50.0, 60.0],
+            DB::table('cuentasporcobrar_serviciocliente')
+                ->where('cuentasPorCobrar_idcuentasPorCobrar', $successorId)
+                ->orderBy('servicioCliente_idservicioCliente')
+                ->pluck('montoServicio')
+                ->map(fn($amount): float => (float) $amount)
+                ->all()
+        );
+        $this->assertSame(
+            ['2026-11-15', '2026-11-15'],
+            DB::table('serviciocliente')
+                ->whereIn('idservicioCliente', [41, 42])
+                ->orderBy('idservicioCliente')
+                ->pluck('fecheVencimiento')
+                ->all()
+        );
     }
 
     public function test_new_monthly_service_prorates_its_second_charge_and_anchors_end_of_month(): void
@@ -2923,6 +3320,93 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             ->value('fecheVencimiento'));
     }
 
+    public function test_individual_payment_reuses_the_next_period_after_splitting_a_group_cxc(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        Schema::create('cuentasporcobrar_serviciocliente', function (Blueprint $table): void {
+            $table->integer('cuentasPorCobrar_idcuentasPorCobrar');
+            $table->integer('servicioCliente_idservicioCliente');
+            $table->decimal('montoServicio', 12, 2)->nullable();
+            $table->primary(['cuentasPorCobrar_idcuentasPorCobrar', 'servicioCliente_idservicioCliente']);
+        });
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fechaInicio' => '2026-09-30',
+            'fecheVencimiento' => '2026-12-31',
+        ]);
+        DB::table('serviciocliente')->insert([
+            'idservicioCliente' => 42,
+            'cliente_idcliente' => 'CLIENTE-1',
+            'estado' => 'activo',
+            'fechaInicio' => '2026-09-30',
+            'fecheVencimiento' => '2026-10-31',
+            'moneda_idmoneda' => 1,
+            'tipoCobro_idtipoCobros' => 5,
+            'monto' => 45,
+        ]);
+        $sourceCxcId = $this->createCxc(
+            'CXC 30/09/2026 a 31/10/2026 SC-41,42',
+            '1'
+        );
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $sourceCxcId)->update([
+            'montoOriginal' => 90,
+            'montoActual' => 90,
+            'fechaCancelacion' => '2026-10-31',
+        ]);
+        DB::table('cuentasporcobrar_serviciocliente')->insert([
+            [
+                'cuentasPorCobrar_idcuentasPorCobrar' => $sourceCxcId,
+                'servicioCliente_idservicioCliente' => 41,
+                'montoServicio' => 45,
+            ],
+            [
+                'cuentasPorCobrar_idcuentasPorCobrar' => $sourceCxcId,
+                'servicioCliente_idservicioCliente' => 42,
+                'montoServicio' => 45,
+            ],
+        ]);
+        $isolated = (new CxcService())->isolateSelectedServiceReceivables([$sourceCxcId], [41]);
+        $isolatedCxcId = $isolated['cxc_ids'][0];
+        $novemberCxcId = $this->createCxc(
+            'REN-CXC-' . $sourceCxcId . ' P 31/10/2026 a 30/11/2026 SC-41',
+            '1'
+        );
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $novemberCxcId)->update([
+            'montoOriginal' => 70,
+            'montoActual' => 50,
+            'fechaCancelacion' => '2026-11-30',
+        ]);
+        $decemberCxcId = $this->createCxc(
+            'REN-CXC-' . $novemberCxcId . ' P 30/11/2026 a 31/12/2026 SC-41',
+            '1'
+        );
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $decemberCxcId)->update([
+            'fechaCancelacion' => '2026-12-31',
+        ]);
+
+        $returnedId = (new CxcService())->renovarServicioVinculado(
+            DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $isolatedCxcId)->first(),
+            0,
+            Carbon::parse('2026-11-05'),
+            [41],
+            5,
+            null,
+            false,
+            null,
+            '2026-11-05 10:00:00'
+        );
+
+        $this->assertSame($novemberCxcId, $returnedId);
+        $this->assertSame(4, DB::table('cuentasporcobrar')->count());
+        $novemberCxc = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $novemberCxcId)->first();
+        $this->assertSame('2026-11-05', Carbon::parse($novemberCxc->fechaRegistro)->toDateString());
+        $this->assertSame(70.0, (float) $novemberCxc->montoOriginal);
+        $this->assertSame(50.0, (float) $novemberCxc->montoActual);
+        $this->assertSame('REN-CXC-' . $sourceCxcId . ' P 31/10/2026 a 30/11/2026 SC-41', $novemberCxc->descripcion);
+        $this->assertSame('2026-11-30', $novemberCxc->fechaCancelacion);
+        $this->assertNull(DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $decemberCxcId)->value('fechaRegistro'));
+    }
+
     public function test_same_client_services_with_different_periods_share_one_visual_group(): void
     {
         Schema::create('tipocobro', function (Blueprint $table): void {
@@ -3237,6 +3721,47 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             'REN-CXC-0 P 23/09/2026 a 23/10/2026 SC-42',
             'CANCELADO'
         );
+        DB::table('serviciocliente')->insert([
+            'idservicioCliente' => 43,
+            'cliente_idcliente' => 'CLIENTE-1',
+            'estado' => 'inactivo',
+            'fechaInicio' => '2026-09-23',
+            'fecheVencimiento' => '2026-11-30',
+            'moneda_idmoneda' => 1,
+            'tipoCobro_idtipoCobros' => 5,
+            'monto' => 45,
+            'almacen_idalmacen' => null,
+            'vehiculo_placa' => 'DEF-456',
+            'docReferencia' => null,
+        ]);
+        $unbilledInactiveCxcId = $this->createCxc(
+            'REN-CXC-' . $inactiveServiceCancelledId . ' P 23/10/2026 a 30/11/2026 SC-43',
+            '1'
+        );
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $unbilledInactiveCxcId)->update([
+            'fechaCancelacion' => '2026-11-30',
+        ]);
+        DB::table('serviciocliente')->insert([
+            'idservicioCliente' => 44,
+            'cliente_idcliente' => 'CLIENTE-1',
+            'estado' => 'inactivo',
+            'fechaInicio' => '2026-09-23',
+            'fecheVencimiento' => '2026-11-30',
+            'moneda_idmoneda' => 1,
+            'tipoCobro_idtipoCobros' => 5,
+            'monto' => 45,
+            'almacen_idalmacen' => null,
+            'vehiculo_placa' => 'GHI-789',
+            'docReferencia' => null,
+        ]);
+        $invoicedInactiveCxcId = $this->createCxc(
+            'REN-CXC-1 P 23/10/2026 a 30/11/2026 SC-44',
+            '1'
+        );
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $invoicedInactiveCxcId)->update([
+            'docReferencia' => 'F001-444',
+            'fechaCancelacion' => '2026-11-30',
+        ]);
         $octoberCancelledId = $this->createCxc(
             'REN-CXC-0 P 23/09/2026 a 23/10/2026 SC-41',
             'CANCELADO'
@@ -3265,7 +3790,7 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
 
         $servicesById = $services->keyBy('idcuentasPorCobrar');
         $this->assertEqualsCanonicalizing(
-            [$successorId, $numericCancelledId, $textCancelledId, $inactiveServiceCancelledId, $octoberCancelledId],
+            [$successorId, $numericCancelledId, $textCancelledId, $inactiveServiceCancelledId, $invoicedInactiveCxcId, $octoberCancelledId],
             $services->pluck('idcuentasPorCobrar')->all()
         );
         $this->assertSame('3', (string) $servicesById[$numericCancelledId]->cxc_estado);
@@ -3278,6 +3803,7 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         }
         $this->assertSame('2026-10-23', (string) $servicesById[$inactiveServiceCancelledId]->cxc_fechaCancelacion);
         $this->assertSame(45.0, (float) $servicesById[$inactiveServiceCancelledId]->cxc_montoOriginal);
+        $this->assertSame(44, (int) $servicesById[$invoicedInactiveCxcId]->idservicioCliente);
 
         $octoberServices = $loadServices->invoke($service, [
             'service_months' => ['octubre'],
@@ -3869,7 +4395,7 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertSame('2026-10-23', DB::table('serviciocliente')->value('fecheVencimiento'));
     }
 
-    public function test_scheduled_deactivation_reprices_only_the_selected_service_in_future_grouped_cxc(): void
+    public function test_scheduled_deactivation_preserves_cycle_through_month_end_and_reprices_the_next_cycle(): void
     {
         $this->createSchema();
         $this->createOctoberService();
@@ -3883,9 +4409,15 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             'tipoCobro_idtipoCobros' => 5,
             'monto' => 45,
         ]);
-        $futureId = $this->createCxc('REN-CXC-1 P 23/10/2026 a 23/11/2026 SC-41,42', '1');
-        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $futureId)->update([
+        $currentCycleId = $this->createCxc('REN-CXC-1 P 23/09/2026 a 23/11/2026 SC-41,42', '1');
+        $nextCycleId = $this->createCxc('REN-CXC-' . $currentCycleId . ' P 23/11/2026 a 23/12/2026 SC-41,42', '1');
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $currentCycleId)->update([
             'fechaCancelacion' => '2026-11-23',
+            'montoOriginal' => 90,
+            'montoActual' => 90,
+        ]);
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $nextCycleId)->update([
+            'fechaCancelacion' => '2026-12-23',
             'montoOriginal' => 90,
             'montoActual' => 90,
         ]);
@@ -3900,21 +4432,348 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             Carbon::parse('2026-10-01')
         );
 
-        $futureCharge = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $futureId)->first();
+        $currentCycle = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $currentCycleId)->first();
+        $nextCycle = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $nextCycleId)->first();
         $service = DB::table('serviciocliente')->where('idservicioCliente', 41)->first();
         $this->assertSame(1, $processed);
         $this->assertSame('activo', $service->estado);
+        $this->assertSame('2026-10-31', $service->fecheVencimiento);
         $scheduledHistory = DB::table('historial_servicio')
             ->where('servicioCliente_idservicioCliente', 41)
-            ->where('motivo', 'Baja programada al finalizar periodo')
+            ->where('motivo', 'Baja prog')
             ->first();
+        $this->assertLessThanOrEqual(10, mb_strlen($scheduledHistory->motivo, 'UTF-8'));
         $this->assertStringContainsString('Cliente solicita baja al final de su periodo.', $scheduledHistory->descripcion);
         $this->assertStringContainsString('(Mantener SIM/Número: No)', $scheduledHistory->descripcion);
-        $this->assertSame('1', $futureCharge->estado);
-        $this->assertSame(45.0, (float) $futureCharge->montoOriginal);
-        $this->assertSame(45.0, (float) $futureCharge->montoActual);
-        $this->assertStringContainsString('SC-42', $futureCharge->descripcion);
-        $this->assertStringNotContainsString('SC-41', $futureCharge->descripcion);
+        $this->assertSame('1', $currentCycle->estado);
+        $this->assertSame(90.0, (float) $currentCycle->montoOriginal);
+        $this->assertSame(90.0, (float) $currentCycle->montoActual);
+        $this->assertStringContainsString('SC-41', $currentCycle->descripcion);
+        $this->assertSame('1', $nextCycle->estado);
+        $this->assertSame(45.0, (float) $nextCycle->montoOriginal);
+        $this->assertSame(45.0, (float) $nextCycle->montoActual);
+        $this->assertStringContainsString('SC-42', $nextCycle->descripcion);
+        $this->assertStringNotContainsString('SC-41', $nextCycle->descripcion);
+    }
+
+    public function test_scheduled_deactivation_keeps_current_month_charge_and_removes_service_from_later_months(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fecheVencimiento' => '2027-02-28',
+            'monto' => 50,
+        ]);
+        $serviceIds = range(41, 50);
+        DB::table('serviciocliente')->insert(array_map(
+            fn(int $serviceId): array => [
+                'idservicioCliente' => $serviceId,
+                'cliente_idcliente' => 'CLIENTE-1',
+                'estado' => 'activo',
+                'fechaInicio' => '2026-09-23',
+                'fecheVencimiento' => '2027-02-28',
+                'moneda_idmoneda' => 1,
+                'tipoCobro_idtipoCobros' => 5,
+                'monto' => 50,
+            ],
+            array_slice($serviceIds, 1)
+        ));
+        $serviceMarker = 'SC-' . implode(',', $serviceIds);
+        $decemberId = $this->createCxc('CXC 01/12/2026 a 31/12/2026 ' . $serviceMarker, '1');
+        $januaryId = $this->createCxc('CXC 01/01/2027 a 31/01/2027 ' . $serviceMarker, '1');
+        $februaryId = $this->createCxc('CXC 01/02/2027 a 28/02/2027 ' . $serviceMarker, '1');
+        Schema::create('detallecxc', function (Blueprint $table): void {
+            $table->increments('iddetalleCXC');
+            $table->integer('cuentasPorCobrar_idcuentasPorCobrar');
+            $table->dateTime('fechaPago')->nullable();
+            $table->integer('bancos_idbancos')->nullable();
+        });
+        foreach ([$decemberId => '2026-12-31', $januaryId => '2027-01-31', $februaryId => '2027-02-28'] as $cxcId => $endDate) {
+            DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $cxcId)->update([
+                'fechaCancelacion' => $endDate,
+                'montoOriginal' => 500,
+                'montoActual' => 500,
+            ]);
+        }
+        DB::table('detallecxc')->insert([
+            'cuentasPorCobrar_idcuentasPorCobrar' => $decemberId,
+            'fechaPago' => '2026-12-20 10:00:00',
+            'bancos_idbancos' => 15,
+        ]);
+
+        $service = new CxcService();
+        $processed = $service->darDeBajaServicios(
+            [41],
+            'periodo',
+            'Baja al cierre del mes.',
+            'si',
+            'usuario-prueba',
+            Carbon::parse('2026-12-15')
+        );
+
+        $this->assertSame(1, $processed);
+        $this->assertSame('activo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        $this->assertSame('2026-12-31', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('fecheVencimiento'));
+        $this->assertSame(500.0, (float) DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $decemberId)->value('montoOriginal'));
+        foreach ([$januaryId, $februaryId] as $futureId) {
+            $futureCharge = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $futureId)->first();
+            $this->assertSame(450.0, (float) $futureCharge->montoOriginal);
+            $this->assertSame(450.0, (float) $futureCharge->montoActual);
+            $this->assertStringNotContainsString('SC-41', $futureCharge->descripcion);
+        }
+
+        $this->assertSame(0, $service->procesarBajasProgramadas(Carbon::parse('2026-12-31')));
+        $this->assertSame('activo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        $this->assertSame(1, $service->procesarBajasProgramadas(Carbon::parse('2027-01-01')));
+        $this->assertSame('inactivo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        $chargedCurrentPeriod = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $decemberId)->first();
+        $this->assertSame(500.0, (float) $chargedCurrentPeriod->montoOriginal);
+        $this->assertStringContainsString('SC-41', $chargedCurrentPeriod->descripcion);
+    }
+
+    public function test_scheduled_deactivation_excludes_next_cxc_starting_at_month_end_and_saves_hardware(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fecheVencimiento' => '2027-02-28',
+            'monto' => 50,
+        ]);
+        $serviceIds = range(41, 50);
+        DB::table('serviciocliente')->insert(array_map(
+            fn(int $serviceId): array => [
+                'idservicioCliente' => $serviceId,
+                'cliente_idcliente' => 'CLIENTE-1',
+                'estado' => 'activo',
+                'fechaInicio' => '2026-09-23',
+                'fecheVencimiento' => '2027-02-28',
+                'moneda_idmoneda' => 1,
+                'tipoCobro_idtipoCobros' => 5,
+                'monto' => 50,
+            ],
+            array_slice($serviceIds, 1)
+        ));
+        $serviceMarker = 'SC-' . implode(',', $serviceIds);
+        $currentCycleId = $this->createCxc('CXC 31/10/2026 a 30/11/2026 ' . $serviceMarker, '1');
+        $nextCycleId = $this->createCxc('CXC 30/11/2026 a 31/12/2026 ' . $serviceMarker, '1');
+        foreach ([$currentCycleId => '2026-11-30', $nextCycleId => '2026-12-31'] as $cxcId => $endDate) {
+            DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $cxcId)->update([
+                'fechaCancelacion' => $endDate,
+                'montoOriginal' => 500,
+                'montoActual' => 500,
+            ]);
+        }
+        $this->createBajaHistorySchema();
+        Schema::create('detnumerosdispositivo', function (Blueprint $table): void {
+            $table->increments('iddetalleNumeroDispositivo');
+            $table->integer('dispositivoCliente_iddispositivoCliente');
+            $table->string('numeroTelefonico_numeroTelefonico');
+            $table->dateTime('fechaAsignacion')->nullable();
+        });
+        DB::table('detalle_serviciodispositivo')->insert([
+            'servicioCliente_idservicioCliente' => 41,
+            'dispositivoCliente_iddispositivoCliente' => 7041,
+        ]);
+        DB::table('detnumerosdispositivo')->insert([
+            'dispositivoCliente_iddispositivoCliente' => 7041,
+            'numeroTelefonico_numeroTelefonico' => '987654321',
+            'fechaAsignacion' => '2026-10-01 10:00:00',
+        ]);
+
+        $processed = (new CxcService())->darDeBajaServicios(
+            [41],
+            'periodo',
+            'Baja solicitada en noviembre.',
+            'si',
+            'usuario-prueba',
+            Carbon::parse('2026-11-06')
+        );
+
+        $currentCycle = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $currentCycleId)->first();
+        $nextCycle = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $nextCycleId)->first();
+        $scheduledHistory = DB::table('historial_servicio')
+            ->where('servicioCliente_idservicioCliente', 41)
+            ->where('motivo', 'Baja prog')
+            ->first();
+        $this->assertSame(1, $processed);
+        $this->assertSame(500.0, (float) $currentCycle->montoOriginal);
+        $this->assertSame(500.0, (float) $currentCycle->montoActual);
+        $this->assertStringContainsString('SC-41', $currentCycle->descripcion);
+        $this->assertSame('2026-11-30', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('fecheVencimiento'));
+        $this->assertSame(450.0, (float) $nextCycle->montoOriginal);
+        $this->assertSame(450.0, (float) $nextCycle->montoActual);
+        $this->assertStringNotContainsString('SC-41', $nextCycle->descripcion);
+        $this->assertSame(7041, (int) $scheduledHistory->dispositivo);
+        $this->assertSame('987654321', $scheduledHistory->numerotelefono);
+        $this->assertSame('activo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+    }
+
+    public function test_scheduled_deactivation_marker_uses_latest_history_and_month_end(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        $this->createBajaHistorySchema();
+        DB::table('historial_servicio')->insert([
+            'usuario_usuario' => 'usuario-prueba',
+            'serv_usuario' => 'usuario-prueba',
+            'servicioCliente_idservicioCliente' => 41,
+            'fecha_accion' => '2026-11-06 10:00:00',
+            'motivo' => 'Baja prog',
+            'descripcion' => 'Baja solicitada.',
+        ]);
+        $services = collect([(object) ['idservicioCliente' => 41]]);
+        $markScheduledDeactivations = new \ReflectionMethod(CuentasPorCobrarService::class, 'markScheduledDeactivations');
+        $markedServices = $markScheduledDeactivations->invoke(new CuentasPorCobrarService(), $services);
+
+        $this->assertSame('30/11/2026', $markedServices->first()->baja_programada_hasta);
+
+        DB::table('historial_servicio')->insert([
+            'usuario_usuario' => 'usuario-prueba',
+            'serv_usuario' => 'usuario-prueba',
+            'servicioCliente_idservicioCliente' => 41,
+            'fecha_accion' => '2026-11-07 10:00:00',
+            'motivo' => 'Cambio de documento',
+            'descripcion' => 'Se actualizó el documento del servicio.',
+        ]);
+        $markedServices = $markScheduledDeactivations->invoke(
+            new CuentasPorCobrarService(),
+            collect([(object) ['idservicioCliente' => 41]])
+        );
+        $this->assertSame('30/11/2026', $markedServices->first()->baja_programada_hasta);
+
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update(['estado' => 'inactivo']);
+        $markedServices = $markScheduledDeactivations->invoke(
+            new CuentasPorCobrarService(),
+            collect([(object) ['idservicioCliente' => 41]])
+        );
+        $this->assertNull($markedServices->first()->baja_programada_hasta);
+    }
+
+    public function test_scheduled_deactivation_marker_is_shown_only_for_the_charge_covering_the_request_date(): void
+    {
+        $service = new CuentasPorCobrarService();
+        $isScheduledDeactivationCharge = new \ReflectionMethod($service, 'isScheduledDeactivationCharge');
+        $scheduledDate = '2026-11-06';
+
+        $this->assertTrue($isScheduledDeactivationCharge->invoke($service, (object) [
+            'baja_programada_solicitada' => $scheduledDate,
+            'fechaInicio' => '2026-10-31',
+            'fecheVencimiento' => '2026-11-30',
+        ]));
+        $this->assertFalse($isScheduledDeactivationCharge->invoke($service, (object) [
+            'baja_programada_solicitada' => $scheduledDate,
+            'fechaInicio' => '2026-09-30',
+            'fecheVencimiento' => '2026-10-30',
+        ]));
+        $this->assertFalse($isScheduledDeactivationCharge->invoke($service, (object) [
+            'baja_programada_solicitada' => $scheduledDate,
+            'fechaInicio' => '2026-11-30',
+            'fecheVencimiento' => '2026-12-31',
+        ]));
+    }
+
+    public function test_immediate_deactivation_removes_service_from_current_and_future_month_charges(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fecheVencimiento' => '2027-02-28',
+            'monto' => 50,
+        ]);
+        $serviceIds = range(41, 50);
+        DB::table('serviciocliente')->insert(array_map(
+            fn(int $serviceId): array => [
+                'idservicioCliente' => $serviceId,
+                'cliente_idcliente' => 'CLIENTE-1',
+                'estado' => 'activo',
+                'fechaInicio' => '2026-09-23',
+                'fecheVencimiento' => '2027-02-28',
+                'moneda_idmoneda' => 1,
+                'tipoCobro_idtipoCobros' => 5,
+                'monto' => 50,
+            ],
+            array_slice($serviceIds, 1)
+        ));
+        $serviceMarker = 'SC-' . implode(',', $serviceIds);
+        $decemberId = $this->createCxc('CXC 01/12/2026 a 31/12/2026 ' . $serviceMarker, '1');
+        $januaryId = $this->createCxc('CXC 01/01/2027 a 31/01/2027 ' . $serviceMarker, '1');
+        foreach ([$decemberId => '2026-12-31', $januaryId => '2027-01-31'] as $cxcId => $endDate) {
+            DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $cxcId)->update([
+                'fechaCancelacion' => $endDate,
+                'montoOriginal' => 500,
+                'montoActual' => 500,
+            ]);
+        }
+
+        $processed = (new CxcService())->darDeBajaServicios(
+            [41],
+            'ahora',
+            'Baja inmediata.',
+            'si',
+            'usuario-prueba',
+            Carbon::parse('2026-12-15')
+        );
+
+        $this->assertSame(1, $processed);
+        $this->assertSame('inactivo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        foreach ([$decemberId, $januaryId] as $cxcId) {
+            $charge = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $cxcId)->first();
+            $this->assertSame(450.0, (float) $charge->montoOriginal);
+            $this->assertSame(450.0, (float) $charge->montoActual);
+            $this->assertStringNotContainsString('SC-41', $charge->descripcion);
+        }
+    }
+
+    public function test_scheduled_deactivation_preserves_current_multimonth_cycle_and_removes_next_cycle(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fecheVencimiento' => '2027-06-30',
+            'monto' => 50,
+        ]);
+        $serviceIds = range(41, 50);
+        DB::table('serviciocliente')->insert(array_map(
+            fn(int $serviceId): array => [
+                'idservicioCliente' => $serviceId,
+                'cliente_idcliente' => 'CLIENTE-1',
+                'estado' => 'activo',
+                'fechaInicio' => '2026-09-23',
+                'fecheVencimiento' => '2027-06-30',
+                'moneda_idmoneda' => 1,
+                'tipoCobro_idtipoCobros' => 5,
+                'monto' => 50,
+            ],
+            array_slice($serviceIds, 1)
+        ));
+        $serviceMarker = 'SC-' . implode(',', $serviceIds);
+        $currentCycleId = $this->createCxc('CXC 01/11/2026 a 31/01/2027 ' . $serviceMarker, '1');
+        $nextCycleId = $this->createCxc('CXC 01/02/2027 a 30/04/2027 ' . $serviceMarker, '1');
+        foreach ([$currentCycleId => '2027-01-31', $nextCycleId => '2027-04-30'] as $cxcId => $endDate) {
+            DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $cxcId)->update([
+                'fechaCancelacion' => $endDate,
+                'montoOriginal' => 500,
+                'montoActual' => 500,
+            ]);
+        }
+
+        (new CxcService())->darDeBajaServicios(
+            [41],
+            'periodo',
+            'Baja al cierre del mes.',
+            'si',
+            'usuario-prueba',
+            Carbon::parse('2026-12-15')
+        );
+
+        $currentCycle = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $currentCycleId)->first();
+        $nextCycle = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $nextCycleId)->first();
+        $this->assertSame(500.0, (float) $currentCycle->montoOriginal);
+        $this->assertSame(500.0, (float) $currentCycle->montoActual);
+        $this->assertStringContainsString('SC-41', $currentCycle->descripcion);
+        $this->assertSame(450.0, (float) $nextCycle->montoOriginal);
+        $this->assertSame(450.0, (float) $nextCycle->montoActual);
+        $this->assertStringNotContainsString('SC-41', $nextCycle->descripcion);
     }
 
     public function test_immediate_deactivation_reprices_current_unpaid_grouped_cxc(): void
@@ -3983,6 +4842,88 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             'estado' => '1',
             'montoActual' => 45,
         ]);
+    }
+
+    public function test_service_edit_immediate_deactivation_removes_current_and_future_unpaid_cxc_and_sets_last_charged_date(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fecheVencimiento' => '2026-12-31',
+        ]);
+        $paidOctoberId = $this->createCxc('CXC 01/10/2026 a 31/10/2026 SC-41', '3');
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $paidOctoberId)->update([
+            'docReferencia' => 'F001-PAID',
+            'montoActual' => 0,
+            'fechaCancelacion' => '2026-10-31',
+        ]);
+        $novemberId = $this->createCxc('CXC 01/11/2026 a 30/11/2026 SC-41', '1');
+        $decemberId = $this->createCxc('CXC 01/12/2026 a 31/12/2026 SC-41', '1');
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $novemberId)->update([
+            'montoOriginal' => 45,
+            'montoActual' => 45,
+            'fechaCancelacion' => '2026-11-30',
+        ]);
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $decemberId)->update([
+            'montoOriginal' => 45,
+            'montoActual' => 45,
+            'fechaCancelacion' => '2026-12-31',
+        ]);
+        $service = DB::table('serviciocliente')->where('idservicioCliente', 41)->first();
+
+        $serviceEnd = (new CxcService())->adjustOpenChargesForImmediateServiceDeactivation(
+            $service,
+            Carbon::parse('2026-11-18')
+        );
+
+        $this->assertSame('2026-10-31', $serviceEnd);
+        $this->assertDatabaseHas('cuentasporcobrar', [
+            'idcuentasPorCobrar' => $paidOctoberId,
+            'docReferencia' => 'F001-PAID',
+            'estado' => '3',
+        ]);
+        $this->assertDatabaseMissing('cuentasporcobrar', ['idcuentasPorCobrar' => $novemberId]);
+        $this->assertDatabaseMissing('cuentasporcobrar', ['idcuentasPorCobrar' => $decemberId]);
+    }
+
+    public function test_immediate_deactivation_removes_unbilled_duplicate_with_same_end_as_last_charged_period(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fecheVencimiento' => '2026-12-04',
+        ]);
+        $chargedCxcId = $this->createCxc('CXC 04/10/2026 a 04/11/2026 SC-41', 'CANCELADO');
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $chargedCxcId)->update([
+            'docReferencia' => 'F001-PAID',
+            'montoOriginal' => 45,
+            'montoActual' => 0,
+            'fechaCancelacion' => '2026-11-04',
+        ]);
+        $unbilledCxcId = $this->createCxc('REN-CXC-1 P 04/10/2026 a 04/11/2026 SC-41', '1');
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $unbilledCxcId)->update([
+            'montoOriginal' => 45,
+            'montoActual' => 45,
+            'fechaCancelacion' => '2026-11-04',
+        ]);
+
+        $processed = (new CxcService())->darDeBajaServicios(
+            [41],
+            'ahora',
+            'Baja inmediata.',
+            'si',
+            'usuario-prueba',
+            Carbon::parse('2026-11-09')
+        );
+
+        $this->assertSame(1, $processed);
+        $this->assertSame('2026-11-04', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('fecheVencimiento'));
+        $this->assertDatabaseHas('cuentasporcobrar', [
+            'idcuentasPorCobrar' => $chargedCxcId,
+            'docReferencia' => 'F001-PAID',
+            'estado' => 'CANCELADO',
+        ]);
+        $this->assertDatabaseMissing('cuentasporcobrar', ['idcuentasPorCobrar' => $unbilledCxcId]);
     }
 
     public function test_immediate_deactivation_preserves_a_current_cxc_with_payment_activity(): void
@@ -4131,7 +5072,7 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
         $this->assertSame('2027-01-22', (string) DB::table('serviciocliente')->where('idservicioCliente', 42)->value('fecheVencimiento'));
     }
 
-    public function test_scheduled_deactivation_waits_for_each_service_end_then_inactivates_service(): void
+    public function test_scheduled_deactivation_waits_until_month_end_then_inactivates_service(): void
     {
         $this->createSchema();
         $this->createOctoberService();
@@ -4147,19 +5088,196 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             Carbon::parse('2026-10-01')
         );
         $this->assertSame('activo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        DB::table('historial_servicio')->insert([
+            'usuario_usuario' => 'usuario-prueba',
+            'serv_usuario' => 'usuario-prueba',
+            'servicioCliente_idservicioCliente' => 41,
+            'fecha_accion' => '2026-10-10 10:00:00',
+            'motivo' => 'Cambio de documento',
+            'descripcion' => 'Se actualizó el documento después de programar la baja.',
+        ]);
 
         $processed = $service->procesarBajasProgramadas(Carbon::parse('2026-10-22'));
         $this->assertSame(0, $processed);
         $this->assertSame('activo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        $this->assertSame('2026-10-31', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('fecheVencimiento'));
 
         $processed = $service->procesarBajasProgramadas(Carbon::parse('2026-10-23'));
+        $this->assertSame(0, $processed);
+        $this->assertSame('activo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+
+        $processed = $service->procesarBajasProgramadas(Carbon::parse('2026-10-31'));
+        $this->assertSame(0, $processed);
+        $this->assertSame('activo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+
+        $processed = $service->procesarBajasProgramadas(Carbon::parse('2026-11-01'));
         $this->assertSame(1, $processed);
         $this->assertSame('inactivo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
         $this->assertSame(1, DB::table('historial_servicio')->where('motivo', 'Dado de baja')->count());
-        $this->assertSame(0, $service->procesarBajasProgramadas(Carbon::parse('2026-10-24')));
+        $this->assertSame(0, $service->procesarBajasProgramadas(Carbon::parse('2026-11-02')));
     }
 
-    public function test_grouped_scheduled_deactivation_respects_each_service_end_date(): void
+    public function test_scheduled_deactivation_inactivates_service_even_if_a_later_charge_was_invoiced(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        $this->createBajaHistorySchema();
+
+        $service = new CxcService();
+        $service->darDeBajaServicios(
+            [41],
+            'periodo',
+            'Fin de contrato.',
+            'si',
+            'usuario-prueba',
+            Carbon::parse('2026-10-01')
+        );
+        $futureChargeId = $this->createCxc('CXC 31/10/2026 a 30/11/2026 SC-41', '1');
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $futureChargeId)->update([
+            'fechaCancelacion' => '2026-11-30',
+            'docReferencia' => 'F001-0001',
+        ]);
+
+        $this->assertSame(1, $service->procesarBajasProgramadas(Carbon::parse('2026-11-01')));
+        $this->assertSame('inactivo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        $this->assertSame('F001-0001', DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $futureChargeId)->value('docReferencia'));
+    }
+
+    public function test_scheduled_deactivation_deletes_uninvoiced_last_period_cxc_after_cutoff(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fecheVencimiento' => '2026-12-04',
+            'monto' => 50,
+        ]);
+        $this->createBajaHistorySchema();
+
+        $service = new CxcService();
+        $service->darDeBajaServicios(
+            [41],
+            'periodo',
+            'Baja al cierre de noviembre.',
+            'si',
+            'usuario-prueba',
+            Carbon::parse('2026-11-06')
+        );
+        $novemberChargeId = $this->createCxc(
+            'CXC 04/11/2026 a 30/11/2026 SC-41',
+            '1'
+        );
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $novemberChargeId)->update([
+            'montoOriginal' => 50,
+            'montoActual' => 50,
+            'fechaCancelacion' => '2026-11-30',
+        ]);
+
+        $this->assertSame(0, $service->procesarBajasProgramadas(Carbon::parse('2026-11-30')));
+        $this->assertDatabaseHas('cuentasporcobrar', ['idcuentasPorCobrar' => $novemberChargeId]);
+
+        $this->assertSame(1, $service->procesarBajasProgramadas(Carbon::parse('2026-12-01')));
+        $this->assertSame('inactivo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        $this->assertDatabaseMissing('cuentasporcobrar', ['idcuentasPorCobrar' => $novemberChargeId]);
+    }
+
+    public function test_scheduled_deactivation_keeps_invoiced_last_period_cxc_after_cutoff(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fecheVencimiento' => '2026-12-04',
+            'monto' => 50,
+        ]);
+        $this->createBajaHistorySchema();
+
+        $service = new CxcService();
+        $service->darDeBajaServicios(
+            [41],
+            'periodo',
+            'Baja al cierre de noviembre.',
+            'si',
+            'usuario-prueba',
+            Carbon::parse('2026-11-06')
+        );
+        $novemberChargeId = $this->createCxc(
+            'CXC 04/11/2026 a 30/11/2026 SC-41',
+            'FACTURADO'
+        );
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $novemberChargeId)->update([
+            'docReferencia' => 'F001-1130',
+            'montoOriginal' => 50,
+            'montoActual' => 50,
+            'fechaCancelacion' => '2026-11-30',
+        ]);
+
+        $this->assertSame(1, $service->procesarBajasProgramadas(Carbon::parse('2026-12-01')));
+        $this->assertSame('inactivo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        $this->assertDatabaseHas('cuentasporcobrar', [
+            'idcuentasPorCobrar' => $novemberChargeId,
+            'docReferencia' => 'F001-1130',
+            'estado' => 'FACTURADO',
+            'montoActual' => 50,
+        ]);
+    }
+
+    public function test_scheduled_deactivation_reconciles_future_cxc_created_after_the_request(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fecheVencimiento' => '2027-02-28',
+            'monto' => 50,
+        ]);
+        $serviceIds = range(41, 50);
+        DB::table('serviciocliente')->insert(array_map(
+            fn(int $serviceId): array => [
+                'idservicioCliente' => $serviceId,
+                'cliente_idcliente' => 'CLIENTE-1',
+                'estado' => 'activo',
+                'fechaInicio' => '2026-09-23',
+                'fecheVencimiento' => '2027-02-28',
+                'moneda_idmoneda' => 1,
+                'tipoCobro_idtipoCobros' => 5,
+                'monto' => 50,
+            ],
+            array_slice($serviceIds, 1)
+        ));
+        $this->createBajaHistorySchema();
+
+        $service = new CxcService();
+        $service->darDeBajaServicios(
+            [41],
+            'periodo',
+            'Baja al cierre de noviembre.',
+            'si',
+            'usuario-prueba',
+            Carbon::parse('2026-11-06')
+        );
+
+        $futureCxcId = $this->createCxc(
+            'CXC 30/11/2026 a 31/12/2026 SC-' . implode(',', $serviceIds),
+            '1'
+        );
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $futureCxcId)->update([
+            'fechaCancelacion' => '2026-12-31',
+            'montoOriginal' => 500,
+            'montoActual' => 500,
+        ]);
+
+        $processed = $service->procesarBajasProgramadas(Carbon::parse('2026-11-17'));
+        $futureCxc = DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $futureCxcId)->first();
+
+        $this->assertSame(0, $processed);
+        $this->assertSame('activo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        $this->assertSame(450.0, (float) $futureCxc->montoOriginal);
+        $this->assertSame(450.0, (float) $futureCxc->montoActual);
+        $this->assertStringNotContainsString('SC-41', $futureCxc->descripcion);
+
+        $this->assertSame(1, $service->procesarBajasProgramadas(Carbon::parse('2026-12-01')));
+        $this->assertSame('inactivo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+    }
+
+    public function test_grouped_scheduled_deactivation_uses_the_same_month_end_cutoff(): void
     {
         $this->createSchema();
         $this->createOctoberService();
@@ -4184,11 +5302,43 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             Carbon::parse('2026-10-01')
         );
 
-        $this->assertSame(1, $service->procesarBajasProgramadas(Carbon::parse('2026-10-23')));
-        $this->assertSame('inactivo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        $scheduledMotives = DB::table('historial_servicio')
+            ->where('motivo', 'Baja prog')
+            ->pluck('motivo');
+        $this->assertCount(2, $scheduledMotives);
+        foreach ($scheduledMotives as $motive) {
+            $this->assertLessThanOrEqual(10, mb_strlen($motive, 'UTF-8'));
+        }
+
+        $this->assertSame(0, $service->procesarBajasProgramadas(Carbon::parse('2026-10-23')));
+        $this->assertSame('activo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
         $this->assertSame('activo', DB::table('serviciocliente')->where('idservicioCliente', 42)->value('estado'));
-        $this->assertSame(1, $service->procesarBajasProgramadas(Carbon::parse('2026-11-23')));
+        $this->assertSame(0, $service->procesarBajasProgramadas(Carbon::parse('2026-10-31')));
+        $this->assertSame(2, $service->procesarBajasProgramadas(Carbon::parse('2026-11-01')));
+        $this->assertSame('inactivo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
         $this->assertSame('inactivo', DB::table('serviciocliente')->where('idservicioCliente', 42)->value('estado'));
+    }
+
+    public function test_legacy_scheduled_deactivation_uses_month_end_instead_of_service_end_date(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('historial_servicio')->insert([
+            'usuario_usuario' => 'usuario-prueba',
+            'serv_usuario' => 'usuario-prueba',
+            'servicioCliente_idservicioCliente' => 41,
+            'fecha_accion' => '2026-10-01 10:00:00',
+            'motivo' => 'Baja programada al finalizar periodo',
+            'descripcion' => 'Baja al fin de periodo (Mantener SIM/Número: Sí)',
+        ]);
+        $service = new CxcService();
+
+        $this->assertSame(0, $service->procesarBajasProgramadas(Carbon::parse('2026-10-22')));
+        $this->assertSame('2026-10-31', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('fecheVencimiento'));
+        $this->assertSame(0, $service->procesarBajasProgramadas(Carbon::parse('2026-10-23')));
+        $this->assertSame('activo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        $this->assertSame(1, $service->procesarBajasProgramadas(Carbon::parse('2026-11-01')));
+        $this->assertSame('inactivo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
     }
 
     public function test_scheduled_service_is_not_renewed_into_another_period(): void
@@ -4203,11 +5353,17 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             'motivo' => 'Baja programada al finalizar periodo',
             'descripcion' => 'Baja al fin de periodo (Mantener SIM/Número: Sí)',
         ]);
-        $this->createCxc('REN-CXC-0 P 23/09/2026 a 23/10/2026 SC-41', '3');
+        $cxcId = $this->createCxc('REN-CXC-0 P 23/09/2026 a 23/10/2026 SC-41', '3');
 
         $generated = (new CxcService())->generarPeriodosAutomaticos(Carbon::parse('2026-11-01'));
+        $renewed = (new CxcService())->renovarServicioVinculado(
+            DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $cxcId)->first(),
+            0,
+            Carbon::parse('2026-10-23')
+        );
 
         $this->assertSame(0, $generated);
+        $this->assertNull($renewed);
         $this->assertSame(1, DB::table('cuentasporcobrar')->count());
     }
 
@@ -4462,6 +5618,49 @@ class CxcAutomaticPeriodGenerationTest extends TestCase
             ->where('motivo', 'Dado de baja')
             ->first();
         $this->assertSame('Baja inmediata del vehículo. (Mantener SIM/Número: Sí)', $history->descripcion);
+    }
+
+    public function test_immediate_deactivation_keeps_last_charged_period_and_removes_unbilled_current_period(): void
+    {
+        $this->createSchema();
+        $this->createOctoberService();
+        DB::table('serviciocliente')->where('idservicioCliente', 41)->update([
+            'fecheVencimiento' => '2026-12-04',
+        ]);
+        $octoberChargeId = $this->createCxc(
+            'CXC 23/09/2026 a 23/10/2026 SC-41',
+            'CANCELADO'
+        );
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $octoberChargeId)->update([
+            'docReferencia' => 'F001-100',
+            'montoOriginal' => 45,
+            'montoActual' => 0,
+            'fechaCancelacion' => '2026-10-23',
+        ]);
+        $novemberChargeId = $this->createCxc(
+            'REN-CXC-' . $octoberChargeId . ' P 23/10/2026 a 04/11/2026 SC-41',
+            'VENCIDO'
+        );
+        DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $novemberChargeId)->update([
+            'montoOriginal' => 45,
+            'montoActual' => 45,
+            'fechaCancelacion' => '2026-11-04',
+        ]);
+
+        $processed = (new CxcService())->darDeBajaServicios(
+            [41],
+            'ahora',
+            'Baja inmediata.',
+            'si',
+            'usuario-prueba',
+            Carbon::parse('2026-11-09')
+        );
+
+        $this->assertSame(1, $processed);
+        $this->assertSame('inactivo', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('estado'));
+        $this->assertSame('2026-10-23', DB::table('serviciocliente')->where('idservicioCliente', 41)->value('fecheVencimiento'));
+        $this->assertSame(1, DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $octoberChargeId)->count());
+        $this->assertSame(0, DB::table('cuentasporcobrar')->where('idcuentasPorCobrar', $novemberChargeId)->count());
     }
 
     public function test_advance_cancels_existing_cxcs_only_through_the_last_paid_period(): void

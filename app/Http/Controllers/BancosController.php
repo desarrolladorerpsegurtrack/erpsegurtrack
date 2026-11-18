@@ -237,7 +237,8 @@ class BancosController extends Controller
 
     public function notaCreditos(Request $request): View
     {
-        $items = $this->notaCreditoQuery($request)
+        $query = $this->notaCreditoQuery($request);
+        $items = (clone $query)
             ->orderByDesc('nc.fechaEmision')
             ->orderByDesc('nc.idnotacredito')
             ->paginate($this->resolvePerPage($request))
@@ -255,8 +256,8 @@ class BancosController extends Controller
             $row->canDelete = (bool) $row->can_modify;
             return $row;
         });
-        $totals = DB::table('nota_credito as nc')
-            ->leftJoin('moneda as m', 'm.idmoneda', '=', 'nc.moneda_idmoneda')
+        $totals = (clone $query)
+            ->select([])
             ->selectRaw("COALESCE(NULLIF(TRIM(m.simbolo), ''), 'S/') as moneda_simbolo")
             ->selectRaw('SUM(nc.monto) as monto_emitido')
             ->groupBy('m.simbolo')
@@ -305,7 +306,7 @@ class BancosController extends Controller
             'destroyRoute' => 'modules.finanzas.nota-creditos.destroy',
             'lockResource' => self::CREDIT_NOTE_LOCK_RESOURCE,
             'showResultStat' => true,
-            'resultsLabel' => 'Notas de crédito encontradas',
+            'resultsLabel' => 'Notas de crédito',
             'identifierKey' => 'idnotacredito',
         ]);
     }
@@ -927,8 +928,24 @@ class BancosController extends Controller
 
             return implode('|', [$client ?: '-', $currency, $period, $comment]);
         })->map(function ($group): object {
-            $first = $group->sortByDesc(fn ($row) => strtotime((string) $row->fechaRegistro) ?: 0)->first();
+            $latestMovement = $group->sortByDesc(fn ($row) => strtotime((string) $row->fechaRegistro) ?: 0)->first();
+            $firstPayment = $group
+                ->filter(fn ($row): bool =>
+                    strtoupper(trim((string) ($row->tipoMov ?? ''))) === 'I'
+                    && !preg_match('/^\[ANULADO\]/iu', trim((string) ($row->informacion ?? '')))
+                )
+                ->sort(function ($left, $right): int {
+                    $leftTime = strtotime((string) ($left->fechaRegistro ?? '')) ?: 0;
+                    $rightTime = strtotime((string) ($right->fechaRegistro ?? '')) ?: 0;
+                    if ($leftTime !== $rightTime) {
+                        return $leftTime <=> $rightTime;
+                    }
+
+                    return (int) ($left->idbancos ?? 0) <=> (int) ($right->idbancos ?? 0);
+                })
+                ->first();
             $latest = $group->max(fn ($row) => strtotime((string) $row->fechaRegistro) ?: 0);
+            $first = clone ($firstPayment ?? $latestMovement);
             $total = array_sum(array_map(function ($row): float {
                 $type = strtoupper(trim((string) ($row->tipoMov ?? '')));
                 if (in_array($type, ['I'], true) && !preg_match('/^\[ANULADO\]/iu', trim((string) ($row->informacion ?? '')))) {

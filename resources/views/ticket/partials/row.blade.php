@@ -120,7 +120,7 @@
                     $lockedByOther = !empty($row->locked_by_other);
                     $lockedUser = $row->lock_usuario ?? ($row->historial_usuario ?? null);
                     $estadoLabel = mb_strtolower(trim((string) ($row->estado ?? '')));
-                    $isResolved = $estadoLabel === 'resuelto';
+                    $isResolved = in_array($estadoLabel, ['resuelto', 'cancelado'], true);
                 @endphp
                 @if(!$canAttend)
                     <div class="flex flex-col items-center gap-2">
@@ -140,22 +140,27 @@
                             <span class="text-xs text-slate-500">Último en atender: {{ $lockedUser }}</span>
                         @endif
                     </div>
-                @elseif($lockedByOther)
-                    <div class="flex flex-col items-center gap-2">
-                        <button type="button" disabled class="inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition duration-200 opacity-60 cursor-not-allowed" style="color: #ffffff; background-color: #c71010;">
-                            Atender
-                        </button>
-                        @if($lockedUser)
-                            <span class="text-xs text-slate-500">Atendiendo: {{ $lockedUser }}</span>
-                        @endif
-                    </div>
                 @else
                     <div class="flex flex-col items-center gap-2">
-                        <a href="{{ route('modules.tickets.show', ['ticketId' => $row->idticket]) }}">
-                            <button type="button" class="inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition duration-200 " style="color: #ffffff; background-color: #c71010;">
+                        <div
+                            class="relative inline-flex"
+                            data-ticket-vistas-dropdown
+                            data-ticket-vistas-url="{{ route('modules.tickets.available-views', ['ticketId' => $row->idticket]) }}">
+                            <button
+                                type="button"
+                                data-ticket-vistas-toggle
+                                aria-haspopup="menu"
+                                aria-expanded="false"
+                                class="inline-flex items-center justify-center rounded-l-md border px-3 py-2 text-sm font-semibold transition duration-200"
+                                style="color: #ffffff; background-color: #c71010;">
                                 Atender
-                            </button>
-                        </a>
+                            </button>                           
+                            <div
+                                data-ticket-vistas-menu
+                                role="menu"
+                                class="fixed z-[99999] hidden max-h-64 min-w-56 overflow-y-auto rounded-md border border-slate-200 bg-white py-1 text-left text-xs shadow-xl">
+                            </div>
+                        </div>
                         @if($lockedUser)
                             <span class="text-xs text-slate-500">Último en atender: {{ $lockedUser }}</span>
                         @endif

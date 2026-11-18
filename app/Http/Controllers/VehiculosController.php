@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Export\ExportableList;
 use App\Http\Controllers\Permission\HandlesResourceLock;
+use App\Services\VehicleComponentService;
 use App\Support\ResourceLock;
 use App\Support\ServicePeriod;
 use App\Support\VehiculoData;
@@ -571,6 +572,7 @@ class VehiculosController extends Controller
             ->where('vehiculo_placa', $placa)
             ->select('iddispositivoCliente', 'marcaDispositivo', 'modeloDispositivo', 'fechaInstalacion', 'fechaBaja', 'estado')
             ->get();
+        $componentesVehiculo = app(VehicleComponentService::class)->forVehicle($placa);
         $clienteCambioBloqueado = $this->getOwnershipChangeBlockReason($placa);
 
         return view('vehiculo.vehiculos-form', [
@@ -675,6 +677,15 @@ class VehiculosController extends Controller
                 ],
             ],
             'dispositivos' => $dispositivos,
+            'extraSections' => [
+                [
+                    'view' => 'vehiculo.componentes',
+                    'data' => [
+                        'componentesVehiculo' => $componentesVehiculo,
+                        'componentesTitle' => 'Accesorios y sensores del vehículo',
+                    ],
+                ],
+            ],
         ] + $this->prepareLockViewData(self::LOCK_RESOURCE, $record->placa));
     }
 

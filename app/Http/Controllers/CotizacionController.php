@@ -66,7 +66,9 @@ class CotizacionController extends Controller
                 ->keyBy(fn ($cxc): string => substr((string) $cxc->descripcion, strlen('COTIZACION:')))
                 ->map(fn ($cxc): ?string => $cxc->fechaRegistro);
 
-        $items->through(function ($row) use ($approvalDatesByQuote) {
+        $vista1ManagementUrls = $this->buildVista1ManagementUrls($items->getCollection(), $request);
+
+        $items->through(function ($row) use ($approvalDatesByQuote, $vista1ManagementUrls) {
             $row->moneda_simbolo = $this->currencySymbol($row->moneda_detalle ?? null);
             $row->total_label = $this->formatMoney(round((float) ($row->total ?? 0), 2), $row->moneda_simbolo);
             $row->subtotal_label = $this->formatMoney($row->subtotal ?? null, $row->moneda_simbolo);
@@ -95,14 +97,27 @@ class CotizacionController extends Controller
                 $row->personal_label = '-';
             }
 
-            if (! isset($row->estado) || $row->estado === null || $row->estado === '') {
+            $estado = (string) ($row->estado ?? '');
+            if ($estado === '') {
                 $row->estado_label = '-';
             } else {
                 $row->estado_label = $this->formatCotizacionEstadoHtmlLabel($row->estado);
             }
+            if (in_array($estado, [
+                CotizacionService::STATE_APROBADO_SP,
+                CotizacionService::STATE_APROBADO,
+            ], true)) {
+                $reference = trim((string) ($row->batch_id ?? ''));
+                if ($reference === '') {
+                    $reference = (string) $row->nroCotizacion;
+                }
+                $managementUrl = $vista1ManagementUrls[$reference] ?? null;
+                if ($managementUrl !== null) {
+                    $row->estado_label = '<a href="'.e($managementUrl).'" class="cursor-pointer hover:underline" title="Abrir gestión de Vista 1">'.$row->estado_label.'</a>';
+                }
+            }
 
             $row->is_vigencia_expired = $this->isCotizacionExpired($row);
-            $estado = (string) ($row->estado ?? '');
             $notEditableStates = [
                 CotizacionService::STATE_APROBADO_SP,
                 CotizacionService::STATE_APROBADO,
@@ -126,23 +141,20 @@ class CotizacionController extends Controller
             $row->anularRoute = $row->canAnular ? route('modules.ventas.cotizaciones.anular', ['id' => $row->nroCotizacion]) : null;
             $row->download_link = '<a href="'.route('modules.ventas.cotizaciones.pdf', ['id' => $row->nroCotizacion]).'" data-download-cotizacion="'.e($row->nroCotizacion).'" class="cursor-pointer flex items-center p-2 transition duration-300 ease-in-out rounded-md hover:bg-slate-200/60 dark:bg-darkmode-600 dark:hover:bg-darkmode-400 dropdown-item text-slate-600 w-full text-left" title="Descargar PDF"><i data-lucide="download" class="mr-1 h-4 w-4 stroke-[1.3]"></i>Descargar</a>';
             $batchId = $row->batch_id ?? null;
-            $previewUrl = $batchId !== null
-                ? route('modules.ventas.cotizaciones.pdf-grupo', [
-                    'batch_id' => $batchId,
-                    'include_image' => '1',
-                    'preview' => '1',
-                ])
-                : route('modules.ventas.cotizaciones.pdf', [
-                    'id' => $row->nroCotizacion,
-                    'include_image' => '1',
-                    'preview' => '1',
-                ]);
+            $previewUrl = route('modules.ventas.cotizaciones.preview-single', [
+                'id' => $row->nroCotizacion,
+                'include_image' => '0',
+            ]);
             $row->nroCotizacion_preview = '<button type="button" class="font-medium text-slate-700 hover:text-primary hover:underline whitespace-nowrap" data-cotizacion-pdf-preview="'.e($previewUrl).'" data-cotizacion-number="'.e($row->nroCotizacion).'" title="Ver PDF">'.e($row->nroCotizacion).'</button>';
             $row->copyRoute = route('modules.ventas.cotizaciones.create', ['copy_from' => $row->nroCotizacion]);
             $groupText = $this->formatCotizacionGroupLabel($batchId);
             if ($batchId) {
-                $groupDownloadUrl = route('modules.ventas.cotizaciones.pdf-grupo', ['batch_id' => $batchId]);
-                $row->group_label = '<a href="'.$groupDownloadUrl.'" class="font-medium text-slate-700 hover:text-primary hover:underline  whitespace-nowrap " title="Descargar PDF Grupal" target="_blank">'.e($groupText).'</a>';
+                $groupPreviewUrl = route('modules.ventas.cotizaciones.pdf-grupo', [
+                    'batch_id' => $batchId,
+                    'include_image' => '1',
+                    'preview' => '1',
+                ]);
+                $row->group_label = '<button type="button" class="font-medium text-slate-700 hover:text-primary hover:underline whitespace-nowrap" data-cotizacion-pdf-preview="'.e($groupPreviewUrl).'" data-cotizacion-number="'.e($groupText).'" title="Ver PDF Grupal">'.e($groupText).'</button>';
             } else {
                 $row->group_label = e($groupText);
             }
@@ -240,6 +252,124 @@ class CotizacionController extends Controller
             ],
             'tableWrapperClass' => 'cotizacion-table',
         ]);
+    }
+
+    private function buildVista1ManagementUrls(iterable $rows, Request $request): array
+    {
+        $authContext = $this->ticketsService->resolveAuthContext($request->session()->get('erp_auth', []));
+        if (! $authContext['isAdmin']
+            && (! $authContext['canAttendTickets'] || ! in_array(1, $authContext['allowedVistaIds'], true))) {
+            return [];
+        }
+
+        $references = collect($rows)
+            ->filter(fn ($row): bool => in_array((string) ($row->estado ?? ''), [
+                CotizacionService::STATE_APROBADO_SP,
+                CotizacionService::STATE_APROBADO,
+            ], true))
+            ->map(static function ($row): string {
+                $batchId = trim((string) ($row->batch_id ?? ''));
+
+                return $batchId !== '' ? $batchId : trim((string) ($row->nroCotizacion ?? ''));
+            })
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($references->isEmpty()) {
+            return [];
+        }
+
+        $ticketsByReference = DB::table('ticket')
+            ->whereIn('pedidoReferencia', $references)
+            ->orderByDesc('idticket')
+            ->get(['idticket', 'pedidoReferencia', 'tipoOperacion_idtipoOperacion', 'estado'])
+            ->groupBy('pedidoReferencia');
+        $openTicketsByReference = [];
+        foreach ($ticketsByReference as $reference => $tickets) {
+            $ticket = $tickets->first();
+            if (! is_object($ticket)) {
+                continue;
+            }
+
+            $ticketId = (int) data_get($ticket, 'idticket', 0);
+            $ticketState = mb_strtolower(trim((string) data_get($ticket, 'estado', '')), 'UTF-8');
+            if ($ticketId <= 0 || in_array($ticketState, ['resuelto', 'cancelado'], true)) {
+                continue;
+            }
+
+            $openTicketsByReference[(string) $reference] = $ticket;
+        }
+        if ($openTicketsByReference === []) {
+            return [];
+        }
+
+        $operationIds = collect($openTicketsByReference)
+            ->map(fn ($ticket): int => (int) $ticket->tipoOperacion_idtipoOperacion)
+            ->filter(fn (int $operationId): bool => $operationId > 0)
+            ->unique()
+            ->values();
+        $flowsByOperation = DB::table('flujo')
+            ->whereIn('tipoOperacion_idtipoOperacion', $operationIds)
+            ->orderBy('idflujo')
+            ->get(['idflujo', 'tipoOperacion_idtipoOperacion'])
+            ->unique('tipoOperacion_idtipoOperacion')
+            ->keyBy('tipoOperacion_idtipoOperacion');
+        $flowIds = $flowsByOperation->pluck('idflujo')->map(fn ($flowId): int => (int) $flowId)->all();
+        if ($flowIds === []) {
+            return [];
+        }
+
+        $vista1RulesByFlow = DB::table('flujoregla')
+            ->whereIn('flujo_idflujo', $flowIds)
+            ->where('vista_idvista', 1)
+            ->where('estado', '1')
+            ->orderBy('orden')
+            ->orderBy('idflujoregla')
+            ->get(['idflujoregla', 'flujo_idflujo'])
+            ->unique('flujo_idflujo')
+            ->keyBy('flujo_idflujo');
+
+        $vista1RuleIdsByTicket = [];
+        foreach ($openTicketsByReference as $reference => $ticket) {
+            $flow = $flowsByOperation->get((int) $ticket->tipoOperacion_idtipoOperacion);
+            $rule = $flow ? $vista1RulesByFlow->get((int) $flow->idflujo) : null;
+            if ($rule) {
+                $vista1RuleIdsByTicket[(int) $ticket->idticket] = (int) $rule->idflujoregla;
+            }
+        }
+        if ($vista1RuleIdsByTicket === []) {
+            return [];
+        }
+
+        $latestResultsByTicket = [];
+        DB::table('historialflujo')
+            ->whereIn('ticket_idticket', array_keys($vista1RuleIdsByTicket))
+            ->whereIn('flujoregla_idflujoregla', array_values($vista1RuleIdsByTicket))
+            ->orderBy('idhistorialflujo')
+            ->get(['ticket_idticket', 'flujoregla_idflujoregla', 'resultado'])
+            ->each(function ($history) use (&$latestResultsByTicket): void {
+                $ticketId = (int) $history->ticket_idticket;
+                $ruleId = (int) $history->flujoregla_idflujoregla;
+                $latestResultsByTicket[$ticketId][$ruleId] = (string) $history->resultado;
+            });
+
+        $managementUrls = [];
+        foreach ($openTicketsByReference as $reference => $ticket) {
+            $ticketId = (int) $ticket->idticket;
+            $vista1RuleId = $vista1RuleIdsByTicket[$ticketId] ?? null;
+            if ($vista1RuleId === null
+                || in_array($latestResultsByTicket[$ticketId][$vista1RuleId] ?? null, ['completado', 'finalizado'], true)) {
+                continue;
+            }
+
+            $managementUrls[(string) $reference] = route('modules.tickets.show.vista', [
+                'ticketId' => $ticketId,
+                'vistaId' => 1,
+            ]);
+        }
+
+        return $managementUrls;
     }
 
     public function export(Request $request, string $format)
@@ -1599,7 +1729,7 @@ class CotizacionController extends Controller
             'detalle' => 'Nueva cotización '.$nroCotizacion,
             'ImagenEvidencia' => null,
             'respuesta' => null,
-            'estado' => 'Activo',
+            'estado' => 'Pendiente',
         ]);
 
         $this->ticketsService->ensureInitialHistorialForTicket((int) $ticketId, (int) $tipoOperacionId, $currentUser);

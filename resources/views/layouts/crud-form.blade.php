@@ -327,8 +327,8 @@
             align-items: center;
             width: fit-content;
             padding: 0.14rem 0.45rem;
-            background-color: #eef2f7;
-            color: #334155;
+            background-color: #dcfce7;
+            color: #166534;
             font-size: 0.72rem;
             font-weight: 700;
             border-radius: 0.50rem;
@@ -476,8 +476,8 @@
             width: fit-content;
             padding: 0.14rem 0.48rem;
             border-radius: 0.50rem;
-            background-color: #eef2f7;
-            color: #334155;
+            background-color: #dcfce7;
+            color: #166534;
             font-weight: 700;
         }
         .vista-selected-empty {
@@ -1648,11 +1648,16 @@
                 }
 
                 var ticketsVerInput = form.querySelector('input[name="permissions[tickets][ver]"]');
-                var shouldShow = !!(ticketsVerInput && ticketsVerInput.checked);
+                var activePermissionTab = form.querySelector('[data-permission-tab].is-active');
+                var isGestionesTabActive = !!(
+                    activePermissionTab &&
+                    activePermissionTab.dataset.permissionTab === 'tickets'
+                );
+                var shouldShow = isGestionesTabActive && !!(ticketsVerInput && ticketsVerInput.checked);
                 vistaSelectorFieldset.classList.toggle('hidden', !shouldShow);
             };
 
-            var syncTicketsViewModeExclusive = function () {
+            var syncTicketsViewModeExclusive = function (changedInput) {
                 var ticketsVerInput = form.querySelector('input[name="permissions[tickets][ver]"]');
                 var ticketsVerFlujoInput = form.querySelector('input[name="permissions[tickets][ver_flujo]"]');
 
@@ -1660,26 +1665,18 @@
                     return;
                 }
 
-                [ticketsVerInput, ticketsVerFlujoInput].forEach(function (input) {
-                    if (input.dataset.exclusiveApplied === 'true') {
-                        input.disabled = input.dataset.exclusiveBaseDisabled === 'true';
-                        input.dataset.exclusiveApplied = 'false';
-                    }
+                var changedElement = changedInput && changedInput.currentTarget
+                    ? changedInput.currentTarget
+                    : changedInput;
 
-                    input.dataset.exclusiveBaseDisabled = input.disabled ? 'true' : 'false';
-                });
-
-                if (ticketsVerInput.checked) {
+                if (changedElement === ticketsVerInput && ticketsVerInput.checked) {
                     ticketsVerFlujoInput.checked = false;
-                    ticketsVerFlujoInput.disabled = true;
-                    ticketsVerFlujoInput.dataset.exclusiveApplied = 'true';
-                    return;
-                }
-
-                if (ticketsVerFlujoInput.checked) {
+                } else if (changedElement === ticketsVerFlujoInput && ticketsVerFlujoInput.checked) {
                     ticketsVerInput.checked = false;
-                    ticketsVerInput.disabled = true;
-                    ticketsVerInput.dataset.exclusiveApplied = 'true';
+                } else if (ticketsVerInput.checked) {
+                    ticketsVerFlujoInput.checked = false;
+                } else if (ticketsVerFlujoInput.checked) {
+                    ticketsVerInput.checked = false;
                 }
 
                 updateVistaSelectorVisibility();
@@ -1755,6 +1752,7 @@
                             panels.forEach(function (panel) {
                                 panel.classList.toggle('is-active', panel.dataset.permissionPanel === moduleKey);
                             });
+                            try { updateVistaSelectorVisibility(); } catch (e) { }
                             try { updateContactoTiposVisibility(moduleKey); } catch (e) { }
                         };
 
@@ -2057,9 +2055,9 @@
                                 unlockRoleForManualEdit();
                             }
 
-                            manualDraftMatrix = cloneMatrix(matrixFromInputs());
                             updatePermissionCardExpansion();
-                            syncTicketsViewModeExclusive();
+                            syncTicketsViewModeExclusive(this);
+                            manualDraftMatrix = cloneMatrix(matrixFromInputs());
                             if (String(this.name || '') === 'permissions[tickets][ver]') {
                                 updateVistaSelectorVisibility();
                             }
@@ -2094,7 +2092,7 @@
                 if (ticketsVerInput) {
                     ticketsVerInput.addEventListener('change', function (ev) {
                         try { updateVistaSelectorVisibility(); } catch (e) { }
-                        try { syncTicketsViewModeExclusive(); } catch (e) { }
+                        try { syncTicketsViewModeExclusive(this); } catch (e) { }
                         try { updateContactoTiposVisibility(); } catch (e) { }
                     });
                 }
@@ -3457,7 +3455,7 @@
                                 <div class="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
                                     <div class="crud-readonly-table-scroll">
                                         <table class="w-full text-left text-sm text-slate-700">
-                                            <thead class="bg-slate-50 text-slate-500">
+                                            <thead class="bg-slate-200 text-slate-700">
                                                 <tr>
                                                     <th class="px-3 py-3 font-semibold">RUC/DNI</th>
                                                     <th class="px-3 py-3 font-semibold">Cliente</th>
@@ -3508,7 +3506,7 @@
                                 <div class="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
                                     <div style="overflow-x: auto; max-height: 200px;">
                                         <table class="w-full text-left text-sm text-slate-700">
-                                            <thead class="bg-slate-50 text-slate-500" style="position: sticky; top: 0; z-index: 1;">
+                                            <thead class="bg-slate-200 text-slate-700" style="position: sticky; top: 0; z-index: 1;">
                                                 <tr>
                                                     <th class="px-3 py-3 font-semibold">ID Dispositivo</th>
                                                     <th class="px-3 py-3 font-semibold">Vehículo</th>
@@ -3546,7 +3544,7 @@
                                 <div class="overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
                                     <div class="crud-readonly-table-scroll">
                                         <table class="w-full text-left text-sm text-slate-700">
-                                            <thead class="bg-slate-50 text-slate-500">
+                                            <thead class="bg-slate-200 text-slate-700">
                                                 <tr>
                                                     <th class="px-3 py-3 font-semibold">ID Dispositivo</th>
                                                     <th class="px-3 py-3 font-semibold">Número</th>

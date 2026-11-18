@@ -1,42 +1,52 @@
 @extends('dashboard.overview-1')
-@section('title', $title ?? 'Finalizar Ticket')
-@section('header', $title ?? 'Finalizar Ticket')
+@section('title', $title ?? 'Confirmación de realización y pruebas')
+@section('header', $title ?? 'Confirmación de realización y pruebas')
 @section('breadcrumb')
     <nav aria-label="breadcrumb" class="flex hidden flex-1 xl:block">
         <ol class="flex items-center text-theme-1">
             <li><a href="{{ route('home') }}">Inicio</a></li>
             <li
                 class="relative ml-5 pl-0.5 before:content-[''] before:w-[14px] before:h-[14px] before:bg-chevron-black before:transform before:rotate-[-90deg] before:bg-[length:100%] before:-ml-[1.125rem] before:absolute before:my-auto before:inset-y-0 text-slate-600 cursor-text">
-                <span>{{ $title ?? 'Finalizar Ticket' }}</span>
+                <span>{{ $title ?? 'Confirmación de realización y pruebas' }}</span>
             </li>
         </ol>
     </nav>
 @endsection
 @section('content')
-    <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h2 class="text-lg font-medium">{{ $title ?? 'Resumen Final del Ticket' }}</h2>
-        @if(($vista->idvista ?? 0) >= 2 && ($vista->idvista ?? 0) <= 6)
-            <form method="POST" action="{{ $advanceUrl ?? '#' }}" class="ml-auto" id="rechazar-form">
+    @php $hasMissingImeis = false; @endphp
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h1 class="inline-flex min-w-0 flex-1 items-center gap-2 rounded-sm pr-2 text-xl font-semibold text-slate-900">
+            <span class="h-5 w-1.5 shrink-0 rounded-full bg-danger" aria-hidden="true"></span>
+            <span class="truncate">{{ $title ?? 'Confirmación de realización y pruebas' }}</span>
+        </h1>
+        <span class="inline-flex shrink-0 items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600"
+            aria-label="Paso {{ $currentStep }} de {{ $totalSteps }}">
+            Fase  {{ $currentStep }} de {{ $totalSteps }}
+        </span>
+        @if(($vista->idvista ?? 0) >= 2 && ($vista->idvista ?? 0) <= 7)
+            <form method="POST" action="{{ $advanceUrl ?? '#' }}" class="shrink-0" id="rechazar-form" data-lock-action="ticket.vista">
                 @csrf
                 <input type="hidden" name="action" value="back_to_previous">
                 <input type="hidden" name="current_vista_id" value="{{ $vista->idvista ?? '' }}">
                 <button type="button" onclick="abrirModalRechazar()"
-                    class="ml-auto inline-flex items-center justify-center rounded-md border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-600 transition duration-200 hover:bg-slate-100" style="background-color: white;">
+                    class="inline-flex items-center justify-center rounded-md shrink-0 transition duration-200 border shadow-sm py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&:hover:not(:disabled)]:bg-opacity-90 [&:hover:not(:disabled)]:border-opacity-90 [&:not(button)]:text-center disabled:opacity-70 disabled:cursor-not-allowed border-secondary text-slate-500 dark:border-darkmode-100/40 dark:text-slate-300 [&:hover:not(:disabled)]:bg-secondary/20 [&:hover:not(:disabled)]:dark:bg-darkmode-100/10 border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-600 transition duration-200 hover:bg-slate-100" style="background-color: white;">
                     <i data-lucide="x-circle" class="mr-2 h-4 w-4"></i>
                     Rechazar
                 </button>
             </form>
         @endif
     </div>
-    <div class="grid grid-cols-12 gap-6">
+    <div class="box box--stacked grid grid-cols-12 gap-6">
         <div class="col-span-12">
             @if(isset($cotizaciones) && count($cotizaciones) > 0)
                 @php
                     $cotizacionesToShow = collect($cotizaciones)->take(1);
                 @endphp
-                {{-- Bloque Informativo del Cliente --}}
-                <div class="box p-5 mb-5">
-                    <h2 class="text-md font-semibold border-b pb-2 mb-4 text-slate-700">Datos del Cliente y Cotización</h2>
+                <div class="box p-5">
+                    <h2 class="mb-3 flex items-center gap-2 border-b pb-2 text-base font-semibold text-slate-800">
+                        <i data-lucide="file-text" class="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true"></i>
+                        Información de la Cotización
+                    </h2>
                     @foreach($cotizacionesToShow as $cot)
                         @php
                             $fechaEmision = data_get($cot, 'fechaEmision') ?? data_get($cot, 'fechaHoraEmision');
@@ -53,17 +63,15 @@
                             <div><strong>Cliente:</strong>
                                 {{ $cot->razonSocial ?? $cot->nombreComercial ?? $cot->cliente_label ?? '-' }}</div>
                             <div><strong>{{ $clienteTipo }}:</strong> {{ data_get($cot, 'cliente_idcliente', '-') }}</div>
-                            <div><strong>Teléfono:</strong> {{ $cot->telefono ?? $cot->cliente_telefono ?? 'No tiene teléfono' }}
-                            </div>
+                            <div><strong>Teléfono:</strong> {{ $cot->telefono ?? $cot->cliente_telefono ?? 'No tiene teléfono' }}</div>
                             <div><strong>Correo:</strong> {{ $cot->correo ?? $cot->cliente_correo ?? 'No tiene correo' }}</div>
                             <div><strong>Grupo Cliente:</strong> {{ $grupoCliente !== '' ? $grupoCliente : 'No tiene grupo' }}</div>
-                            <div class="md:col-span-3"><strong>Dirección:</strong>
-                                {{ $cot->direccion ?? $cot->cliente_direccion ?? 'No tiene dirección' }}</div>
+                            <div class="md:col-span-3"><strong>Dirección:</strong>{{ $cot->direccion ?? $cot->cliente_direccion ?? 'No tiene dirección' }}</div>
                         </div>
 
                         <div class="grid grid-cols-1 md:grid-cols-1 gap-4 mb-4">
                             <div class="rounded-md border border-slate-200 bg-slate-50 p-4">
-                                <div class="text-sm font-semibold text-slate-700 mb-2">Comentarios de la Cotización</div>
+                                <div class="text-sm font-semibold text-slate-700 mb-2">Comentarios de la Cotización:</div>
                                 @php
                                     $cotizacionesComentarios = $cotizacionesComentarios ?? collect([]);
                                 @endphp
@@ -76,18 +84,18 @@
                                         @endforeach
                                     </ol>
                                 @else
-                                    <div class="text-sm text-slate-600">-</div>
+                                    <div class="text-sm text-slate-600">No hay comentarios</div>
                                 @endif
                             </div>
                         </div>
                     @endforeach
-                </div>
 
-                {{-- Bloque de Equipamiento Asignado --}}
-                <div class="box p-5 mb-5">
-                    <h3 class="text-md font-semibold border-b pb-2 mb-4 text-slate-700">Detalle de Equipamiento (Pedido)</h3>
+                    <h2 class="mb-3 flex items-center gap-2 border-b pb-2 text-base font-semibold text-slate-800">
+                        <i data-lucide="clipboard-check" class="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true"></i>
+                        Validación de Equipamiento
+                    </h2>
                     @if(isset($equipamiento) && count($equipamiento) > 0)
-                        <div class="overflow-x-auto rounded-md border border-slate-200 shadow-sm">
+                        <div class="overflow-visible rounded-3xl border border-slate-300 bg-slate-50 shadow-sm mb-6">
                             <div class="overflow-x-auto table-scroll-wrapper">
                                 <table class="min-w-[920px] w-full text-left text-sm text-slate-600">
                                     <thead class="bg-slate-100 text-xs uppercase tracking-[0.16em] text-slate-500">
@@ -104,8 +112,9 @@
                                             @for($i = 0; $i < (int) $item->cantidad; $i++)
                                                 @php
                                                     $numeroSeleccionado = $item->numeros_seleccionados[$i] ?? 'Sin número';
-                                                    $imeiSeleccionado = $item->imeis_seleccionados[$i] ?? 'No asignado';
-                                                    if (empty($imeiSeleccionado)) {
+                                                    $imeiRaw = $item->imeis_seleccionados[$i] ?? '';
+                                                    $imeiSeleccionado = $imeiRaw ?: 'No asignado';
+                                                    if (empty(trim((string) $imeiRaw))) {
                                                         $hasMissingImeis = true;
                                                     }
 
@@ -126,7 +135,7 @@
                                                     }
                                                     $planNombre = empty($nombresPlanes) ? 'Sin plan asignado' : implode(', ', $nombresPlanes);
                                                 @endphp
-                                                <tr class="border-t border-slate-200 bg-white">
+                                                <tr class="border-t border-slate-300 bg-white">
                                                     <td class="px-4 py-4 text-slate-900 font-medium">
                                                         {{ $item->producto }}
                                                     </td>
@@ -149,30 +158,49 @@
                             </div>
                         </div>
                     @endif
-                </div>
-                {{-- Comentario --}}
-                @if(!empty($comentarioTemporal))
-                    <div class="box p-5 mb-5">
-                        <h3 class="text-md font-semibold border-b pb-2 mb-3 text-slate-700">Comentario del Pedido</h3>
-                        <p class="text-slate-600 bg-slate-50 p-4 rounded-md border border-slate-200">{{ $comentarioTemporal }}</p>
-                    </div>
-                @endif
-                {{-- Formulario de Finalización --}}
-                <form id="ticket-flow-form" method="POST" action="{{ $advanceUrl ?? '#' }}" data-lock-action="ticket">
-                    @csrf
-                    <input type="hidden" name="current_vista_id" value="{{ $vista->idvista ?? '' }}">
-                    <input type="hidden" name="action" value="finish">
-                    <input type="hidden" id="erp-lock-resource" value="{{ $lockResource ?? 'ticket' }}">
-                    <input type="hidden" id="erp-lock-id" value="{{ $lockId ?? ($ticket->idticket ?? '') }}">
+                    <!-- Comentario -->
+                    @if(isset($comentarioTemporal) && $comentarioTemporal)
+                        <div class="mt-4 mb-6 p-4 bg-slate-50 border border-slate-200 rounded-md">
+                            <h4 class="font-medium text-slate-700 mb-1">Comentario del Pedido:</h4>
+                            <p class="text-slate-600">{{ $comentarioTemporal }}</p>
+                        </div>
+                    @endif
 
-                    <div class="mt-6 flex flex-wrap items-center justify-end gap-3">
-                        @include('vistas._actions')
-                    </div>
-                </form>
+                    <form id="ticket-flow-form" method="POST" action="{{ $advanceUrl ?? '#' }}" data-lock-action="ticket.vista">
+                        @csrf
+                        <input type="hidden" name="current_vista_id" value="{{ $vista->idvista ?? '' }}">
+                        <input type="hidden" id="erp-lock-resource" value="{{ $lockResource ?? 'ticket.vista' }}">
+                        <input type="hidden" id="erp-lock-id" value="{{ $lockId ?? ($ticket->idticket ?? '') }}">
 
-            @else
-                <div class="box p-5">
-                    <p class="text-slate-500">No hay datos para mostrar. Vuelve a los pasos anteriores.</p>
+                        @if($hasMissingImeis)
+                            <div class="alert alert-danger mb-5 p-4 rounded-md flex items-center">
+                                <i data-lucide="alert-circle" class="w-6 h-6 mr-3"></i>
+                                <div>
+                                    <strong>¡Atención!</strong> Faltan IMEIs por asignar. No puedes avanzar a la finalización del
+                                    ticket hasta que todos los equipos tengan su IMEI.
+                                </div>
+                            </div>
+
+                            <!-- Regresa a la vista 2, donde se asignan los IMEIs -->
+                            <input type="hidden" name="action" value="back_to_2">
+                            <div class="mt-6 flex justify-end">
+                                <button type="submit"
+                                    class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 bg-primary border-primary text-white">
+                                    <i data-lucide="corner-up-left" class="w-4 h-4 mr-2"></i>
+                                    Regresar a Completar IMEIs
+                                </button>
+                            </div>
+                        @else
+                            <div class="alert alert-success mb-5 p-4 rounded-md flex items-center">
+                                <i data-lucide="check-circle" class="w-6 h-6 mr-3"></i>
+                                <div>Todos los equipos tienen su IMEI asignado correctamente. Puedes proceder.</div>
+                            </div>
+
+                            <div class="mt-6 flex flex-wrap items-center justify-end gap-3">
+                                @include('vistas._actions')
+                            </div>
+                        @endif
+                    </form>
                 </div>
             @endif
         </div>
@@ -194,7 +222,7 @@
         }
 
         document.addEventListener('DOMContentLoaded', function () {
-            const form = document.querySelector('form[data-lock-action="ticket"]');
+            const form = document.querySelector('form[data-lock-action="ticket.vista"]');
             if (!form) return;
 
             form.addEventListener('submit', function (e) {
@@ -206,28 +234,21 @@
 
                 const isActionAdvance = (actionInput && actionInput.name !== '');
 
-                // Si no es avanzar (es cancelar), dejamos que se envíe
-                if (!isActionAdvance) {
-                    return;
-                }
+                if (!isActionAdvance) return;
 
-                // Si ya fue confirmado, permitimos el envío real
-                if (form.dataset.confirmed === 'true') {
-                    return;
-                }
+                if (form.dataset.confirmed === 'true') return;
 
-                e.preventDefault(); // Detenemos el submit real para mostrar modal
+                e.preventDefault();
 
-                const submitter = e.submitter; // Botón que disparó el evento
+                const submitter = e.submitter;
                 const actionUrl = submitter ? submitter.getAttribute('formaction') : '';
+                const actionLabel = submitter ? submitter.textContent.trim() : 'Confirmar';
 
                 function onModalConfirm() {
                     form.dataset.confirmed = 'true';
                     if (actionUrl) form.action = actionUrl;
                     form.submit();
                 }
-
-                const actionLabel = submitter ? submitter.textContent.trim() : 'Confirmar';
 
                 showConfirmModal(
                     'Confirmación',
@@ -238,7 +259,6 @@
             });
         });
 
-        // Función utilitaria para crear el modal dinámico
         function showConfirmModal(title, text, confirmText, onConfirm) {
             const isWarning = title.toLowerCase().includes('advertencia') || title.toLowerCase().includes('incompleto');
             const iconColor = isWarning ? '#f59e0b' : '#3b82f6';
@@ -248,30 +268,33 @@
                 : `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>`;
 
             const modalHtml = `
-                                    <div id="custom-confirm-modal" style="display:flex;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;" role="dialog" aria-modal="true">
-                                        <div style="width:720px;max-width:92%;margin:0 auto;position:relative;border-radius:10px;background:#ffffff;box-shadow:0 20px 40px rgba(2,6,23,0.12);overflow:hidden;">
-                                            <button type="button" id="btn-close-icon-modal" style="position:absolute;right:16px;top:16px;height:44px;width:44px;border-radius:9999px;border:1px solid #e6e9ee;background:#fff;color:#6b7280;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-                                            </button>
-                                            <div style="padding:40px 48px;text-align:center;">
-                                                <div style="margin:0 auto 24px;display:flex;height:64px;width:64px;align-items:center;justify-content:center;border-radius:9999px;border:1px solid ${iconColor};background:${iconBg};color:${iconColor};">
-                                                    ${iconSvg}
-                                                </div>
-                                                <h2 style="font-size:22px;font-weight:600;margin:0;color:#111827;">${title}</h2>
-                                                <p style="margin-top:12px;color:#6b7280;font-size:15px;line-height:1.6;">${text}</p>
-                                                <div style="margin-top:32px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;align-items:center;">
-                                                    <button type="button" id="btn-cancel-modal" style="min-width:120px;padding:10px 18px;border-radius:10px;border:1px solid #000000;background:#ffffff;color:#374151;font-weight:600;cursor:pointer;">Cancelar</button>
-                                                    <button type="button" id="btn-confirm-modal" style="min-width:120px;padding:10px 18px;border-radius:10px;background:#c71010;color:#ffffff;font-weight:600;border:none;cursor:pointer;">${confirmText}</button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                `;
+                                                    <div id="custom-confirm-modal" style="display:flex;position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;" role="dialog" aria-modal="true">
+                                                        <div style="width:720px;max-width:92%;margin:0 auto;position:relative;border-radius:10px;background:#ffffff;box-shadow:0 20px 40px rgba(2,6,23,0.12);overflow:hidden;">
+                                                            <button type="button" id="btn-close-icon-modal" style="position:absolute;right:16px;top:16px;height:44px;width:44px;border-radius:9999px;border:1px solid #e6e9ee;background:#fff;color:#6b7280;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;">
+                                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                                                            </button>
+                                                            <div style="padding:40px 48px;text-align:center;">
+                                                                <div style="margin:0 auto 24px;display:flex;height:64px;width:64px;align-items:center;justify-content:center;border-radius:9999px;border:1px solid ${iconColor};background:${iconBg};color:${iconColor};">
+                                                                    ${iconSvg}
+                                                                </div>
+                                                                <h2 style="font-size:22px;font-weight:600;margin:0;color:#111827;">${title}</h2>
+                                                                <p style="margin-top:12px;color:#6b7280;font-size:15px;line-height:1.6;">${text}</p>
+
+                                                                <div style="margin-top:32px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;align-items:center;">
+                                                                    <button type="button" id="btn-cancel-modal" style="min-width:120px;padding:10px 18px;border-radius:10px;border:1px solid #000000;background:#ffffff;color:#374151;font-weight:600;cursor:pointer;">Cancelar</button>
+                                                                    <button type="button" id="btn-confirm-modal" style="min-width:120px;padding:10px 18px;border-radius:10px;background:#c71010;color:#ffffff;font-weight:600;border:none;cursor:pointer;">${confirmText}</button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                `;
             document.body.insertAdjacentHTML('beforeend', modalHtml);
             const modal = document.getElementById('custom-confirm-modal');
+
             const removeModal = () => modal.remove();
             document.getElementById('btn-close-icon-modal').addEventListener('click', removeModal);
             document.getElementById('btn-cancel-modal').addEventListener('click', removeModal);
+
             document.getElementById('btn-confirm-modal').addEventListener('click', () => {
                 const confirmButton = document.getElementById('btn-confirm-modal');
                 const cancelButton = document.getElementById('btn-cancel-modal');

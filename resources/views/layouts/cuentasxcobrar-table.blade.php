@@ -1660,8 +1660,9 @@
 		.list-row-checkbox:checked,
 		.list-select-all:indeterminate,
 		.list-row-checkbox:indeterminate {
-			background-color: #c1121f !important;
-			accent-color: #c1121f;
+			accent-color: #c1121f !important;
+            background-color: #c1121f !important;
+            border-color: #c1121f !important;
 		}
 
 		.list-select-all:focus,

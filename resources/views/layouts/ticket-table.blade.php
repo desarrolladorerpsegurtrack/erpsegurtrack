@@ -67,7 +67,7 @@
                 </div>
             </div>
 
-            <div class="mt-3.5 flex flex-col gap-8">
+            <div class="mt-3.5 flex flex-col gap-4">
                 {{-- ALERTAS DE SESIÓN: se envuelven en un contenedor ancho para igualar la tabla --}}
                 <div class="session-alerts-container w-full">
                     @if(session('success'))
@@ -81,6 +81,20 @@
                         <div class="mb-4 rounded-lg border px-4 py-3 text-base font-semibold relative session-alert session-alert--error" style="border-color:#a31616;background-color:#fcdcdc;color:#531414;">
                             <span class="session-alert__icon">✕</span>
                             <span class="session-alert__message">{{ session('error') }}</span>
+                            <button type="button" class="session-alert__close" onclick="this.parentElement.style.display='none';">&times;</button>
+                        </div>
+                    @endif
+                    @if(session('info'))
+                        <div class="mb-4 rounded-lg border px-4 py-3 text-base font-semibold relative session-alert session-alert--info" style="border-color:#2563eb;background-color:#dbeafe;color:#1e3a8a;">
+                            <span class="session-alert__icon">ℹ</span>
+                            <span class="session-alert__message">{{ session('info') }}</span>
+                            <button type="button" class="session-alert__close" onclick="this.parentElement.style.display='none';">&times;</button>
+                        </div>
+                    @endif
+                    @if(session('warning'))
+                        <div class="mb-4 rounded-lg border px-4 py-3 text-base font-semibold relative session-alert session-alert--warning" style="border-color:#d97706;background-color:#fef3c7;color:#78350f;">
+                            <span class="session-alert__icon">!</span>
+                            <span class="session-alert__message">{{ session('warning') }}</span>
                             <button type="button" class="session-alert__close" onclick="this.parentElement.style.display='none';">&times;</button>
                         </div>
                     @endif
@@ -197,10 +211,10 @@
                             </div>
 
                             <div class="ticket-filters-actions">
-                                <button type="submit" class="erp-btn-primary transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 bg-primary border-primary text-white">
+                                <button type="submit" class="erp-btn-primary transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none dark:focus:ring-slate-700 dark:focus:ring-opacity-50 bg-primary border-primary text-white gap-1">
                                     <i data-lucide="list-filter" aria-hidden="true"></i> Aplicar
                                 </button>
-                                <a href="{{ url()->current() }}" data-list-clear="true" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none border-secondary text-slate-500">
+                                <a href="{{ url()->current() }}" data-list-clear="true" class="transition duration-200 border shadow-sm inline-flex items-center justify-center py-2 px-3 rounded-md font-medium cursor-pointer focus:ring-4 focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none" style="border-color: #000000; color: #000000;">
                                     Limpiar
                                 </a>
                             </div>
@@ -299,18 +313,18 @@
                                                             $estadoLabel = trim((string) $estadoValue) !== '' ? trim((string) $estadoValue) : 'Sin estado';
                                                             $estadoNormalized = mb_strtolower($estadoLabel);
                                                             $estadoColores = match($estadoNormalized) {
-                                                                'activo' => ['bg' => '#dbeafe', 'text' => '#1d4ed8'],
-                                                                'en proceso' => ['bg' => '#ffedd5', 'text' => '#9a3412'],
+                                                                'pendiente' => ['bg' => '#fef3c7', 'text' => '#b45309'],
+                                                                'en proceso' => ['bg' => '#cffafe', 'text' => '#0e7490'],
                                                                 'resuelto' => ['bg' => '#dcfce7', 'text' => '#15803d'],
                                                                 default       => ['bg' => '#f9fafb', 'text' => '#6b7280'],
                                                             };
                                                         @endphp
-                                                        <div class="flex flex-col items-center gap-1">
-                                                            <span class="inline-flex items-center rounded-md border px-2.5 py-2 text-xs font-semibold" style="background-color: {{ $estadoColores['bg'] }}; color: {{ $estadoColores['text'] }};">
+                                                        <div class="flex flex-col items-center gap-2">
+                                                            <span class="inline-flex items-center rounded-md border px-2.5 py-2 text-sm font-semibold" style="background-color: {{ $estadoColores['bg'] }}; color: {{ $estadoColores['text'] }};">
                                                                 {{ $estadoLabel }}
                                                             </span>
                                                             @if(!empty($row->estado_fase_texto))
-                                                                <span class="text-xs font-medium text-slate-500">
+                                                                <span class="text-sm font-semibold text-slate-500">
                                                                     {{ $row->estado_fase_texto }}
                                                                 </span>
                                                             @endif
@@ -365,7 +379,7 @@
                                                         $lockedByOther = !empty($row->locked_by_other);
                                                         $statusText = $row->estado_accion_texto ?? null;
                                                         $estadoLabel = mb_strtolower(trim((string) ($row->estado ?? '')));
-                                                        $isResolved = $estadoLabel === 'resuelto';
+                                                        $isResolved = in_array($estadoLabel, ['resuelto', 'cancelado'], true);
                                                     @endphp
                                                     @if(!$canAttend)
                                                         <div class="flex flex-col items-center gap-2">
@@ -385,22 +399,27 @@
                                                                 <span class="text-xs text-slate-500">{{ $statusText }}</span>
                                                             @endif
                                                         </div>
-                                                    @elseif($lockedByOther)
-                                                        <div class="flex flex-col items-center gap-2">
-                                                            <button type="button" disabled class="inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition duration-200 opacity-60 cursor-not-allowed" style="color: #ffffff; background-color: #c71010;">
-                                                                Atender
-                                                            </button>
-                                                            @if($statusText)
-                                                                <span class="text-xs text-slate-500">{{ $statusText }}</span>
-                                                            @endif
-                                                        </div>
                                                     @else
                                                         <div class="flex flex-col items-center gap-2">
-                                                            <a href="{{ route('modules.tickets.show', ['ticketId' => $row->idticket]) }}">
-                                                                <button type="button" class="inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm font-semibold transition duration-200 " style="color: #ffffff; background-color: #c71010;">
+                                                            <div
+                                                                class="relative inline-flex"
+                                                                data-ticket-vistas-dropdown
+                                                                data-ticket-vistas-url="{{ route('modules.tickets.available-views', ['ticketId' => $row->idticket]) }}">
+                                                                <button
+                                                                    type="button"
+                                                                    data-ticket-vistas-toggle
+                                                                    aria-haspopup="menu"
+                                                                    aria-expanded="false"
+                                                                    class="inline-flex items-center justify-center rounded-l-md border px-3 py-2 text-sm font-semibold transition duration-200"
+                                                                    style="color: #ffffff; background-color: #c71010;">
                                                                     Atender
                                                                 </button>
-                                                            </a>
+                                                                <div
+                                                                    data-ticket-vistas-menu
+                                                                    role="menu"
+                                                                    class="fixed z-[99999] hidden max-h-64 min-w-56 overflow-y-auto rounded-md border border-slate-200 bg-white py-1 text-left text-sm shadow-xl">
+                                                                </div>
+                                                            </div>
                                                                 @if($statusText)
                                                                     <span class="text-xs text-slate-500">{{ $statusText }}</span>
                                                             @endif
@@ -439,7 +458,122 @@
             </div>
         </div>
     </div>        
-            
+
+    <script>
+        (() => {
+            const closeMenus = () => {
+                document.querySelectorAll('[data-ticket-vistas-menu]').forEach((menu) => {
+                    menu.classList.add('hidden');
+                    const dropdown = menu.closest('[data-ticket-vistas-dropdown]');
+                    dropdown?.querySelectorAll('[data-ticket-vistas-toggle]')
+                        .forEach((button) => button.setAttribute('aria-expanded', 'false'));
+                });
+            };
+
+            const positionMenu = (dropdown, menu) => {
+                const button = dropdown.querySelector('[data-ticket-vistas-toggle]');
+                const rect = button.getBoundingClientRect();
+                const width = Math.min(
+                    Math.max(rect.width + (dropdown.offsetWidth - button.offsetWidth), 224),
+                    window.innerWidth - 16
+                );
+                menu.style.width = `${width}px`;
+                menu.style.maxHeight = `${Math.max(40, Math.min(256, window.innerHeight - rect.bottom - 8))}px`;
+                menu.style.zIndex = '99999';
+                const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+                const top = rect.bottom + 4;
+                menu.style.left = `${left}px`;
+                menu.style.top = `${top}px`;
+            };
+
+            const loadViews = async (dropdown, menu) => {
+                menu.replaceChildren();
+                menu.dataset.loaded = 'false';
+                const loading = document.createElement('div');
+                loading.className = 'px-3 py-1.5 text-xs text-slate-500';
+                loading.textContent = 'Cargando...';
+                menu.appendChild(loading);
+
+                try {
+                    const response = await fetch(dropdown.dataset.ticketVistasUrl, {
+                        headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    });
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.message || 'No se pudieron cargar las vistas.');
+                    }
+
+                    menu.replaceChildren();
+                    if (!Array.isArray(result.vistas) || result.vistas.length === 0) {
+                        const empty = document.createElement('div');
+                        empty.className = 'px-3 py-1.5 text-xs text-slate-500';
+                        empty.textContent = 'No hay vistas disponibles.';
+                        menu.appendChild(empty);
+                    } else {
+                        result.vistas.forEach((vista) => {
+                            const option = vista.disponible
+                                ? document.createElement('a')
+                                : document.createElement('button');
+                            option.className = 'block w-full px-3 py-1.5 text-left text-sm text-slate-800 hover:bg-slate-100' +
+                                (vista.disponible ? '' : ' cursor-not-allowed opacity-50');
+                            option.setAttribute('role', 'menuitem');
+                            option.textContent = `${vista.orden}. ${vista.nombre}`;
+
+                            if (vista.disponible) {
+                                option.href = vista.url;
+                            } else {
+                                option.type = 'button';
+                                option.disabled = true;
+                            }
+                            menu.appendChild(option);
+                        });
+                        menu.dataset.loaded = 'true';
+                    }
+                } catch (error) {
+                    menu.replaceChildren();
+                    const errorMessage = document.createElement('div');
+                    errorMessage.className = 'px-3 py-1.5 text-xs text-red-700';
+                    errorMessage.textContent = error instanceof Error ? error.message : 'No se pudieron cargar las vistas.';
+                    menu.appendChild(errorMessage);
+                }
+                positionMenu(dropdown, menu);
+            };
+
+            document.addEventListener('click', async (event) => {
+                const trigger = event.target.closest('[data-ticket-vistas-toggle]');
+                if (trigger) {
+                    const dropdown = trigger.closest('[data-ticket-vistas-dropdown]');
+                    const menu = dropdown.querySelector('[data-ticket-vistas-menu]');
+                    if (!menu) return;
+                    const wasOpen = !menu.classList.contains('hidden');
+                    closeMenus();
+                    if (wasOpen) return;
+
+                    menu.classList.remove('hidden');
+                    dropdown.querySelectorAll('[data-ticket-vistas-toggle]')
+                        .forEach((button) => button.setAttribute('aria-expanded', 'true'));
+                    positionMenu(dropdown, menu);
+                    if (menu.dataset.loaded !== 'true') await loadViews(dropdown, menu);
+                    return;
+                }
+
+                if (event.target.closest('[data-ticket-vistas-menu]')) return;
+                if (!event.target.closest('[data-ticket-vistas-dropdown]')) closeMenus();
+            });
+
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    closeMenus();
+                }
+            });
+
+            window.addEventListener('resize', closeMenus);
+            window.addEventListener('scroll', (event) => {
+                if (event.target === document || event.target === document.documentElement) closeMenus();
+            }, true);
+        })();
+    </script>
+
     <style>
         .ticket-stats-white,
         .ticket-table-white {
@@ -580,7 +714,7 @@
         }
 
         #list-filter-form .tom-select.ts-wrapper .ts-control,
-        #list-filter-form .tom-select .ts-control,
+        #list-filter-form .tom-select .ts-control,  
         #list-filter-form .tom-select.plugin-dropdown_input.focus.dropdown-active .ts-control,
         .ticket-filter-item--tom .tom-select.ts-wrapper .ts-control,
         .ticket-filter-item--tom .tom-select .ts-control,

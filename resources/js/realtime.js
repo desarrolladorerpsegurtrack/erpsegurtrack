@@ -4,7 +4,7 @@ const wsHost = isHttpsPage
     ? (import.meta.env.VITE_WS_SERVER_HOST || window.location.hostname)
     : window.location.hostname;
 const wsPort = isHttpsPage
-    ? import.meta.env.VITE_WS_SERVER_PORT
+    ? (import.meta.env.VITE_WS_SERVER_PORT || import.meta.env.VITE_WS_SERVER_PORT || '')
     : (import.meta.env.VITE_WS_LOCAL_PORT || 6001);
 const wsPortSegment = wsPort ? `:${wsPort}` : '';
 const wsUrl = `${wsScheme}://${wsHost}${wsPortSegment}`;

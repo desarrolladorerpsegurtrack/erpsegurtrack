@@ -831,7 +831,7 @@
                                                                 @unless($hideHistoryPanelTitle ?? false)
                                                                     <div class="border-b border-black bg-slate-200 text-slate-800 px-4 py-3 text-sm font-semibold">{{ $historyTitle }}</div>
                                                                 @endunless
-                                                                <div class="overflow-x-auto" >
+                                                                <div class="overflow-x-auto @if($historyTitle === 'Regla de flujo') overflow-y-auto @endif" @if($historyTitle === 'Regla de flujo') style="max-height: 15rem;" @endif>
                                                                     @if($relationGroups->isNotEmpty())
                                                                         <div class="flex flex-col gap-4">
                                                                             @foreach($relationGroups as $relationGroup)
@@ -938,7 +938,7 @@
                                                                         </div>
                                                                     @else
                                                                         <table class="w-full text-left text-sm border-collapse border border-black">
-                                                                            <thead class="bg-slate-300 text-slate-800">
+                                                                            <thead class="bg-slate-300 text-slate-800 @if($historyTitle === 'Regla de flujo') sticky top-0 z-10 @endif">
                                                                                 <tr>
                                                                                     @foreach($historyColumns as $historyColumn)
                                                                                         <th class="px-3 py-2 whitespace-nowrap border-b border-black">{{ $historyColumn['label'] ?? '' }}</th>
@@ -975,7 +975,7 @@
                                                                                                     </div>
                                                                                                 </td>
                                                                                             @else
-                                                                                                <td class="px-3 py-2 whitespace-nowrap border-b border-black">{{ $historyValue }}</td>
+                                                                                                <td class="px-3 py-2 whitespace-nowrap border-b border-black" title="{{ $historyValue }}">{{ $historyValue }}</td>
                                                                                             @endif
                                                                                         @endforeach
                                                                                     </tr>
@@ -1278,20 +1278,20 @@
                                     </div>
 
                                     <div class="mt-4 rounded-[0.85rem] border border-slate-200" style="max-height: 240px; overflow-x: auto; overflow-y: auto; overscroll-behavior-x: contain;">
-                                        <table class="text-left text-sm" style="width: 100%; min-width: {{ $activeImportType === 'numero' ? '740px' : ($activeImportType === 'simcard' ? '760px' : '1120px') }}; table-layout: fixed;">
+                                        <table class="text-left text-sm" style="width: 100%; min-width: {{ $activeImportType === 'numero' ? '900px' : ($activeImportType === 'simcard' ? '800px' : '1240px') }}; table-layout: fixed;">
                                             <thead class="bg-slate-100 text-slate-600">
                                                 <tr>
                                                     <th class="w-16 px-3 py-2">Línea</th>
                                                     @if($activeImportType === 'numero')
-                                                        <th class="w-36 px-3 py-2">Número</th>
+                                                        <th class="w-72 px-3 py-2">Número</th>
                                                         <th class="w-40 px-3 py-2">Plan</th>
                                                         <th class="w-32 px-3 py-2">Precio</th>
                                                     @elseif($activeImportType === 'simcard')
-                                                        <th class="w-56 px-3 py-2">SimCard</th>
+                                                        <th class="w-72 px-3 py-2">SimCard</th>
                                                         <th class="w-36 px-3 py-2">Operador</th>
                                                     @else
-                                                        <th class="w-36 px-3 py-2">Número</th>
-                                                        <th class="w-56 px-3 py-2">SimCard</th>
+                                                        <th class="w-60 px-3 py-2">Número</th>
+                                                        <th class="w-60 px-3 py-2">SimCard</th>
                                                         <th class="w-36 px-3 py-2">Operador</th>
                                                         <th class="w-40 px-3 py-2">Plan</th>
                                                         <th class="w-32 px-3 py-2">Precio</th>
@@ -2919,7 +2919,7 @@
                         return `
                             <tr class="border-t border-slate-100">
                                 <td class="px-3 py-2">${row.line ?? '-'}</td>
-                                <td class="px-3 py-2">${row.numero ?? ''}</td>
+                                <td class="whitespace-nowrap px-3 py-2">${row.numero ?? ''}</td>
                                 <td class="px-3 py-2">${row.plan ?? ''}</td>
                                 <td class="px-3 py-2">${row.moneda ? row.moneda + ' ' : ''}${row.precio ?? ''}</td>
                                 <td class="px-3 py-2">${row.status ?? ''}</td>
@@ -2931,7 +2931,7 @@
                         return `
                             <tr class="border-t border-slate-100">
                                 <td class="px-3 py-2">${row.line ?? '-'}</td>
-                                <td class="px-3 py-2">${row.simcard ?? ''}</td>
+                                <td class="whitespace-nowrap px-3 py-2">${row.simcard ?? ''}</td>
                                 <td class="px-3 py-2">${row.operador ?? ''}</td>
                                 <td class="px-3 py-2">${row.status ?? ''}</td>
                             </tr>
@@ -3016,8 +3016,8 @@
 
                 let headersHtml = `
                     <th class="w-16 px-3 py-2">Línea</th>
-                    <th class="w-36 px-3 py-2">Número</th>
-                    <th class="w-56 px-3 py-2">SimCard</th>
+                    <th class="w-60 px-3 py-2">Número</th>
+                    <th class="w-60 px-3 py-2">SimCard</th>
                     <th class="w-36 px-3 py-2">Operador</th>
                     <th class="w-40 px-3 py-2">Plan</th>
                     <th class="w-32 px-3 py-2">Precio</th>
@@ -3027,7 +3027,7 @@
                 if (preview.importType === 'numero') {
                     headersHtml = `
                         <th class="w-16 px-3 py-2">Línea</th>
-                        <th class="w-36 px-3 py-2">Número</th>
+                        <th class="w-72 px-3 py-2">Número</th>
                         <th class="w-40 px-3 py-2">Plan</th>
                         <th class="w-32 px-3 py-2">Precio</th>
                         <th class="w-60 px-3 py-2">Estado</th>
@@ -3035,9 +3035,9 @@
                 } else if (preview.importType === 'simcard') {
                     headersHtml = `
                         <th class="w-16 px-3 py-2">Línea</th>
-                        <th class="w-56 px-3 py-2">SimCard</th>
+                        <th class="w-65 px-3 py-2">SimCard</th>
                         <th class="w-36 px-3 py-2">Operador</th>
-                        <th class="w-60 px-3 py-2">Estado</th>
+                        <th class="w-40 px-3 py-2">Estado</th>
                     `;
                 }
 
@@ -3045,7 +3045,7 @@
                 previewContainer.innerHTML = `
                     ${summaryHtml}
                     <div class="mt-4 rounded-[0.85rem] border border-slate-200" style="max-height: 240px; overflow-x: auto; overflow-y: auto; overscroll-behavior-x: contain;">
-                        <table class="text-left text-sm" style="width: 100%; min-width: ${preview.importType === 'numero' ? '740px' : (preview.importType === 'simcard' ? '760px' : '1120px')}; table-layout: fixed;">
+                        <table class="text-left text-sm" style="width: 100%; min-width: ${preview.importType === 'numero' ? '900px' : (preview.importType === 'simcard' ? '800px' : '1240px')}; table-layout: fixed;">
                             <thead class="bg-slate-100 text-slate-600">
                                 <tr>
                                     ${headersHtml}

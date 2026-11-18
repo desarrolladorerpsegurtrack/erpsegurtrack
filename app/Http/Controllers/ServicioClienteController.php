@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Export\ExportableList;
 use App\Http\Controllers\Permission\HandlesResourceLock;
+use App\Services\VehicleComponentService;
 use App\Support\ResourceLock;
 use App\Support\ServicePeriod;
 use Illuminate\Database\QueryException;
@@ -11,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
@@ -920,6 +922,15 @@ class ServicioClienteController extends Controller
 
         $extraSections = [
             [
+                'view' => 'vehiculo.componentes',
+                'data' => [
+                    'componentesVehiculo' => app(VehicleComponentService::class)->forVehicle(
+                        (string) ($record->vehiculo_placa ?? '')
+                    ),
+                    'componentesTitle' => 'Accesorios',
+                ],
+            ],
+            [
                 'view' => 'serviciocliente.historial-servicio',
                 'data' => [
                     'historialRows' => $historialRows
@@ -1192,10 +1203,31 @@ class ServicioClienteController extends Controller
                     ->orderByDesc('dsd.iddetalle_serviciodispositivo')
                     ->first();
 
+                if (
+                    $validated['estado'] === 'activo'
+                    && Schema::hasTable('historial_servicio')
+                ) {
+                    $scheduledDeactivation = DB::table('historial_servicio')
+                        ->where('servicioCliente_idservicioCliente', $id)
+                        ->whereIn('motivo', \App\Services\CxcService::SCHEDULED_DEACTIVATION_MOTIVES)
+                        ->orderByDesc('idhistorial_servicio')
+                        ->first(['fecha_accion']);
+                    if ($scheduledDeactivation) {
+                        $scheduledEnd = Carbon::parse($scheduledDeactivation->fecha_accion)
+                            ->endOfMonth()
+                            ->toDateString();
+                        $validated['fecheVencimiento'] = $scheduledEnd;
+                        if (($serviceUpdates['fecheVencimiento'] ?? null) !== $scheduledEnd) {
+                            $serviceUpdates['fecheVencimiento'] = $scheduledEnd;
+                        }
+                    }
+                }
+
                 $oldVehicle = $oldRecord->vehiculo_placa ?? null;
                 $oldDevice = $oldRecord->dispositivoCliente_iddispositivoCliente ?? null;
                 $oldServiceWasActive = ($oldRecord->estado ?? null) === 'activo';
                 $oldNumero = $oldServiceWasActive ? ($oldRecord->numeroTelefonico_numeroTelefonico ?? null) : null;
+                $isImmediateDeactivation = $validated['estado'] === 'inactivo' && $oldServiceWasActive;
                 $deviceChanged = $oldDevice !== $deviceId;
                 $vehicleChanged = $oldVehicle !== null && $oldVehicle !== $validated['vehiculo_placa'];
                 $numberChanged = $oldNumero !== $phoneNumber;
@@ -1453,13 +1485,9 @@ class ServicioClienteController extends Controller
                     ]);
                 }
 
-                if ($validated['estado'] === 'inactivo' && $oldServiceWasActive) {
-                    app(\App\Services\CxcService::class)->adjustOpenChargesForServiceDeactivation(
-                        $existingRecord,
-                        Carbon::parse($existingRecord->fecheVencimiento ?? $fechaServicio),
-                        true,
-                        true
-                    );
+                if ($isImmediateDeactivation) {
+                    $serviceUpdates['fecheVencimiento'] = app(\App\Services\CxcService::class)
+                        ->adjustOpenChargesForImmediateServiceDeactivation($existingRecord);
                 }
 
                 if ($serviceUpdates !== []) {
@@ -1475,7 +1503,10 @@ class ServicioClienteController extends Controller
                     );
                 }
 
-                if (array_key_exists('fechaInicio', $serviceUpdates) || array_key_exists('fecheVencimiento', $serviceUpdates)) {
+                if (
+                    !$isImmediateDeactivation
+                    && (array_key_exists('fechaInicio', $serviceUpdates) || array_key_exists('fecheVencimiento', $serviceUpdates))
+                ) {
                     app(\App\Services\CxcService::class)->synchronizeCurrentServiceChargeDates(
                         $id,
                         $existingRecord,
@@ -2148,7 +2179,7 @@ class ServicioClienteController extends Controller
 
     private function clienteEsIntegrador(string $cliente): bool
     {
-        if ($cliente === '' || $cliente === '0' || $cliente === null) {
+        if ($cliente === '' || $cliente === '0' || $cliente === 'null') {
             return false;
         }
 

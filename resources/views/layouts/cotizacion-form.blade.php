@@ -3624,7 +3624,7 @@
             </div>
 
             <!-- Body with PDF Canvas Container -->
-            <div class="flex-1 overflow-y-auto bg-slate-700 relative p-4 flex flex-col gap-4 items-center" id="preview-canvas-container">
+            <div class="flex-1 overflow-y-auto bg-slate-200 relative p-4 flex flex-col gap-4 items-center" id="preview-canvas-container">
                 <div id="preview-loading" class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-10 hidden">
                     <svg class="animate-spin h-10 w-10 text-primary mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>

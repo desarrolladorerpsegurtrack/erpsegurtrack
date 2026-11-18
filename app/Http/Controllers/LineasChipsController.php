@@ -128,11 +128,7 @@ class LineasChipsController extends Controller
             ->withQueryString();
 
         $items->getCollection()->transform(function ($item) {
-            $item->plan = implode(' - ', [
-                trim((string) ($item->plan ?? '')),
-                trim((string) ($item->plan_megas ?? '')),
-                trim((string) ($item->plan_sms ?? '')),
-            ]);
+            $item->plan = trim((string) ($item->plan ?? ''));
             $simcardActual = trim((string) ($item->simcard_actual ?? ''));
             $simcardPasada = trim((string) ($item->simcard_pasada ?? ''));
             $precio = trim((string) ($item->precio_numero ?? ''));
@@ -1009,11 +1005,7 @@ class LineasChipsController extends Controller
             ->get();
 
         $rows->transform(function ($item) {
-            $item->plan = implode(' - ', [
-                trim((string) ($item->plan ?? '')),
-                trim((string) ($item->plan_megas ?? '')),
-                trim((string) ($item->plan_sms ?? '')),
-            ]);
+            $item->plan = trim((string) ($item->plan ?? ''));
             $simcardActual = trim((string) ($item->simcard_actual ?? ''));
             $simcardPasada = trim((string) ($item->simcard_pasada ?? ''));
             $precio = trim((string) ($item->precio_numero ?? ''));
@@ -1889,11 +1881,7 @@ class LineasChipsController extends Controller
             })->values();
 
             $row->estado = self::normalizeDetalleSimCardEstadoLabel($row->estado);
-            $row->plan = implode(' - ', array_filter([
-                trim((string) ($row->plan_nombre ?? '')),
-                trim((string) ($row->plan_megas ?? '')),
-                trim((string) ($row->plan_sms ?? '')),
-            ], static fn (string $value): bool => $value !== ''));
+            $row->plan = trim((string) ($row->plan_nombre ?? ''));
             return $row;
         }));
 
@@ -2267,11 +2255,7 @@ class LineasChipsController extends Controller
 
         $rows->transform(function ($item) {
             $item->fechaAsignacion = self::normalizeFechaAsignacionForInput($item->fechaAsignacion) ?? '';
-            $item->plan = implode(' - ', array_filter([
-                trim((string) ($item->plan_nombre ?? '')),
-                trim((string) ($item->plan_megas ?? '')),
-                trim((string) ($item->plan_sms ?? '')),
-            ], static fn (string $value): bool => $value !== ''));
+            $item->plan = trim((string) ($item->plan_nombre ?? ''));
             $item->estado = self::normalizeDetalleSimCardEstadoLabel($item->estado);
             return $item;
         });
@@ -5089,7 +5073,7 @@ class LineasChipsController extends Controller
                 continue;
             }
 
-            $options[$id] = $plan['nombre'] . ' - ' . $plan['megas'] . ' - ' . $plan['sms'];
+            $options[$id] = $plan['nombre'];
             $priceMap[$id] = [
                 'price' => $plan['precio'],
                 'currency' => $plan['moneda'],

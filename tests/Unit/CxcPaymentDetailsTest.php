@@ -180,6 +180,51 @@ class CxcPaymentDetailsTest extends TestCase
         $this->assertSame(31.0, (float) $groupedDetails['monto_cancelado']);
     }
 
+    public function test_payment_details_return_applied_credit_amounts_in_the_receivable_currency(): void
+    {
+        $this->createSchema();
+        $this->createPaymentFixture();
+        Schema::create('nota_credito_aplicacion', function (Blueprint $table): void {
+            $table->increments('idnotaCreditoAplicacion');
+            $table->integer('nota_credito_idnotacredito');
+            $table->integer('cuentasPorCobrar_idcuentasPorCobrar');
+            $table->decimal('monto', 10, 2);
+            $table->dateTime('fechaAplicacion');
+            $table->string('estado');
+        });
+        DB::table('nota_credito_aplicacion')->insert([
+            'nota_credito_idnotacredito' => 1,
+            'cuentasPorCobrar_idcuentasPorCobrar' => 1,
+            'monto' => 10,
+            'fechaAplicacion' => '2026-10-07 10:15:30',
+            'estado' => '1',
+        ]);
+        DB::table('bancos')->insert([
+            'idbancos' => 3,
+            'entidadBancaria_identidadBancaria' => 2,
+            'fechaRegistro' => '2026-10-07 10:15:00',
+            'informacion' => 'Aplicación saldo a favor a CXC #1',
+            'tipoMov' => 'C',
+            'monto' => 5,
+        ]);
+        DB::table('detallecxc')->insert([
+            'iddetalleCXC' => 3,
+            'formaPago_idformaPago' => 2,
+            'cuentasPorCobrar_idcuentasPorCobrar' => 1,
+            'moneda_idmoneda' => 1,
+            'fechaPago' => '2026-10-07 10:15:00',
+            'bancos_idbancos' => 3,
+            'estado' => '1',
+            'descripcion' => 'Aplicación saldo a favor',
+        ]);
+
+        $data = $this->controller()->getPaymentDetails('1')->getData(true)['data'];
+
+        $this->assertSame(10.0, (float) $data['monto_nota_credito_aplicado']);
+        $this->assertSame(5.0, (float) $data['monto_saldo_favor_aplicado']);
+        $this->assertSame('S/', $data['moneda_simbolo']);
+    }
+
     public function test_service_payment_details_extract_the_comment_from_bank_information(): void
     {
         $this->createSchema();

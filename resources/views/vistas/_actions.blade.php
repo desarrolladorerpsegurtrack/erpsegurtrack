@@ -2,17 +2,11 @@
     $cancelUrl = $cancelUrl ?? route('modules.tickets.cancel', ['ticketId' => $ticket->idticket]);
     $advanceUrl = $advanceUrl ?? route('modules.tickets.advance', ['ticketId' => $ticket->idticket]);
     $actionLabel = $actionLabel ?? 'Guardar';
-    $actionValue = $actionValue ?? 'save';
+    $actionValue = $actionValue ?? 'complete';
 @endphp
 
-@php
-    $cancelUrl = $cancelUrl ?? route('modules.tickets.cancel', ['ticketId' => $ticket->idticket]);
-    $advanceUrl = $advanceUrl ?? route('modules.tickets.advance', ['ticketId' => $ticket->idticket]);
-    $actionLabel = $actionLabel ?? 'Guardar';
-    $actionValue = $actionValue ?? 'save';
-@endphp
-
-<input type="hidden" id="erp-lock-resource" value="{{ $lockResource ?? 'ticket' }}">
+<input type="hidden" name="current_vista_id" value="{{ $vista->idvista ?? '' }}">
+<input type="hidden" id="erp-lock-resource" value="{{ $lockResource ?? 'ticket.vista' }}">
 <input type="hidden" id="erp-lock-id" value="{{ $lockId ?? $ticket->idticket }}">
 <input type="hidden" name="action" id="form-action-input" value="{{ $actionValue }}">
 

@@ -71,7 +71,7 @@
     @endif
     <div class="erp-cuentas-layout">
         <div id="cxc-list-wrapper" class="erp-cuentas-card"
-            data-loaded-tab="{{ $activeTab !== 'servicios' || $serviceDataLoaded ? $activeTab : '' }}">
+            data-loaded-tab="{{ ($activeTab === 'cotizaciones' && $quotationDataLoaded) || ($activeTab === 'servicios' && $serviceDataLoaded) ? $activeTab : '' }}">
             <div class="erp-cuentas-header">
                 <h2>Cuentas por Cobrar</h2>
 
@@ -102,7 +102,7 @@
                         onclick="this.parentElement.classList.add('hidden');">&times;</button>
                 </div>
                 <div id="tab-cotizaciones" class="tab-panel {{ request('tab') === 'servicios' ? 'hidden' : '' }}">
-                    <div id="quote-stats" class="erp-section-stats">
+                    <div id="quote-stats" class="erp-section-stats {{ $activeTab === 'cotizaciones' && $quotationDataLoaded ? '' : 'hidden' }}">
                         @foreach($quoteStats ?? [] as $stat)
                             <div class="erp-section-stat">
                                 <div class="erp-section-stat-label">{{ $stat['label'] }}</div>
@@ -126,7 +126,7 @@
                                     id="quote-export-xlsx" class="erp-btn-secondary"
                                     style="display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none;">
                                     <i data-lucide="download" aria-hidden="true" class="h-4 w-4"></i>
-                                    Exportar XLSX
+                                    Reporte XLSX
                                 </a>
                             @endif
                         </div>
@@ -200,9 +200,11 @@
                         </div>
                     </form>
 
-                    <div id="quote-results">
+                    <div id="quote-results" style="min-height:360px">
                         @if($activeTab !== 'cotizaciones')
                             <div class="erp-empty-state" aria-live="polite" hidden></div>
+                        @elseif(!$quotationDataLoaded)
+                            <div class="erp-empty-state" aria-live="polite">Cargando cotizaciones...</div>
                         @elseif($cotizacionesPendientes->isEmpty())
                             <div class="erp-empty-state">
                                 No se encontraron cotizaciones.
@@ -427,7 +429,7 @@
                 </div>
 
                 <div id="tab-servicios" class="tab-panel {{ request('tab') === 'servicios' ? '' : 'hidden' }}">
-                    <div id="service-stats" class="erp-section-stats">
+                    <div id="service-stats" class="erp-section-stats {{ $activeTab === 'servicios' && $serviceDataLoaded ? '' : 'hidden' }}">
                         @foreach($serviceStats ?? [] as $stat)
                             <div class="erp-section-stat">
                                 <div class="erp-section-stat-label">{{ $stat['label'] }}</div>
@@ -454,7 +456,7 @@
                                     id="service-export-xlsx" class="erp-btn-secondary"
                                     style="display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none;">
                                     <i data-lucide="download" aria-hidden="true" class="h-4 w-4"></i>
-                                    Exportar XLSX
+                                    Reporte XLSX
                                 </a>
                             @endif
                             @if($canCreateCxc)
@@ -498,12 +500,12 @@
                                 </summary>
                                 <div class="erp-month-picker-panel">
                                     <label class="erp-month-picker-select-all">
-                                        <input type="checkbox" id="service-month-select-all">
+                                        <input type="checkbox" id="service-month-select-all" class="duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&[type='radio']]:checked:bg-primary [&[type='radio']]:checked:border-primary [&[type='radio']]:checked:border-opacity-10 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:not(:checked)]:dark:bg-darkmode-800/50 [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed [&:disabled:checked]:dark:bg-darkmode-800/50">
                                         <span>Todos</span>
                                     </label>
                                     @foreach($serviceMonthOptions as $monthValue => $monthLabel)
                                         <label>
-                                            <input type="checkbox" name="service_month[]" value="{{ $monthValue }}"
+                                            <input type="checkbox" name="service_month[]" value="{{ $monthValue }}" class="duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&[type='radio']]:checked:bg-primary [&[type='radio']]:checked:border-primary [&[type='radio']]:checked:border-opacity-10 [&[type='checkbox']]:checked:bg-primary [&[type='checkbox']]:checked:border-primary [&[type='checkbox']]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:not(:checked)]:dark:bg-darkmode-800/50 [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed [&:disabled:checked]:dark:bg-darkmode-800/50"
                                                 @checked(in_array($monthValue, $serviceFilters['service_months'] ?? [], true))>
                                             <span>{{ $monthLabel }}</span>
                                         </label>
@@ -720,7 +722,7 @@
                                                             data-amount="{{ $clientGroup['monto_factura'] ?? $clientGroup['monto_total'] }}"
                                                             data-withholding-gross="{{ $clientGroup['monto_servicios'] ?? $clientGroup['monto_total'] }}"
                                                             data-payment-amount="{{ $isWithholdingPendingGroup || mb_strtolower(trim((string) ($clientGroup['cxc_estado'] ?? '')), 'UTF-8') === 'pendiente pago parcial' ? ($clientGroup['monto_saldo'] ?? 0) : ($clientGroup['monto_factura'] ?? $clientGroup['monto_saldo']) }}"
-                                                            data-paid-amount="{{ preg_match('/^pendiente a cr[eé]dito/i', trim((string) ($clientGroup['cxc_estado'] ?? ''))) === 1 ? ($clientGroup['monto_pagado'] ?? 0) : max(0, (float) ($clientGroup['monto_servicios'] ?? 0) - (float) ($clientGroup['monto_saldo'] ?? 0)) }}"
+                                                            data-paid-amount="{{ in_array(($clientGroup['cxc_estado'] ?? ''), ['Cancelado Detracción', 'Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención'], true) ? ($clientGroup['monto_pagado_periodo'] ?? 0) : (preg_match('/^pendiente a cr[eé]dito/i', trim((string) ($clientGroup['cxc_estado'] ?? ''))) === 1 ? ($clientGroup['monto_pagado'] ?? 0) : max(0, (float) ($clientGroup['monto_servicios'] ?? 0) - (float) ($clientGroup['monto_saldo'] ?? 0))) }}"
                                                             data-amount-display="{{ $clientGroup['monto_total_display'] }}"
                                                             data-tipo-cobro-id="{{ $clientGroup['tipo_cobro_id'] ?? '' }}"
                                                             data-moneda-id="{{ $clientGroup['moneda_idmoneda'] ?? 1 }}"
@@ -868,7 +870,7 @@
                                                                                     data-amount="{{ $typeGroup['monto_factura'] ?? $typeGroup['monto_subtotal'] }}"
                                                                                     data-withholding-gross="{{ $typeGroup['monto_subtotal'] }}"
                                                                                     data-payment-amount="{{ $isTypeWithholdingPending || mb_strtolower(trim((string) ($typeGroup['cxc_estado'] ?? '')), 'UTF-8') === 'pendiente pago parcial' ? ($typeGroup['monto_saldo'] ?? 0) : ($typeGroup['monto_factura'] ?? $typeGroup['monto_saldo']) }}"
-                                                                                    data-paid-amount="{{ preg_match('/^pendiente a cr[eé]dito/i', trim((string) ($typeGroup['cxc_estado'] ?? ''))) === 1 ? ($typeGroup['monto_pagado'] ?? 0) : max(0, (float) ($typeGroup['monto_subtotal'] ?? 0) - (float) ($typeGroup['monto_saldo'] ?? 0)) }}"
+                                                                                    data-paid-amount="{{ in_array(($typeGroup['cxc_estado'] ?? ''), ['Cancelado Detracción', 'Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención'], true) ? ($typeGroup['monto_pagado_periodo'] ?? 0) : (preg_match('/^pendiente a cr[eé]dito/i', trim((string) ($typeGroup['cxc_estado'] ?? ''))) === 1 ? ($typeGroup['monto_pagado'] ?? 0) : max(0, (float) ($typeGroup['monto_subtotal'] ?? 0) - (float) ($typeGroup['monto_saldo'] ?? 0))) }}"
                                                                                     data-amount-display="{{ $typeGroup['monto_subtotal_display'] }}"
                                                                                     data-tipo-cobro-id="{{ $typeGroup['tipo_cobro_id'] ?? ($clientGroup['tipo_cobro_id'] ?? '') }}"
                                                                                     data-moneda-id="{{ $clientGroup['moneda_idmoneda'] ?? 1 }}"
@@ -949,8 +951,8 @@
                                                                                                 Dispositivo
                                                                                             </th>
                                                                                             <th class="py-1 px-1 text-left">Número</th>
-                                                                                            <th class="py-1 px-1 text-left">Fecha Inicio
-                                                                                            </th>
+                                                                                            {{-- <th class="py-1 px-1 text-left">Fecha Inicio
+                                                                                            </th> --}}
                                                                                             <th class="py-1 px-1 text-left">Fecha Fin
                                                                                             </th>
                                                                                             <th class="py-1 px-1 text-left">Mes</th>
@@ -986,18 +988,31 @@
                                                                                                                 value="{{ $veh['cxc_ids'][0] }}">
                                                                                                         @endif
                                                                                                         <span class="stair-vehicle-plate-text">{{ $veh['placa'] }}</span>
-                                                                                                        @if(in_array((string) ($veh['cxc_estado'] ?? ''), ['3', 'CANCELADO'], true)
+                                                                                                        @if(!empty($veh['baja_programada_hasta']))
+                                                                                                            <span class="stair-vehicle-status inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-800"
+                                                                                                                title="Se conserva el CXC del periodo actual; este servicio no se incluirá en los siguientes periodos.">
+                                                                                                                Baja programada: {{ $veh['baja_programada_hasta'] }}
+                                                                                                            </span>
+                                                                                                        @endif
+                                                                                                        @if(in_array(mb_strtoupper(trim((string) ($veh['cxc_estado'] ?? '')), 'UTF-8'), ['2', 'FACTURADO'], true))
+                                                                                                            <span
+                                                                                                                class="stair-vehicle-status inline-flex items-center rounded-full bg-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-white" style="color:#a16207; background-color: #fef3c7;">Facturado</span>
+                                                                                                        @elseif(in_array((string) ($veh['cxc_estado'] ?? ''), ['3', 'CANCELADO'], true)
                                                                                                             && mb_strtolower(trim((string) ($clientGroup['cxc_estado'] ?? '')), 'UTF-8') !== 'pendiente pago parcial'
                                                                                                             && mb_strtolower(trim((string) ($typeGroup['cxc_estado'] ?? '')), 'UTF-8') !== 'pendiente pago parcial')
                                                                                                             <span
                                                                                                                 class="stair-vehicle-status inline-flex items-center rounded-full bg-danger px-1.5 py-0.5 text-[9px] font-bold text-white">Pagado</span>
-                                                                                                        @elseif(in_array((string) ($veh['cxc_estado'] ?? ''), ['Pendiente a Detracción', 'Pendiente Autodetracción', 'Cancelado Detracción'], true))
+                                                                                                        @elseif((string) ($veh['cxc_estado'] ?? '') === 'Pendiente Autodetracción')
                                                                                                             <span
-                                                                                                                class="stair-vehicle-status inline-flex items-center rounded-full bg-amber-600 px-1.5 py-0.5 text-[9px] font-bold text-white">Pend.
+                                                                                                                class="stair-vehicle-status inline-flex items-center rounded-full bg-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-white" style="color:#a16207; background-color: #fef3c7;">Pend.
+                                                                                                                Autodetraer</span>
+                                                                                                        @elseif(in_array((string) ($veh['cxc_estado'] ?? ''), ['Pendiente a Detracción', 'Cancelado Detracción'], true))
+                                                                                                            <span
+                                                                                                                class="stair-vehicle-status inline-flex items-center rounded-full bg-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-white" style="color:#a16207; background-color: #fef3c7;">Pend.
                                                                                                                 Detracción</span>
                                                                                                         @elseif(in_array((string) ($veh['cxc_estado'] ?? ''), ['Pendiente a Retención', 'Pendiente Autoretención'], true))
                                                                                                             <span
-                                                                                                                class="stair-vehicle-status inline-flex items-center rounded-full bg-amber-600 px-1.5 py-0.5 text-[9px] font-bold text-white">Pend.
+                                                                                                                class="stair-vehicle-status inline-flex items-center rounded-full bg-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-white" style="color:#a16207; background-color: #fef3c7;">Pend.
                                                                                                                 Retención</span>
                                                                                                         @endif
                                                                                                     </div>
@@ -1008,9 +1023,9 @@
                                                                                                 <td class="py-1 px-1 text-slate-700">
                                                                                                     {{ $veh['numero'] }}
                                                                                                 </td>
-                                                                                                <td class="py-1 px-1 text-slate-600">
+                                                                                                {{-- <td class="py-1 px-1 text-slate-600">
                                                                                                     {{ $veh['fecha_inicio_display'] }}
-                                                                                                </td>
+                                                                                                </td> --}}
                                                                                                 <td class="py-1 px-1 text-slate-600">
                                                                                                     {{ $veh['fecha_vencimiento_display'] }}
                                                                                                 </td>
@@ -1050,7 +1065,7 @@
                                                                                                         data-amount="{{ $veh['monto'] }}"
                                                                                                         data-withholding-gross="{{ $veh['monto'] }}"
                                                                                                         data-payment-amount="{{ $veh['monto_saldo'] }}"
-                                                                                                        data-paid-amount="{{ preg_match('/^pendiente a cr[eé]dito/i', trim((string) ($veh['cxc_estado'] ?? ''))) === 1 ? ($veh['monto_pagado'] ?? 0) : max(0, (float) $veh['monto'] - (float) $veh['monto_saldo']) }}"
+                                                                                                        data-paid-amount="{{ in_array(($veh['cxc_estado'] ?? ''), ['Cancelado Detracción', 'Pendiente Autodetracción', 'Pendiente Autoretención', 'Pendiente a Detracción', 'Pendiente a Retención'], true) ? ($veh['monto_pagado_periodo'] ?? 0) : (preg_match('/^pendiente a cr[eé]dito/i', trim((string) ($veh['cxc_estado'] ?? ''))) === 1 ? ($veh['monto_pagado'] ?? 0) : max(0, (float) $veh['monto'] - (float) $veh['monto_saldo'])) }}"
                                                                                                         data-amount-display="{{ $veh['monto_display'] }}"
                                                                                                         data-tipo-cobro-id="{{ $veh['tipo_cobro_id'] ?? ($typeGroup['tipo_cobro_id'] ?? ($clientGroup['tipo_cobro_id'] ?? '')) }}"
                                                                                                         data-moneda-id="{{ $clientGroup['moneda_idmoneda'] ?? 1 }}"
@@ -1088,6 +1103,20 @@
                                                                         </td>
                                                                     </tr>
                                                                 @endforeach
+                                                                @if(!empty($clientGroup['saldo_a_favor_generado_display']))
+                                                                    <tr class="border-t border-slate-200 font-semibold">
+                                                                        <td colspan="2" class="py-2 px-3 text-right font-semibold text-danger" style="color: #b91c1c; font-weight: 600;">Saldo a favor generado:</td>
+                                                                        <td class="py-2 px-3 text-right font-semibold text-danger" style="color: #b91c1c; font-weight: 600;">{{ $clientGroup['saldo_a_favor_generado_display'] }}</td>
+                                                                        <td></td>
+                                                                    </tr>
+                                                                @endif
+                                                                @if(!empty($clientGroup['saldo_a_favor_aplicado_display']))
+                                                                    <tr class="border-t border-slate-200 font-semibold">
+                                                                        <td colspan="2" class="py-2 px-3 text-right font-semibold text-danger" style="color: #b91c1c; font-weight: 600;">Saldo a favor aplicado:</td>
+                                                                        <td class="py-2 px-3 text-right font-semibold text-danger" style="color: #b91c1c; font-weight: 600;">{{ $clientGroup['saldo_a_favor_aplicado_display'] }}</td>
+                                                                        <td></td>
+                                                                    </tr>
+                                                                @endif
                                                             </tbody>
                                                         </table>
 
@@ -2077,7 +2106,7 @@
 
         .erp-vehicles-nested-table th:nth-child(3),
         .erp-vehicles-nested-table td:nth-child(3) {
-            width: 7%;
+            width: 12%;
         }
 
         .erp-vehicles-nested-table th:nth-child(4),
@@ -2121,6 +2150,10 @@
         .erp-vehicles-nested-table .stair-vehicle-status {
             max-width: 100%;
             white-space: normal;
+        }
+
+        .erp-vehicles-nested-table .stair-vehicle-status-facturado {
+            flex-basis: 100%;
         }
 
         .erp-vehicles-nested-table .stair-check-item {
@@ -3447,6 +3480,47 @@
                 }
             }
 
+            async function submitServicePayment() {
+                if (!servicePaymentForm) return;
+                const submitButton = servicePaymentForm.querySelector('button[type="submit"]');
+                if (submitButton) {
+                    submitButton.disabled = true;
+                    submitButton.textContent = 'Guardando pago...';
+                }
+
+                try {
+                    const response = await fetch(servicePaymentForm.action, {
+                        method: 'POST',
+                        headers: {
+                            Accept: 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: new FormData(servicePaymentForm)
+                    });
+                    const result = await response.json();
+                    if (!response.ok || !result.success) {
+                        throw new Error(result.message || 'No se pudo registrar el pago.');
+                    }
+
+                    closeServicePaymentModal();
+                    showCxcNotice('success', result.message);
+                    activateTab('servicios', true);
+                    const params = new URLSearchParams(cxcQuery);
+                    params.set('tab', 'servicios');
+                    params.set('services_page', '1');
+                    params.delete('quotes_page');
+                    loadCxcResults(`${window.location.pathname}?${params.toString()}`, 'servicios');
+                } catch (error) {
+                    console.error('Error registrando pago de Cuentas por Cobrar:', error);
+                    showServiceMessage(error.message || 'No se pudo registrar el pago. Reintenta la operación.');
+                } finally {
+                    if (submitButton && servicePaymentModal?.classList.contains('visible')) {
+                        submitButton.disabled = false;
+                        submitButton.textContent = 'Registrar cobro';
+                    }
+                }
+            }
+
             document.addEventListener('change', function (event) {
                 const quoteSelectAll = event.target.closest('#quote-select-all');
                 if (quoteSelectAll) {
@@ -3768,12 +3842,31 @@
                 const foreignPaymentAmount = document.getElementById('payment-foreign-amount');
                 const hasForeignPaymentAmount = Boolean(details.mostrar_monto_cancelado);
                 const paymentAmountViewDisplays = document.getElementById('payment-amount-view-displays');
-                paymentAmountViewDisplays?.classList.toggle('grid-cols-2', hasForeignPaymentAmount);
-                paymentAmountViewDisplays?.classList.toggle('grid-cols-1', !hasForeignPaymentAmount);
+                const creditNoteAmountDisplay = document.getElementById('payment-credit-note-amount-display');
+                const creditNoteAmount = document.getElementById('payment-credit-note-amount');
+                const bankCreditAmountDisplay = document.getElementById('payment-bank-credit-amount-display');
+                const bankCreditAmount = document.getElementById('payment-bank-credit-amount');
+                const hasCreditNoteAmount = Number(details.monto_nota_credito_aplicado || 0) > 0;
+                const hasBankCreditAmount = Number(details.monto_saldo_favor_aplicado || 0) > 0;
+                const hasAdditionalAmounts = hasForeignPaymentAmount || hasCreditNoteAmount || hasBankCreditAmount;
+                paymentAmountViewDisplays?.classList.toggle('grid-cols-2', hasAdditionalAmounts);
+                paymentAmountViewDisplays?.classList.toggle('grid-cols-1', !hasAdditionalAmounts);
                 foreignPaymentAmountDisplay?.classList.toggle('hidden', !hasForeignPaymentAmount);
                 if (foreignPaymentAmount) {
                     foreignPaymentAmount.value = hasForeignPaymentAmount
                         ? `${normalizeCurrencySymbol(details.monto_cancelado_simbolo, details.payment_currency_id)} ${Number(details.monto_cancelado || 0).toFixed(2)}`
+                        : '';
+                }
+                creditNoteAmountDisplay?.classList.toggle('hidden', !hasCreditNoteAmount);
+                if (creditNoteAmount) {
+                    creditNoteAmount.value = hasCreditNoteAmount
+                        ? `${paymentCurrencySymbol} ${Number(details.monto_nota_credito_aplicado).toFixed(2)}`
+                        : '';
+                }
+                bankCreditAmountDisplay?.classList.toggle('hidden', !hasBankCreditAmount);
+                if (bankCreditAmount) {
+                    bankCreditAmount.value = hasBankCreditAmount
+                        ? `${paymentCurrencySymbol} ${Number(details.monto_saldo_favor_aplicado).toFixed(2)}`
                         : '';
                 }
                 if (proofInput) proofInput.value = '';
@@ -4977,12 +5070,7 @@
                         servicePaymentForm.reportValidity();
                         return;
                     }
-                    const submitButton = servicePaymentForm.querySelector('button[type="submit"]');
-                    if (submitButton) {
-                        submitButton.disabled = true;
-                        submitButton.textContent = 'Registrando comprobante...';
-                    }
-                    servicePaymentForm.submit();
+                    submitServicePayment();
                     return;
                 }
 
@@ -5056,17 +5144,11 @@
                     return;
                 }
 
-                const submitButton = servicePaymentForm.querySelector('button[type="submit"]');
-                if (submitButton) {
-                    submitButton.disabled = true;
-                    submitButton.textContent = 'Guardando datos...';
-                }
-
                 const paymentPeriodEnd = document.getElementById('payment-period-end');
                 const omitDefaultPeriodEnd = paymentPeriodEnd
                     && paymentPeriodEnd.value === (paymentPeriodEnd.dataset.basePeriodEnd || '');
                 if (omitDefaultPeriodEnd) paymentPeriodEnd.disabled = true;
-                servicePaymentForm.submit();
+                submitServicePayment();
                 if (omitDefaultPeriodEnd) paymentPeriodEnd.disabled = false;
             });
             refreshServiceSelection();
@@ -5269,6 +5351,7 @@
             const facturaCobroExtraSection = document.getElementById('factura-cobro-extra-section');
             const facturaRealizarCobroInput = document.getElementById('factura-realizar-cobro-input');
             const facturaSubmitBtn = document.getElementById('factura-submit-btn');
+            const facturaSavingStatus = document.getElementById('factura-saving-status');
             const facturaSubmitError = document.getElementById('factura-submit-error');
             const facturaModal = document.getElementById('service-factura-modal');
             const facturaClientField = document.getElementById('factura-client-field');
@@ -5798,7 +5881,7 @@
 
                 const addOption = (id, label, detail = '') => {
                     const wrapper = document.createElement('label');
-                    wrapper.className = 'flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-3 text-sm hover:border-red-300 hover:bg-red-50/40 mb-2';
+                    wrapper.className = 'flex cursor-pointer items-start gap-3 rounded-lg border border-slate-300 p-3 text-sm hover:border-red-300 hover:bg-red-50/40 mb-2';
                     const radio = document.createElement('input');
                     radio.type = 'radio';
                     radio.name = 'credit-note-selector-choice';
@@ -6076,6 +6159,20 @@
                 summary.classList.remove('hidden');
             }
 
+            function renderPreviousDebtSummary(elementId, currentAmount, previousDebtAmount, totalAmount, symbol) {
+                const summary = document.getElementById(elementId);
+                if (!summary) return;
+
+                if (previousDebtAmount <= 0) {
+                    summary.textContent = '';
+                    summary.classList.add('hidden');
+                    return;
+                }
+
+                summary.textContent = `Periodo actual: ${formatMoney(currentAmount, symbol)} + períodos anteriores: ${formatMoney(previousDebtAmount, symbol)} = total: ${formatMoney(totalAmount, symbol)}`;
+                summary.classList.remove('hidden');
+            }
+
             function advancePeriodEndDate(periodEnd, coveredPeriods) {
                 if (!periodEnd || coveredPeriods <= 1) return periodEnd;
 
@@ -6155,6 +6252,13 @@
                 const cashDue = Math.max(afterDeduction - creditApplied, 0);
 
                 if (currentVencidosState.targetModal === 'pay') {
+                    renderPreviousDebtSummary(
+                        'payment-previous-debt-summary',
+                        invoiceAdvanceTotal,
+                        selectedAmount,
+                        grossTotal,
+                        symbol
+                    );
                     if (servicePaymentModal) {
                         servicePaymentModal.dataset.grossAmount = String(grossTotal);
                         servicePaymentModal.dataset.deductionAmount = String(deductionAmount);
@@ -6219,6 +6323,13 @@
                         updateConvertedPaymentAmount();
                     }
                 } else if (currentVencidosState.targetModal === 'factura') {
+                    renderPreviousDebtSummary(
+                        'factura-previous-debt-summary',
+                        invoiceAdvanceTotal,
+                        selectedAmount,
+                        grossTotal,
+                        symbol
+                    );
                     if (facturaModal) {
                         facturaModal.dataset.grossAmount = String(grossTotal);
                         facturaModal.dataset.deductionAmount = String(deductionAmount);
@@ -6683,7 +6794,7 @@
 
                     debtsByMonth.forEach((debts, month) => {
                         const group = document.createElement('section');
-                        group.className = 'overflow-hidden rounded-lg border border-slate-200 bg-white mb-2';
+                        group.className = 'overflow-hidden rounded-lg border border-slate-300 bg-white mb-2';
 
                         const header = document.createElement('div');
                         header.className = 'flex items-center gap-3 px-3 py-2.5';
@@ -6699,15 +6810,25 @@
                         toggleButton.setAttribute('aria-expanded', 'false');
 
                         const monthLabel = document.createElement('span');
-                        monthLabel.textContent = `${month} (${debts.length})`;
+                        monthLabel.textContent = month;
+                        const monthSummary = document.createElement('span');
+                        monthSummary.className = 'flex items-center gap-3';
+                        const debtCount = document.createElement('span');
+                        debtCount.className = 'text-slate-600';
+                        debtCount.textContent = `(Cantidad: ${debts.length})`;
+                        const monthTotal = document.createElement('span');
+                        monthTotal.className = 'text-slate-900';
+                        const totalAmount = debts.reduce((total, debt) => total + Number(debt.montoActual || 0), 0);
+                        monthTotal.textContent = `Total: ${symbol} ${totalAmount.toFixed(2)}`;
+                        monthSummary.append(monthLabel, debtCount, monthTotal);
                         const expandIcon = document.createElement('span');
-                        expandIcon.className = 'ml-2 text-slate-500 transition-transform';
+                        expandIcon.className = 'ml-auto shrink-0 text-slate-500 transition-transform';
                         expandIcon.textContent = '⌄';
-                        toggleButton.append(monthLabel, expandIcon);
+                        toggleButton.append(monthSummary, expandIcon);
                         header.append(monthCheckbox, toggleButton);
 
                         const itemsContainer = document.createElement('div');
-                        itemsContainer.className = 'hidden space-y-2 border-t border-slate-100 bg-slate-50 p-2';
+                        itemsContainer.className = 'hidden space-y-2 border-t border-slate-100 bg-slate-300 p-2';
 
                         debts.forEach(c => {
                             const isChecked = currentVencidosState.selectedIds.includes(String(c.idcuentasPorCobrar));
@@ -7603,6 +7724,7 @@
                         facturaSubmitBtn.disabled = true;
                         facturaSubmitBtn.textContent = isFacturarYCancelar ? 'Registrando cobro...' : 'Guardando factura...';
                     }
+                    facturaSavingStatus?.classList.add('is-visible');
 
                     const formData = new FormData(serviceFacturaForm);
                     const facturaPeriodEnd = document.getElementById('factura-period-end');
@@ -7647,6 +7769,7 @@
                                 facturaSubmitBtn.disabled = false;
                                 facturaSubmitBtn.textContent = isFacturarYCancelar ? 'Guardar y Cancelar' : 'Guardar Factura';
                             }
+                            facturaSavingStatus?.classList.remove('is-visible');
                             showFacturaSubmitError(error.message || 'No se pudo completar el envío. Revisa tu conexión e inténtalo nuevamente.');
                         });
                 });
@@ -7772,6 +7895,17 @@
                         const cxcIds = [...new Set(vehicles.flatMap(({ action }) =>
                             (action.dataset.cxcIds || action.dataset.cxcId || '').split(',').filter(Boolean)
                         ))];
+                        const documentReferences = vehicles.map(({ action }) =>
+                            (action.dataset.docRef || '').trim()
+                        );
+                        const uniqueDocumentReferences = [...new Set(documentReferences.filter(Boolean))];
+                        if (
+                            uniqueDocumentReferences.length > 1
+                            || (uniqueDocumentReferences.length > 0 && documentReferences.some(reference => !reference))
+                        ) {
+                            showServiceMessage('Selecciona vehículos de una sola factura para registrar cada pago por separado.');
+                            return;
+                        }
                         const amount = vehicles.reduce((total, { action }) =>
                             total + Number(action.dataset.paymentAmount || action.dataset.amount || 0), 0);
                         const paidAmount = vehicles.reduce((total, { action }) =>
@@ -7862,7 +7996,7 @@
                                 cxcIds[0] || '',
                                 clientName,
                                 amount,
-                                '',
+                                firstAction.dataset.docRef || '',
                                 `${currency} ${amount.toFixed(2)}`,
                                 firstAction.dataset.monedaId || '',
                                 false,
@@ -8019,12 +8153,7 @@
                 button.addEventListener('click', closeRevertPaymentModal);
             });
 
-            document.getElementById('revert-payment-modal')?.addEventListener('click', function (event) {
-                if (event.target === this) closeRevertPaymentModal();
-            });
-
             document.getElementById('revert-payment-form')?.addEventListener('submit', async function (event) {
-                if (selectedBulkRevertOperations.length === 0) return;
                 event.preventDefault();
                 if (!this.reportValidity()) return;
 
@@ -8038,12 +8167,18 @@
                 errorMessage?.classList.add('hidden');
                 if (errorMessage) errorMessage.textContent = '';
 
-                const operationCount = selectedBulkRevertOperations.length;
+                const operations = selectedBulkRevertOperations.length > 0
+                    ? selectedBulkRevertOperations
+                    : [{ url: form.action, serviceId: '' }];
+                const operationCount = operations.length;
                 let revertedCount = 0;
+                let lastResult = null;
                 try {
-                    for (const operation of selectedBulkRevertOperations) {
+                    for (const operation of operations) {
                         const body = new FormData(form);
-                        body.append('servicio_id', operation.serviceId);
+                        if (operation.serviceId) {
+                            body.append('servicio_id', operation.serviceId);
+                        }
                         const response = await fetch(operation.url, {
                             method: 'POST',
                             body,
@@ -8052,22 +8187,30 @@
                                 'X-Requested-With': 'XMLHttpRequest'
                             }
                         });
-                        const result = await response.json();
+                        let result;
+                        try {
+                            result = await response.json();
+                        } catch {
+                            throw new Error(`El servidor devolvió una respuesta inválida (HTTP ${response.status}).`);
+                        }
                         if (!response.ok || !result.success) {
                             throw new Error(result.message || 'No se pudo revertir el pago.');
                         }
+                        lastResult = result;
                         revertedCount++;
                     }
 
                     closeRevertPaymentModal();
-                    showServiceMessage(`Se revirtieron ${revertedCount} pagos correctamente.`);
+                    showCxcNotice('success', operationCount === 1
+                        ? (lastResult?.message || 'Pago revertido correctamente.')
+                        : `Se revirtieron ${revertedCount} pagos correctamente.`);
                     const params = new URLSearchParams(cxcQuery);
                     params.set('tab', 'servicios');
                     loadCxcResults(`${window.location.pathname}?${params.toString()}`, 'servicios');
                 } catch (error) {
                     if (revertedCount > 0) {
                         closeRevertPaymentModal();
-                        showServiceMessage(`Se revirtieron ${revertedCount} de ${operationCount} pagos. ${error.message || 'La operación se detuvo por un error.'}`);
+                        showCxcNotice('error', `Se revirtieron ${revertedCount} de ${operationCount} pagos. ${error.message || 'La operación se detuvo por un error.'}`);
                         const params = new URLSearchParams(cxcQuery);
                         params.set('tab', 'servicios');
                         loadCxcResults(`${window.location.pathname}?${params.toString()}`, 'servicios');
@@ -8206,18 +8349,18 @@
                         checkbox.value = String(index);
                         checkbox.checked = index === 0;
                         checkbox.className = `duration-100 ease-in-out shadow-sm border-slate-200 cursor-pointer rounded focus:ring-4 focus:ring-offset-0 focus:ring-primary focus:ring-opacity-20 dark:bg-darkmode-800 dark:border-transparent dark:focus:ring-slate-700 dark:focus:ring-opacity-50 [&[type="radio"]]:checked:bg-primary [&[type="radio"]]:checked:border-primary [&[type="radio"]]:checked:border-opacity-10 [&[type="checkbox"]]:checked:bg-primary [&[type="checkbox"]]:checked:border-primary [&[type="checkbox"]]:checked:border-opacity-10 [&:disabled:not(:checked)]:bg-slate-100 [&:disabled:not(:checked)]:cursor-not-allowed [&:disabled:not(:checked)]:dark:bg-darkmode-800/50 [&:disabled:checked]:opacity-70 [&:disabled:checked]:cursor-not-allowed [&:disabled:checked]:dark:bg-darkmode-800/50`; 
-                        checkbox.dataset.cxcIds = ids.join(',');
+                        checkbox.dataset.cxcIds = ids.join(',');                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
                         checkbox.dataset.amount = String(amount);
 
                         const details = document.createElement('span');
-                        details.className = 'min-w-0 flex-1 text-slate-700';
+                        details.className = 'min-w-0 flex-1 text-xs font-bold text-slate-800';
                         const dateLabel = dueDate
                             ? new Date(`${dueDate}T00:00:00`).toLocaleDateString('es-PE')
                             : 'sin fecha';
                         details.textContent = `Cuota ${installment.number || index + 1} · vence ${dateLabel}`;
 
                         const amountLabel = document.createElement('strong');
-                        amountLabel.className = 'whitespace-nowrap text-slate-900';
+                        amountLabel.className = 'whitespace-nowrap text-xs font-bold text-slate-800';
                         amountLabel.textContent = `${currency} ${amount.toFixed(2)}`;
                         row.append(checkbox, details, amountLabel);
                         paymentOptionsList.appendChild(row);
@@ -10979,7 +11122,7 @@
     </script>
 
     <!-- MODAL 1: REGISTRAR FACTURA / DOCUMENTO DE REFERENCIA (ESTADO PENDIENTE) -->
-    <div id="service-factura-modal" class="erp-modal-backdrop hidden" role="dialog" aria-modal="true"
+    <saber div id="service-factura-modal" class="erp-modal-backdrop hidden" role="dialog" aria-modal="true"
         aria-labelledby="service-factura-title">
         <div class="erp-modal-card" style="border-radius: 16px;">
             <div class="erp-modal-header">
@@ -11076,6 +11219,8 @@
                                             Pagar adelantado
                                         </button>
                                     </div>
+                                    <p id="factura-previous-debt-summary" class="hidden mt-1 text-xs font-medium text-danger"
+                                        aria-live="polite"></p>
                                     <p id="factura-amount-summary" class="hidden mt-1 text-xs font-medium text-danger"
                                         aria-live="polite"></p>
                                     <div id="factura-advance-fields" class="hidden mt-2">
@@ -11368,6 +11513,10 @@
                         class="hidden mb-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800"
                         role="alert" aria-live="assertive"></div>
                     <div class="flex items-center justify-end gap-3 mt-1 pt-2 border-t border-slate-200">
+                        <span id="factura-saving-status" class="erp-gestion-saving-status" role="status" aria-live="polite">
+                            <span class="erp-gestion-spinner" aria-hidden="true"></span>
+                            Guardando datos...
+                        </span>
                         <button type="button"
                             class="px-4 py-2 text-sm font-semibold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors"
                             data-close-service-factura>Cancelar</button>
@@ -11694,6 +11843,8 @@
                                     </div>
                                 </div>
                             </div>
+                            <p id="payment-previous-debt-summary" class="hidden mt-1 text-xs font-medium text-danger"
+                                aria-live="polite"></p>
                             <p id="payment-amount-summary" class="hidden mt-1 text-xs font-medium text-danger"
                                 aria-live="polite"></p>
                             <div class="hidden grid grid-cols-2 gap-2" id="payment-amount-view-displays">
@@ -11705,6 +11856,16 @@
                                 <label id="payment-foreign-amount-display" class="hidden min-w-0">
                                     <span class="mb-1 block text-xs font-semibold text-slate-600">Monto cancelado</span>
                                     <input id="payment-foreign-amount" type="text" readonly tabindex="-1"
+                                        class="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm font-bold text-slate-800 outline-none">
+                                </label>
+                                <label id="payment-credit-note-amount-display" class="hidden min-w-0">
+                                    <span class="mb-1 block text-xs font-semibold text-slate-600">Nota de crédito usada</span>
+                                    <input id="payment-credit-note-amount" type="text" readonly tabindex="-1"
+                                        class="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm font-bold text-slate-800 outline-none">
+                                </label>
+                                <label id="payment-bank-credit-amount-display" class="hidden min-w-0">
+                                    <span class="mb-1 block text-xs font-semibold text-slate-600">Saldo a favor usado</span>
+                                    <input id="payment-bank-credit-amount" type="text" readonly tabindex="-1"
                                         class="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm font-bold text-slate-800 outline-none">
                                 </label>
                             </div>
@@ -12416,7 +12577,7 @@
                 <button type="button" class="erp-modal-close" data-close-document-preview
                     aria-label="Cerrar vista previa">×</button>
             </div>
-            <div class="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-slate-100">
+            <div class="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-slate-300">
                 <img id="cxc-document-preview-image" alt="Comprobante de pago" class="hidden h-full w-full object-contain">
                 <iframe id="cxc-document-preview-frame" title="Vista previa del comprobante"
                     class="min-h-0 w-full flex-1 bg-slate-100" src="about:blank"></iframe>
@@ -12816,7 +12977,7 @@
                 </p>
                 <div class="flex flex-col gap-3">
                     <button type="button"
-                        class="btn-select-baja-modo flex items-center justify-between p-4 rounded-xl border border-slate-200 bg-white hover:border-red-500 hover:bg-red-50/50 transition-all text-left group"
+                        class="btn-select-baja-modo flex items-center justify-between p-4 rounded-xl border border-slate-300 bg-white hover:border-red-500 hover:bg-red-50/50 transition-all text-left group"
                         data-baja-modo="ahora">
                         <div>
                             <div class="font-bold text-slate-900 group-hover:text-red-700 text-sm">Dar de baja ahora</div>
@@ -12829,12 +12990,11 @@
                         </svg>
                     </button>
                     <button type="button"
-                        class="btn-select-baja-modo flex items-center justify-between p-4 rounded-xl border border-slate-200 bg-white hover:border-red-500 hover:bg-red-50/50 transition-all text-left group"
+                        class="btn-select-baja-modo flex items-center justify-between p-4 rounded-xl border border-slate-300 bg-white hover:border-red-500 hover:bg-red-50/50 transition-all text-left group"
                         data-baja-modo="periodo">
                         <div>
                             <div class="font-bold text-slate-900 group-hover:text-red-700 text-sm">Terminar periodo</div>
-                            <div class="text-xs text-slate-500 mt-0.5">Se dará de baja automáticamente cuando cumpla su
-                                fecha fin.</div>
+                            <div class="text-xs text-slate-500 mt-0.5">Se dará de baja al finalizar el mes actual.</div>
                         </div>
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-slate-400 group-hover:text-red-600"
                             viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

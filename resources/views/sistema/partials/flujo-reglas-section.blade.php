@@ -2,6 +2,7 @@
     $sectionMode = $sectionMode ?? 'create';
     $vistaOptions = $vistaOptions ?? [];
     $rules = $rules ?? [];
+    $vistaPlaceholder = 'Selecciona una vista';
 
     if ($sectionMode === 'create') {
         $normalizedRules = old('reglas', is_array($rules) ? $rules : []);
@@ -14,25 +15,33 @@
             ]];
         }
     } else {
-        $normalizedRules = is_iterable($rules) ? $rules : [];
+        $normalizedRules = old('reglas', is_iterable($rules) ? $rules : []);
+        $normalizedRules = is_iterable($normalizedRules)
+            ? collect($normalizedRules)->values()->all()
+            : [];
     }
+    $initiallyReadOnly = ($readOnly ?? false) === true;
 @endphp
 
-<div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm" data-flujo-reglas-inline>
+<div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm" data-flujo-reglas-inline data-section-mode="{{ $sectionMode }}" data-initially-readonly="{{ $initiallyReadOnly ? '1' : '0' }}">
     <div class="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
         <div class="w-full">
             <h2 class="text-lg font-semibold text-black">Reglas del flujo</h2>
             <p class="mt-1 text-sm text-slate-600">
-                Agrega una o varias reglas sin salir del formulario. Solo se guardan reglas activas
+                @if($sectionMode === 'edit')
+                    Reordena las reglas o agrega vistas. Las reglas existentes no se pueden quitar ni reemplazar aquí.
+                @else
+                    Agrega y ordena las vistas del flujo.
+                @endif
             </p>
         </div>
-        <button type="button" data-add-flujo-regla class="inline-flex shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-sm focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none" style="background-color: #B91c1c; color: #fff;">
+        <button type="button" data-add-flujo-regla data-edit-control @disabled($initiallyReadOnly) class="inline-flex shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-sm whitespace-nowrap focus:ring-primary focus:ring-opacity-20 focus-visible:outline-none" style="background-color: #B91c1c; color: #fff;">
             <span class="text-base leading-none">+</span>
-            Agregar
+            Agregar vista
         </button>
     </div>
 
-    @if($sectionMode === 'create')
+    @if(in_array($sectionMode, ['create', 'edit'], true))
         @php
             $vistaOptionsForSelect = collect($vistaOptions)->values();
             $vistaOptionItems = $vistaOptionsForSelect->map(function ($vistaOption) {
@@ -57,34 +66,35 @@
             <div class="flujo-scroll-wrapper">
                 <div class="border border-slate-200 bg-white shadow-sm flujo-scroll-inner">
                 <div class="border-b border-slate-200 bg-slate-50" style="padding: 12px 20px;">
-                    <div style="display:grid;grid-template-columns:48px minmax(0,1fr) 120px 120px 44px;gap:16px;align-items:center;" class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                    <div style="display:grid;grid-template-columns:48px minmax(0,1fr) 100px 100px 44px;gap:12px;align-items:center;" class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
                         <div style="text-align:center;">Mover</div>
                         <div style="text-align:left;">Vista</div>
                         <div style="text-align:center;">Estado</div>
                         <div style="text-align:center;">Orden</div>
-                        <div style="text-align:center;">Quitar</div>
+                        <div style="text-align:center;">Acción</div>
                     </div>
                 </div>
 
                 <div class="p-3">
                     <div data-flujo-reglas-list class="flex flex-col gap-2"></div>
                     <div data-flujo-reglas-empty class="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                        No hay reglas agregadas todavía. Pulsa “Agregar regla flujo”.
+                        No hay reglas agregadas todavía. Pulsa “Agregar vista”.
                     </div>
                 </div>
             </div>
         </div>
 
         <template data-flujo-regla-template>
-            <div data-flujo-regla-row style="display:grid;grid-template-columns:48px minmax(0,1fr) 120px 120px 44px;gap:16px;align-items:center;padding:8px 20px;margin:4px 0;border:1px solid #e2e8f0;border-radius:5px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04);">
+            <div data-flujo-regla-row style="display:grid;grid-template-columns:48px minmax(0,1fr) 100px 100px 44px;gap:12px;align-items:center;padding:8px 20px;margin:4px 0;border:1px solid #e2e8f0;border-radius:5px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04);">
                 <div style="display:flex;align-items:center;justify-content:center;">
-                    <button type="button" draggable="true" data-drag-handle class="inline-flex cursor-grab items-center justify-center rounded-md border border-slate-200 bg-slate-50 p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700" title="Reordenar">
+                    <button type="button" draggable="{{ $initiallyReadOnly ? 'false' : 'true' }}" data-drag-handle data-edit-control @disabled($initiallyReadOnly) class="inline-flex cursor-grab items-center justify-center rounded-md border border-slate-200 bg-slate-50 p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700" title="Reordenar">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M7 4a1 1 0 110-2 1 1 0 010 2zm0 6a1 1 0 110-2 1 1 0 010 2zm0 6a1 1 0 110-2 1 1 0 010 2zM13 2a1 1 0 100 2 1 1 0 000-2zm0 6a1 1 0 100 2 1 1 0 000-2zm0 6a1 1 0 100 2 1 1 0 000-2z" /></svg>
                     </button>
                 </div>
                 <div style="min-width:0;">
-                    <select class="tom-select tom-select--compact w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-primary focus:ring-1 focus:ring-primary" data-vista-select style="width:100%;">
-                        <option value="">Selecciona una vista</option>
+                    <span data-vista-static class="hidden rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700"></span>
+                    <select class="tom-select tom-select--compact w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-primary focus:ring-1 focus:ring-primary" data-vista-select placeholder="{{ $vistaPlaceholder }}" @disabled($initiallyReadOnly) style="width:100%;">
+                        <option value="" selected disabled>{{ $vistaPlaceholder }}</option>
                         @foreach($vistaOptionsForSelect as $vistaOption)
                             @php
                                 $vistaOptionValue = data_get($vistaOption, 'idvista');
@@ -95,6 +105,7 @@
                         @endforeach
                     </select>
                     <input type="hidden" data-input-vista value="">
+                    <input type="hidden" data-input-rule-id value="">
                 </div>
                 <div class="pl-8" style="display:flex;align-items:center;justify-content:center;">
                     <span class="inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold" data-estado-label style="background:#dcfce7;color:#166534;">Activo</span>
@@ -106,7 +117,7 @@
                     <input type="hidden" data-input-condicion value="ver vista 1">
                 </div>
                 <div class="pl-8" style="display:flex;align-items:center;justify-content:center;">
-                    <button type="button" data-remove-flujo-regla title="Quitar regla" aria-label="Quitar regla" style="color: #B91c1c">
+                    <button type="button" data-remove-flujo-regla data-edit-control @disabled($initiallyReadOnly) title="Quitar vista nueva" aria-label="Quitar vista nueva" style="color: #B91c1c">
                         <span class="text-lg leading-none">X</span>
                     </button>
                 </div>
@@ -125,6 +136,9 @@
                 const form = container.closest('form');
                 const initialRules = @json($normalizedRules);
                 const vistaOptionItems = @json($vistaOptionItems);
+                const vistaPlaceholder = @json($vistaPlaceholder);
+                const isEditMode = container.dataset.sectionMode === 'edit';
+                const initiallyReadOnly = container.dataset.initiallyReadonly === '1';
 
                 let draggedRow = null;
 
@@ -133,9 +147,8 @@
                     if (select.tomselect || select.tomSelect || select._tomselect) return;
 
                     new TomSelect(select, {
-                        allowEmptyOption: true,
                         maxItems: 1,
-                        placeholder: 'Selecciona una vista',
+                        placeholder: vistaPlaceholder,
                     });
                 };
 
@@ -148,7 +161,11 @@
                     return new Set(
                         Array.from(rulesList.querySelectorAll('[data-flujo-regla-row]'))
                             .filter((row) => row !== excludeRow)
-                            .map((row) => String(row.querySelector('[data-vista-select]')?.value || '').trim())
+                            .map((row) => {
+                                const select = row.querySelector('[data-vista-select]');
+                                const vistaInput = row.querySelector('[data-input-vista]');
+                                return String(select ? select.value : vistaInput?.value || '').trim();
+                            })
                             .filter((value) => value !== '')
                     );
                 };
@@ -159,7 +176,7 @@
                     const tomSelect = select.tomselect || select.tomSelect || select._tomselect;
                     const normalizedCurrentValue = String(currentValue || '');
                     const optionMarkup = [
-                        '<option value="">Selecciona una vista</option>',
+                        `<option value="">${vistaPlaceholder}</option>`,
                         ...vistaOptionItems.map((option) => {
                             const isCurrent = option.value === normalizedCurrentValue;
                             const isBlocked = occupiedValues.has(option.value) && !isCurrent;
@@ -169,7 +186,6 @@
 
                     if (tomSelect && typeof tomSelect.clearOptions === 'function' && typeof tomSelect.addOption === 'function') {
                         tomSelect.clearOptions();
-                        tomSelect.addOption({ value: '', text: 'Selecciona una vista' });
                         vistaOptionItems.forEach((option) => {
                             const isCurrent = option.value === normalizedCurrentValue;
                             const isBlocked = occupiedValues.has(option.value) && !isCurrent;
@@ -203,9 +219,10 @@
                         const estadoInput = row.querySelector('[data-input-estado]');
                         const ordenInput = row.querySelector('[data-input-orden]');
                         const condicionInput = row.querySelector('[data-input-condicion]');
+                        const ruleIdInput = row.querySelector('[data-input-rule-id]');
                         const orderDisplay = row.querySelector('[data-order-display]');
                         const estadoLabel = row.querySelector('[data-estado-label]');
-                        const currentValue = String(select?.value || '');
+                        const currentValue = String(select ? select.value : vistaInput?.value || '');
 
                         refreshVistaSelect(select, currentValue, occupiedValues);
 
@@ -213,7 +230,10 @@
                             vistaInput.name = `reglas[${index}][vista_idvista]`;
                             vistaInput.value = currentValue;
                         }
-                        if (estadoInput) {
+                        if (ruleIdInput && isEditMode) {
+                            ruleIdInput.name = `reglas[${index}][idflujoregla]`;
+                        }
+                        if (estadoInput && !isEditMode) {
                             estadoInput.name = `reglas[${index}][estado]`;
                             estadoInput.value = '1';
                         }
@@ -221,14 +241,14 @@
                             ordenInput.name = `reglas[${index}][orden]`;
                             ordenInput.value = String(order);
                         }
-                        if (condicionInput) {
+                        if (condicionInput && !isEditMode) {
                             condicionInput.name = `reglas[${index}][condicion]`;
                             condicionInput.value = `ver vista ${order}`;
                         }
                         if (orderDisplay) {
                             orderDisplay.textContent = String(order);
                         }
-                        if (estadoLabel) {
+                        if (estadoLabel && !row.dataset.existingRule) {
                             estadoLabel.textContent = 'Activo';
                             estadoLabel.setAttribute('style', 'background:#dcfce7;color:#166534;');
                         }
@@ -312,16 +332,60 @@
 
                     const select = row.querySelector('[data-vista-select]');
                     const hiddenVista = row.querySelector('[data-input-vista]');
+                    const hiddenRuleId = row.querySelector('[data-input-rule-id]');
                     const hiddenOrden = row.querySelector('[data-input-orden]');
                     const hiddenCondicion = row.querySelector('[data-input-condicion]');
                     const orderDisplay = row.querySelector('[data-order-display]');
+                    const estadoLabel = row.querySelector('[data-estado-label]');
                     const selectValue = String(rule.vista_idvista ?? '');
-
+                    const ruleId = String(rule.idflujoregla ?? '');
+                    const isExistingRule = isEditMode && ruleId !== '';
                     if (select) {
                         select.value = selectValue;
+                        if (window.crudFormEditUnlocked === true) {
+                            select.disabled = false;
+                        }
+                        if (isExistingRule) {
+                            const staticVista = row.querySelector('[data-vista-static]');
+                            const selectedOption = vistaOptionItems.find((option) => option.value === selectValue);
+                            if (staticVista) {
+                                staticVista.textContent = selectedOption?.text || String(rule.vista_label || 'Vista');
+                                staticVista.classList.remove('hidden');
+                            }
+                            select.remove();
+                        }
                     }
                     if (hiddenVista) {
                         hiddenVista.value = selectValue;
+                    }
+                    if (hiddenRuleId) {
+                        hiddenRuleId.value = ruleId;
+                    }
+                    if (isExistingRule) {
+                        row.dataset.existingRule = '1';
+                        const handle = row.querySelector('[data-drag-handle]');
+                        const removeButton = row.querySelector('[data-remove-flujo-regla]');
+                        if (handle && window.crudFormEditUnlocked === true) {
+                            handle.disabled = false;
+                            handle.draggable = true;
+                        }
+                        if (removeButton) {
+                            removeButton.hidden = true;
+                        }
+                        if (estadoLabel) {
+                            const active = String(rule.estado ?? '1') === '1';
+                            estadoLabel.textContent = active ? 'Activo' : 'Inactivo';
+                            estadoLabel.setAttribute('style', active
+                                ? 'background:#dcfce7;color:#166534;'
+                                : 'background:#fee2e2;color:#991b1b;');
+                        }
+                    } else if (window.crudFormEditUnlocked === true) {
+                        row.querySelectorAll('[data-edit-control]').forEach((control) => {
+                            control.disabled = false;
+                            if (control.matches('[data-drag-handle]')) {
+                                control.draggable = true;
+                            }
+                        });
                     }
                     if (hiddenOrden) {
                         hiddenOrden.value = String(rulesList.children.length + 1);
@@ -333,14 +397,25 @@
                         orderDisplay.textContent = String(rulesList.children.length + 1);
                     }
 
-                    wireRow(row);
                     rulesList.appendChild(fragment);
+                    wireRow(row);
                     updateRows();
                 };
 
                 if (addButton) {
                     addButton.addEventListener('click', () => {
                         createRow({});
+                    });
+                }
+
+                if (initiallyReadOnly) {
+                    window.addEventListener('crudFormEditUnlockedChange', () => {
+                        container.querySelectorAll('[data-edit-control]').forEach((control) => {
+                            control.disabled = false;
+                            if (control.matches('[data-drag-handle]')) {
+                                control.draggable = true;
+                            }
+                        });
                     });
                 }
 

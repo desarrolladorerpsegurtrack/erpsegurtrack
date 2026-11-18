@@ -568,6 +568,26 @@ class SistemaController extends Controller
             ->select('idtipoOperacion', DB::raw("CONCAT(nomenclatura, ' - ', detalle) as label"))
             ->get();
 
+        $vistas = DB::table('vista')
+            ->orderBy('nombre')
+            ->select('idvista', 'nombre', 'detalle', 'estado', DB::raw("CONCAT(idvista, ' - ', nombre) as label"))
+            ->get();
+
+        $rules = DB::table('flujoregla')
+            ->leftJoin('vista', 'flujoregla.vista_idvista', '=', 'vista.idvista')
+            ->where('flujoregla.flujo_idflujo', $id)
+            ->orderBy('flujoregla.orden')
+            ->orderBy('flujoregla.idflujoregla')
+            ->select(
+                'flujoregla.idflujoregla',
+                'flujoregla.vista_idvista',
+                'flujoregla.orden',
+                'flujoregla.estado',
+                'flujoregla.condicion',
+                'vista.nombre as vista_label'
+            )
+            ->get();
+
         return view('sistema.flujo-form', [
             'title' => 'Editar Flujo',
             'moduleTitle' => 'Sistema: Flujo',
@@ -607,6 +627,9 @@ class SistemaController extends Controller
                     'helpText' => 'Descripción del flujo.',
                 ],
             ],
+            'extraSections' => [
+                $this->buildFlujoReglasSection('edit', $vistas, $rules, $id)
+            ],
             'readOnly' => true,
         ] + $this->prepareLockViewData('sistema.flujo', (string) $id));
     }
@@ -620,6 +643,7 @@ class SistemaController extends Controller
                 'vistaOptions' => $vistaOptions,
                 'rules' => $rules,
                 'flowId' => $flowId,
+                'readOnly' => $sectionMode === 'edit',
             ],
         ];
     }
@@ -642,18 +666,99 @@ class SistemaController extends Controller
             'nombre' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
             'descripcion' => ['required', 'string', 'min:2', 'max:100', 'regex:' . self::SAFE_TEXT_REGEX],
             'fechacreacion' => ['nullable', 'date_format:Y-m-d\TH:i'],
+            'reglas' => ['required', 'array', 'min:1'],
+            'reglas.*.idflujoregla' => ['nullable', 'integer', 'exists:flujoregla,idflujoregla'],
+            'reglas.*.vista_idvista' => ['required', 'integer', 'distinct', 'exists:vista,idvista'],
+            'reglas.*.orden' => ['required', 'integer', 'min:1', 'distinct'],
         ]);
 
         $validated['fechacreacion'] = self::normalizeDateTimeInput($validated['fechacreacion'] ?? null) ?? DB::table('flujo')->where('idflujo', $id)->value('fechacreacion');
 
-        DB::table('flujo')->where('idflujo', $id)->update($validated);
-        $this->publishResourceEvent('sistema.flujo', (string) $id, 'updated');
+        $currentRules = DB::table('flujoregla')
+            ->where('flujo_idflujo', $id)
+            ->get()
+            ->keyBy('idflujoregla');
+        $submittedRules = collect($validated['reglas']);
+        $submittedExistingIds = $submittedRules
+            ->pluck('idflujoregla')
+            ->filter(fn ($ruleId) => $ruleId !== null)
+            ->map(fn ($ruleId) => (int) $ruleId)
+            ->sort()
+            ->values()
+            ->all();
+        $currentRuleIds = $currentRules->keys()
+            ->map(fn ($ruleId) => (int) $ruleId)
+            ->sort()
+            ->values()
+            ->all();
+
+        if ($submittedExistingIds !== $currentRuleIds) {
+            return back()
+                ->withErrors(['reglas' => 'No se pueden quitar reglas existentes al editar el flujo.'])
+                ->withInput();
+        }
+
+        foreach ($submittedRules as $rule) {
+            $ruleId = $rule['idflujoregla'] ?? null;
+            if ($ruleId === null) {
+                continue;
+            }
+
+            $currentRule = $currentRules->get((int) $ruleId);
+            if (!$currentRule || (int) $currentRule->vista_idvista !== (int) $rule['vista_idvista']) {
+                return back()
+                    ->withErrors(['reglas' => 'Las vistas de las reglas existentes no se pueden reemplazar.'])
+                    ->withInput();
+            }
+        }
+
+        $rulesToSave = $submittedRules->sortBy('orden')->values();
+
+        DB::transaction(function () use ($validated, $id, $rulesToSave, $currentRules) {
+            $flowData = $validated;
+            unset($flowData['reglas']);
+            DB::table('flujo')->where('idflujo', $id)->update($flowData);
+
+            foreach ($rulesToSave as $index => $rule) {
+                $order = $index + 1;
+                $ruleId = (int) ($rule['idflujoregla'] ?? 0);
+
+                if ($ruleId > 0) {
+                    $currentRule = $currentRules->get($ruleId);
+                    if ((int) $currentRule->orden !== $order) {
+                        $ruleData = ['orden' => $order];
+                        if (preg_match('/^ver vista \d+$/u', trim((string) $currentRule->condicion)) === 1) {
+                            $ruleData['condicion'] = 'ver vista ' . $order;
+                        }
+
+                        DB::table('flujoregla')
+                            ->where('idflujoregla', $ruleId)
+                            ->where('flujo_idflujo', $id)
+                            ->update($ruleData);
+                        $this->publishResourceEvent('sistema.flujoregla', (string) $ruleId, 'updated');
+                    }
+
+                    continue;
+                }
+
+                $newRuleId = DB::table('flujoregla')->insertGetId([
+                    'flujo_idflujo' => $id,
+                    'vista_idvista' => (int) $rule['vista_idvista'],
+                    'orden' => $order,
+                    'estado' => '1',
+                    'condicion' => 'ver vista ' . $order,
+                ]);
+                $this->publishResourceEvent('sistema.flujoregla', (string) $newRuleId, 'created');
+            }
+
+            $this->publishResourceEvent('sistema.flujo', (string) $id, 'updated');
+        });
 
         $this->releaseLockIfOwned($request, 'sistema.flujo', (string) $id);
 
         return redirect()
             ->route('modules.sistema.flujos.index')
-            ->with('success', 'Flujo actualizado correctamente.');
+            ->with('success', 'Flujo y reglas actualizados correctamente.');
     }
 
     public function flujosDestroy(Request $request, int $id): RedirectResponse
@@ -799,7 +904,6 @@ class SistemaController extends Controller
             ->orderBy('flujoregla.idflujoregla')
             ->paginate($this->resolvePerPage($request))
             ->withQueryString();
-
         return view('sistema.flujoregla', [
             'title' => 'Sistema: Flujo Regla',
             'singularTitle' => 'Flujo Regla',

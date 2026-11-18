@@ -585,6 +585,7 @@ class CxcLargeFleetGestionTest extends TestCase
 
         // Verificaciones del resultado del cobro
         $this->assertSame(240.0, $paymentResult['remaining_debt']);
+        $this->assertSame(240.0, $paymentResult['withholding_pending']);
         $this->assertSame(1760.0, $paymentResult['cash_received']);
         $this->assertSame(0.0, $paymentResult['new_credit']);
 
@@ -1252,6 +1253,17 @@ class CxcLargeFleetGestionTest extends TestCase
 
     public function test_new_vehicles_do_not_replace_an_existing_documented_payment_process(): void
     {
+        Carbon::setTestNow('2026-10-24 12:00:00');
+
+        try {
+            $this->assertNewVehiclesKeepTheExistingDocumentedPaymentProcess();
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    private function assertNewVehiclesKeepTheExistingDocumentedPaymentProcess(): void
+    {
         $clientId = 'CLI-PROCESS-PRESERVED';
         DB::table('cliente')->insert([
             'idcliente' => $clientId,
@@ -1437,6 +1449,42 @@ class CxcLargeFleetGestionTest extends TestCase
         }
     }
 
+    public function test_individual_withholding_cxcs_with_shared_invoice_keep_their_own_prices_in_vehicle_list(): void
+    {
+        $clientId = 'CLI-SHARED-WITHHOLDING-INVOICE';
+        DB::table('cliente')->insert([
+            'idcliente' => $clientId,
+            'detraccion' => '0',
+            'flag_integrador' => 0,
+            'razonSocial' => 'Cliente con factura compartida',
+        ]);
+        $fleet = $this->seedAdditionalVehicleCharges($clientId, 2, 60.0);
+        DB::table('cuentasporcobrar')
+            ->whereIn('idcuentasPorCobrar', $fleet['cxcIds'])
+            ->update([
+                'docReferencia' => 'F00-25689',
+                'estado' => 'Pendiente a Detracción',
+            ]);
+        DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $fleet['cxcIds'][0])
+            ->update([
+                'montoOriginal' => 70,
+                'montoActual' => 70,
+            ]);
+        DB::table('cuentasporcobrar_serviciocliente')
+            ->where('cuentasPorCobrar_idcuentasPorCobrar', $fleet['cxcIds'][0])
+            ->update(['montoServicio' => 70]);
+
+        $group = collect((new CuentasPorCobrarService())->prepareServicesIndex()['serviciosPorVencerGrouped'])
+            ->firstWhere('cliente_id', $clientId);
+
+        $vehicles = collect($group['tipos_servicios'])
+            ->flatMap(fn(array $type): array => $type['vehiculos'])
+            ->keyBy('idservicioCliente');
+        $this->assertSame(70.0, (float) $vehicles[$fleet['serviceIds'][0]]['monto']);
+        $this->assertSame(60.0, (float) $vehicles[$fleet['serviceIds'][1]]['monto']);
+    }
+
     #[DataProvider('documentedProcessStates')]
     public function test_50_vehicles_and_10_services_keep_their_process_when_20_new_vehicles_are_added(
         string $storedState,
@@ -1556,6 +1604,103 @@ class CxcLargeFleetGestionTest extends TestCase
             $this->assertSame(50.0, (float) $group['monto_total']);
             $this->assertSame([$additionalFleet['cxcIds'][0]], $group['cxc_ids']);
             $this->assertSame([$individualServiceId], $group['payment_service_ids']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_service_group_manages_distinct_invoices_in_creation_order(): void
+    {
+        Carbon::setTestNow('2026-10-24 12:00:00');
+
+        try {
+            $clientId = 'CLI-SEPARATE-INVOICES';
+            DB::table('cliente')->insert([
+                'idcliente' => $clientId,
+                'detraccion' => '0',
+                'flag_integrador' => 0,
+                'razonSocial' => 'Cliente con facturas separadas',
+            ]);
+
+            $fleet = $this->seedFleet($clientId, 9, 0, 50.0);
+            $firstInvoiceServiceIds = array_slice($fleet['serviceIds'], 0, 4);
+            $secondInvoiceServiceIds = array_slice($fleet['serviceIds'], 4);
+            $firstInvoiceDescription = 'CXC 01/10/2026 a 31/10/2026 SC-'
+                . implode(',', $firstInvoiceServiceIds);
+            $secondInvoiceDescription = 'CXC 01/10/2026 a 31/10/2026 SC-'
+                . implode(',', $secondInvoiceServiceIds);
+
+            DB::table('cuentasporcobrar_serviciocliente')
+                ->where('cuentasPorCobrar_idcuentasPorCobrar', $fleet['cxcId'])
+                ->whereIn('servicioCliente_idservicioCliente', $secondInvoiceServiceIds)
+                ->delete();
+            DB::table('cuentasporcobrar')
+                ->where('idcuentasPorCobrar', $fleet['cxcId'])
+                ->update([
+                    'docReferencia' => 'F00-01468',
+                    'descripcion' => $firstInvoiceDescription,
+                    'montoOriginal' => 200,
+                    'montoActual' => 200,
+                    'estado' => '2',
+                ]);
+            DB::table('serviciocliente')
+                ->whereIn('idservicioCliente', $firstInvoiceServiceIds)
+                ->update(['docReferencia' => 'F00-01468']);
+
+            $secondCxcId = DB::table('cuentasporcobrar')->insertGetId([
+                'cliente_idcliente' => $clientId,
+                'tipoCobro_idtipoCobros' => 1,
+                'moneda_idmoneda' => 1,
+                'docReferencia' => 'F00-012640',
+                'descripcion' => $secondInvoiceDescription,
+                'montoOriginal' => 250,
+                'montoActual' => 250,
+                'fechaCancelacion' => '2026-10-31',
+                'estado' => '2',
+            ]);
+            foreach ($secondInvoiceServiceIds as $serviceId) {
+                DB::table('cuentasporcobrar_serviciocliente')->insert([
+                    'cuentasPorCobrar_idcuentasPorCobrar' => $secondCxcId,
+                    'servicioCliente_idservicioCliente' => $serviceId,
+                    'montoServicio' => 50,
+                ]);
+            }
+            DB::table('serviciocliente')
+                ->whereIn('idservicioCliente', $secondInvoiceServiceIds)
+                ->update(['docReferencia' => 'F00-012640']);
+
+            $getGroup = fn(): ?array => collect(
+                (new CuentasPorCobrarService())->prepareServicesIndex()['serviciosPorVencerGrouped']
+            )->first(fn(array $group): bool => $group['cliente_id'] === $clientId);
+
+            $group = $getGroup();
+            $this->assertNotNull($group);
+            $this->assertSame('F00-01468', $group['cxc_doc']);
+            $this->assertSame(200.0, (float) $group['monto_total']);
+            $this->assertSame([$fleet['cxcId']], $group['cxc_ids']);
+            $this->assertEqualsCanonicalizing($firstInvoiceServiceIds, $group['payment_service_ids']);
+            $this->assertSame(200.0, (float) $group['tipos_servicios'][0]['monto_factura']);
+            $vehicles = collect($group['tipos_servicios'])
+                ->flatMap(fn(array $type): array => $type['vehiculos'])
+                ->keyBy('idservicioCliente');
+            foreach ($firstInvoiceServiceIds as $serviceId) {
+                $this->assertSame('F00-01468', $vehicles[$serviceId]['doc_referencia']);
+                $this->assertSame(50.0, (float) $vehicles[$serviceId]['monto_saldo']);
+            }
+            foreach ($secondInvoiceServiceIds as $serviceId) {
+                $this->assertSame('F00-012640', $vehicles[$serviceId]['doc_referencia']);
+            }
+
+            DB::table('cuentasporcobrar')
+                ->where('idcuentasPorCobrar', $fleet['cxcId'])
+                ->update(['estado' => '3', 'montoActual' => 0]);
+
+            $group = $getGroup();
+            $this->assertNotNull($group);
+            $this->assertSame('F00-012640', $group['cxc_doc']);
+            $this->assertSame(250.0, (float) $group['monto_total']);
+            $this->assertSame([$secondCxcId], $group['cxc_ids']);
+            $this->assertEqualsCanonicalizing($secondInvoiceServiceIds, $group['payment_service_ids']);
         } finally {
             Carbon::setTestNow();
         }
@@ -2047,6 +2192,91 @@ class CxcLargeFleetGestionTest extends TestCase
         $this->assertNotNull($creditApplication);
         $this->assertSame('Aplicación saldo a favor', $creditApplication->descripcion);
         $this->assertSame(50.0, (float) $creditApplication->monto);
+    }
+
+    public function test_pending_withholding_links_to_credit_application_when_a_group_item_has_no_cash_movement(): void
+    {
+        $clientId = 'CLI-CREDIT-WITHHOLDING-PENDING';
+        DB::table('cliente')->insert([
+            'idcliente' => $clientId,
+            'detraccion' => '0',
+            'flag_integrador' => 0,
+            'razonSocial' => 'Cliente saldo y detracción pendiente SAC',
+        ]);
+        $firstFleet = $this->seedFleet($clientId, 1, 0, 1000.0);
+        $secondFleet = $this->seedFleet($clientId, 1, 0, 1000.0);
+
+        $originCxcId = DB::table('cuentasporcobrar')->insertGetId([
+            'cliente_idcliente' => $clientId,
+            'tipoCobro_idtipoCobros' => 1,
+            'moneda_idmoneda' => 1,
+            'descripcion' => 'Origen de saldo a favor',
+            'montoOriginal' => 900,
+            'montoActual' => 0,
+            'fechaCancelacion' => '2026-09-30',
+            'estado' => '3',
+        ]);
+        $creditMovementId = DB::table('bancos')->insertGetId([
+            'entidadBancaria_identidadBancaria' => 1,
+            'fechaRegistro' => '2026-09-30 12:00:00',
+            'informacion' => 'Saldo a favor por sobrepago',
+            'monto' => 900,
+            'tipoMov' => 'A',
+        ]);
+        DB::table('detallecxc')->insert([
+            'formaPago_idformaPago' => 1,
+            'cuentasPorCobrar_idcuentasPorCobrar' => $originCxcId,
+            'moneda_idmoneda' => 1,
+            'descripcion' => 'Saldo a favor generado',
+            'fechaPagoProgramada' => '2026-09-30',
+            'fechaPago' => '2026-09-30',
+            'bancos_idbancos' => $creditMovementId,
+            'estado' => 'A',
+        ]);
+
+        $cxcService = new CxcService();
+        $payment = $cxcService->procesarPagoGrupo(
+            [$firstFleet['cxcId'], $secondFleet['cxcId']],
+            [
+                'entidadBancaria_identidadBancaria' => 1,
+                'formaPago_idformaPago' => 1,
+                'tipoCobro_idtipoCobros' => 1,
+                'moneda_idmoneda' => 1,
+                'modo_pago' => 'total',
+                'montoPago' => 860,
+                'usar_saldo_favor' => true,
+                'monto_saldo_favor' => 900,
+                'withholding_decision' => 'pending',
+                'fechaPago' => '2026-10-22',
+                'docReferencia' => 'F001-CREDIT-DET',
+                'descripcion' => 'Pago con saldo a favor y detracción pendiente',
+                'servicio_ids' => array_merge($firstFleet['serviceIds'], $secondFleet['serviceIds']),
+                'renewal_cxc_id' => $firstFleet['cxcId'],
+            ]
+        );
+
+        $pendingWithholding = DB::table('detallecxc as dc')
+            ->join('bancos as b', 'b.idbancos', '=', 'dc.bancos_idbancos')
+            ->where('dc.cuentasPorCobrar_idcuentasPorCobrar', $firstFleet['cxcId'])
+            ->where('dc.estado', '0')
+            ->where('dc.descripcion', 'like', 'Detracción pendiente:%')
+            ->first(['dc.bancos_idbancos', 'b.tipoMov', 'b.monto']);
+
+        $this->assertSame(240.0, (float) $payment['remaining_debt']);
+        $this->assertSame(860.0, (float) $payment['cash_received']);
+        $this->assertSame(900.0, (float) $payment['credit_applied']);
+        $this->assertNotNull($pendingWithholding);
+        $this->assertSame('C', $pendingWithholding->tipoMov);
+        $this->assertSame(880.0, (float) $pendingWithholding->monto);
+
+        $secondPendingWithholding = DB::table('detallecxc as dc')
+            ->join('bancos as b', 'b.idbancos', '=', 'dc.bancos_idbancos')
+            ->where('dc.cuentasPorCobrar_idcuentasPorCobrar', $secondFleet['cxcId'])
+            ->where('dc.estado', '0')
+            ->where('dc.descripcion', 'like', 'Detracción pendiente:%')
+            ->first(['b.tipoMov']);
+        $this->assertNotNull($secondPendingWithholding);
+        $this->assertSame('I', $secondPendingWithholding->tipoMov);
     }
 
     public function test_grouped_credit_plan_creates_future_installments_for_each_vehicle_receivable(): void

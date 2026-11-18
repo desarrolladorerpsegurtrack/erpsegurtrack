@@ -358,7 +358,7 @@
                         // Si se pasa un precioInput, mostrar botones de Seleccionar que copian el precio y cierran el modal
                         if (precioInput) {
                             let html = '<div class="overflow-x-auto"><table class="w-full text-left text-sm text-slate-700">';
-                            html += '<thead class="bg-slate-50 text-slate-500"><tr>';
+                            html += '<thead class="bg-slate-200 text-slate-700"><tr>';
                             html += '<th class="px-3 py-3 font-semibold">Lista de Precio</th>';
                             html += '<th class="px-3 py-3 font-semibold text-right">Precio</th>';
                             html += '<th class="px-3 py-3 font-semibold text-center">Acción</th>';
@@ -401,7 +401,7 @@
 
                         // Modo solo visual: mostrar lista simple
                         let html = '<div class="overflow-x-auto"><table class="w-full text-left text-sm text-slate-700">';
-                        html += '<thead class="bg-slate-50 text-slate-500"><tr>';
+                        html += '<thead class="bg-slate-200 text-slate-700"><tr>';
                         html += '<th class="px-3 py-3 font-semibold">Lista de Precio</th>';
                         html += '<th class="px-3 py-3 font-semibold text-right">Precio</th>';
                         html += '</tr></thead><tbody>';

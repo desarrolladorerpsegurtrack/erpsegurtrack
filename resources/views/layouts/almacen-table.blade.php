@@ -390,6 +390,16 @@
 			const paginationLinkStates = new WeakMap();
 			let activeTableSkeleton = null;
 
+			const setControlDisabled = (control, disabled) => {
+				control.disabled = disabled;
+				const instance = control.tomselect || control.tomSelect || control._tomselect;
+				if (disabled && typeof instance?.disable === 'function') {
+					instance.disable();
+				} else if (!disabled && typeof instance?.enable === 'function') {
+					instance.enable();
+				}
+			};
+
 			const setPaginationLinkLoading = (link, loading) => {
 				if (loading) {
 					if (!paginationLinkStates.has(link)) {
@@ -418,7 +428,7 @@
 
 			const setListControlsLoading = (loading) => {
 				const controls = new Set([
-					...(form ? form.querySelectorAll('input:not([type="hidden"]):not([name="q"]), select, textarea, button[type="submit"], [data-list-clear-search]') : []),
+					...(form ? form.querySelectorAll('input:not([type="hidden"]):not([name="q"]):not(.dropdown-input), select, textarea, button[type="submit"], [data-list-clear-search]') : []),
 					...(wrapper ? wrapper.querySelectorAll('[name="perPage"]') : []),
 				]);
 				controls.forEach((control) => {
@@ -426,9 +436,9 @@
 						if (!listControlDisabledStates.has(control)) {
 							listControlDisabledStates.set(control, control.disabled);
 						}
-						control.disabled = true;
+						setControlDisabled(control, true);
 					} else if (listControlDisabledStates.has(control)) {
-						control.disabled = listControlDisabledStates.get(control);
+						setControlDisabled(control, listControlDisabledStates.get(control));
 						listControlDisabledStates.delete(control);
 					}
 				});
@@ -831,7 +841,7 @@
 			const cleanupTomSelectPortals = () => {
 				try {
 					document.querySelectorAll('.ts-dropdown[data-erp-tomselect="1"]').forEach((el) => {
-						if (el && el.parentNode) {
+						if (el && el.parentNode === document.body) {
 							el.parentNode.removeChild(el);
 						}
 					});
@@ -902,7 +912,6 @@
 
 					const instance = new TomSelect(select, {
 						width: '100%',
-						allowEmptyOption: true,
 						create: false,
 						maxOptions: 100,
 						placeholder: select.getAttribute('data-placeholder') || 'Selecciona una opción',
@@ -912,13 +921,6 @@
 						openOnFocus: true,
 						plugins: { dropdown_input: {} }
 					});
-
-					// mark dropdown for cleanup and stable handling
-					try {
-						if (instance && instance.dropdown) {
-							instance.dropdown.dataset.erpTomselect = '1';
-						}
-					} catch (e) {}
 
 					if (instance && instance.wrapper) {
 						instance.wrapper.style.width = select.dataset.tomselectBaseWidth || '100%';
@@ -989,7 +991,7 @@
 				if (window.initLitepickers && typeof window.initLitepickers === 'function') {
 					window.initLitepickers(wrapper);
 				}
-				init();
+				init(false);
 			};
 
 			const fetchList = async (url) => {
@@ -1073,7 +1075,12 @@
 					}
 
 					if (field.tagName === 'SELECT') {
-						field.selectedIndex = 0;
+						const instance = field.tomselect || field.tomSelect || field._tomselect;
+						if (instance && typeof instance.clear === 'function') {
+							instance.clear(true);
+						} else {
+							field.selectedIndex = 0;
+						}
 						return;
 					}
 
@@ -1410,7 +1417,7 @@
 				resetDeleteConfirmationContent();
 			};
 
-			const init = () => {
+			const init = (initializeFilterControls = true) => {
 				form = getForm();
 				wrapper = getWrapper();
 				if (!form || !wrapper) {
@@ -1422,7 +1429,9 @@
 				if (window.initLitepickers && typeof window.initLitepickers === 'function') {
 					window.initLitepickers(document);
 				}
-				initTomSelectFilters();
+				if (initializeFilterControls) {
+					initTomSelectFilters();
+				}
 				closeLocalDropdowns();
 				searchInput = getSearchInput();
 				searchClearBtn = form.querySelector('[data-list-clear-search]');
@@ -1712,14 +1721,14 @@
 		.almacen-filter-item--tom .tom-select.ts-wrapper .ts-control,
 		.almacen-filter-item--tom .tom-select .ts-control,
 		.almacen-filter-item--tom .tom-select.plugin-dropdown_input.focus.dropdown-active .ts-control {
-			min-height: 2.45rem !important;
-			height: 2.45rem !important;
+			min-height: 1.0rem !important;
+			height: 1.5rem !important;
 			border: 0 !important;
 			box-shadow: none !important;
 			background: transparent !important;
-			padding: 0.35rem 0.75rem 0.15rem 0.75rem !important;
+			padding: 0.25rem 0.45rem !important;
 			display: flex !important;
-			align-items: flex-start !important;
+			align-items: center !important;
 			font-size: 0.8rem;
 			color: #0f172a;
 			width: 100% !important;
@@ -1736,10 +1745,12 @@
 
 		#list-filter-form .tom-select.ts-wrapper .ts-control .item,
 		.almacen-filter-item--tom .tom-select.ts-wrapper .ts-control .item {
+			flex: 1 1 auto !important;
+			min-width: 0 !important;
 			white-space: nowrap !important;
 			overflow: hidden !important;
 			text-overflow: ellipsis !important;
-			max-width: calc(100% - 1.5rem) !important;
+			max-width: 100% !important;
 		}
 
 		#list-filter-form .tom-select.ts-wrapper .ts-control .item {

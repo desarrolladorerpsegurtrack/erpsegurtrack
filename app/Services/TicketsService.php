@@ -152,7 +152,7 @@ class TicketsService
 
     /**
      * Construye el array $extraData que se pasa a la vista del ticket.
-     * Solo aplica cuando el ticket tiene pedidoReferencia y la vista es 1–6.
+     * Solo aplica cuando el ticket tiene pedidoReferencia y la vista es 1–7.
      *
      * @param  object $ticket    Fila del ticket desde la BD
      * @param  int    $vistaId   ID de la vista actual
@@ -163,7 +163,7 @@ class TicketsService
     {
         $extraData = [];
 
-        if (!in_array($vistaId, [1, 2, 3, 4, 5, 6]) || empty($ticket->pedidoReferencia)) {
+        if (!in_array($vistaId, [1, 2, 3, 4, 5, 6, 7], true) || empty($ticket->pedidoReferencia)) {
             return $extraData;
         }
 
@@ -182,9 +182,9 @@ class TicketsService
                 'cli.razonSocial',
                 'cli.nombreComercial',
                 DB::raw("COALESCE(NULLIF(TRIM(cli.razonSocial), ''), NULLIF(TRIM(c.cliente_idcliente), ''), 'Cliente sin nombre') as cliente_label"),
-                DB::raw("(select dc.direccion from direccioncliente as dc where dc.cliente_idcliente = c.cliente_idcliente order by dc.default desc, dc.iddireccionCliente desc limit 1) as cliente_direccion"),
-                DB::raw("(select ct.numero from contacto as ct where ct.cliente_idcliente = c.cliente_idcliente order by ct.default desc, ct.idcontacto desc limit 1) as cliente_telefono"),
-                DB::raw("(select ct.correo from contacto as ct where ct.cliente_idcliente = c.cliente_idcliente order by ct.default desc, ct.idcontacto desc limit 1) as cliente_correo"),
+                DB::raw("(select dc.direccion from direccioncliente as dc where dc.cliente_idcliente = c.cliente_idcliente order by dc.`default` desc, dc.iddireccionCliente desc limit 1) as cliente_direccion"),
+                DB::raw("(select ct.numero from contacto as ct where ct.cliente_idcliente = c.cliente_idcliente order by ct.`default` desc, ct.idcontacto desc limit 1) as cliente_telefono"),
+                DB::raw("(select ct.correo from contacto as ct where ct.cliente_idcliente = c.cliente_idcliente order by ct.`default` desc, ct.idcontacto desc limit 1) as cliente_correo"),
                 DB::raw("(select gc2.nombreGrupo from detallegrupocliente as dgc2 join grupocliente as gc2 on gc2.idgrupoCliente = dgc2.grupoCliente_idgrupoCliente where dgc2.cliente_idcliente = c.cliente_idcliente order by gc2.nombreGrupo limit 1) as grupo_cliente_label"),
                 'fp.detalle as formapago_label',
                 'm.detalle as moneda_label',
@@ -206,27 +206,17 @@ class TicketsService
             ->whereIn('d.cotizacion_nroCotizacion', $nros)
             ->whereRaw("LOWER(TRIM(te.nombre)) LIKE ?", ['equipo%'])
             ->select('d.*', 'a.detalle as producto', 'a.cantidadDisponible', 'te.nombre as tipo_nombre')
+            ->orderBy('d.iddetalleCotizacion')
             ->get();
 
-        // --- IMEIs disponibles por dispositivo ---
-        $deviceIds = collect($equipamiento)
-            ->pluck('almacen_idalmacen')
-            ->filter(fn($id) => is_numeric($id) && (int) $id > 0)
-            ->map(fn($id) => (int) $id)
-            ->unique()
-            ->values()
-            ->all();
-
-        $imeisByDevice = collect([]);
-        if (!empty($deviceIds)) {
-            $imeisByDevice = DB::table('elementoalmacen')
-                ->whereIn('dispositivo_iddispositivo', $deviceIds)
-                ->where('estado', 1)
-                ->orderBy('imei')
-                ->get(['dispositivo_iddispositivo', 'imei'])
-                ->groupBy('dispositivo_iddispositivo')
-                ->map(fn($rows) => $rows->pluck('imei')->values()->all());
-        }
+        $servicios = DB::table('detallecotizacion as d')
+            ->join('almacen as a', 'd.almacen_idalmacen', '=', 'a.idalmacen')
+            ->join('tipoelemento as te', 'a.tipoElemento_idtipoElemento', '=', 'te.idtipoElemento')
+            ->whereIn('d.cotizacion_nroCotizacion', $nros)
+            ->where('te.nombre', 'not like', '%EQUIP%')
+            ->select('d.*', 'a.detalle as producto', 'a.periodo as periodo', 'te.nombre as tipo_nombre')
+            ->orderBy('d.iddetalleCotizacion')
+            ->get();
 
         // --- Datos temporales: usar la BD como fuente de verdad (no sesión) ---
         $decodedTempData = [];
@@ -239,13 +229,70 @@ class TicketsService
 
         $tempData = is_array($decodedTempData) ? $decodedTempData : [];
 
+        $planesPorEquipo = $this->buildAutomaticPlanAssignments($equipamiento, $servicios);
+        $hasStoredPlanAssignments = array_key_exists('planes', $tempData);
+        $selectedAssignments = $hasStoredPlanAssignments && is_array($tempData['planes'])
+            ? $tempData['planes']
+            : $planesPorEquipo;
+        foreach ($equipamiento as $item) {
+            for ($index = 0; $index < (int) $item->cantidad; $index++) {
+                $storedPlans = $selectedAssignments[$item->iddetalleCotizacion][$index] ?? [];
+                $item->planes_seleccionados[$index] = is_array($storedPlans) ? $storedPlans : [];
+            }
+        }
+
+        $componentAssignments = $this->buildComponentAssignments($equipamiento, $servicios, $selectedAssignments);
+        $componentItems = array_merge($componentAssignments['sensors'], $componentAssignments['accessories']);
+
+        $deviceIds = collect($equipamiento)
+            ->pluck('almacen_idalmacen')
+            ->merge(collect($componentItems)->pluck('almacen_idalmacen'))
+            ->filter(fn($id) => is_numeric($id) && (int) $id > 0)
+            ->map(fn($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+        $imeisByDevice = collect([]);
+        if (!empty($deviceIds)) {
+            $imeisByDevice = DB::table('elementoalmacen')
+                ->whereIn('dispositivo_iddispositivo', $deviceIds)
+                ->whereIn('estado', [1, 2, 4])
+                ->whereNotExists(function ($query) {
+                    $query->select(DB::raw(1))
+                        ->from('dispositivocliente as dc')
+                        ->whereColumn('dc.iddispositivoCliente', 'elementoalmacen.imei')
+                        ->where('dc.estado', '1');
+                })
+                ->whereNotExists(function ($query) {
+                    $query->select(DB::raw(1))
+                        ->from('detalle_serviciodispositivo as dsd')
+                        ->join('serviciocliente as sc', 'sc.idservicioCliente', '=', 'dsd.servicioCliente_idservicioCliente')
+                        ->whereColumn('dsd.dispositivoCliente_iddispositivoCliente', 'elementoalmacen.imei')
+                        ->where('dsd.estado', 1)
+                        ->where('sc.estado', 'activo');
+                })
+                ->orderBy('imei')
+                ->get(['dispositivo_iddispositivo', 'imei'])
+                ->groupBy('dispositivo_iddispositivo')
+                ->map(fn($rows) => $rows->pluck('imei')->values()->all());
+        }
+
+        foreach ($componentItems as $index => $component) {
+            $componentItems[$index]['availableImeis'] = $imeisByDevice->get((int) $component['almacen_idalmacen'], []);
+            $componentItems[$index]['selectedImei'] = $tempData['component_imeis'][$component['detailId']][$component['unitIndex']] ?? '';
+        }
+        $componentAssignments = [
+            'sensors' => array_values(array_filter($componentItems, fn($item) => $item['category'] === 'sensor')),
+            'accessories' => array_values(array_filter($componentItems, fn($item) => $item['category'] === 'accessory')),
+        ];
+
         // Decorar equipamiento con IMEIs disponibles y selecciones temporales
         $equipamiento = collect($equipamiento)
-            ->map(function ($item) use ($imeisByDevice, $tempData) {
+            ->map(function ($item) use ($imeisByDevice, $tempData, $selectedAssignments) {
                 $item->availableImeis      = $imeisByDevice->get((int) $item->almacen_idalmacen, []);
                 $item->imeis_seleccionados = $tempData['imeis'][$item->iddetalleCotizacion] ?? [];
                 $item->placas_seleccionadas = $tempData['placas'][$item->iddetalleCotizacion] ?? [];
-                $item->planes_seleccionados = $tempData['planes'][$item->iddetalleCotizacion] ?? [];
+                $item->planes_seleccionados = $selectedAssignments[$item->iddetalleCotizacion] ?? [];
                 $item->numeros_seleccionados = $tempData['numeros'][$item->iddetalleCotizacion] ?? [];
                 return $item;
             })
@@ -275,19 +322,40 @@ class TicketsService
         $extraData['comentarioTemporal'] = $tempData['comentario'] ?? null;
         $extraData['tempData']          = $tempData;
 
-        // --- Datos específicos para vistas 3, 4, 5, 6 ---
-        if (in_array($vistaId, [3, 4, 5, 6])) {
-            $vehiculos = collect([]);
+        // --- Datos requeridos por las vistas de asignación ---
+        if (in_array($vistaId, [1, 2, 3, 4, 5, 6, 7], true)) {
+            $groupIds = [];
             if (!empty($clienteIds)) {
-                $vehiculos = DB::table('vehiculo')
+                $groupIds = DB::table('detallegrupocliente')
                     ->whereIn('cliente_idcliente', $clienteIds)
-                    ->get();
+                    ->pluck('grupoCliente_idgrupoCliente')
+                    ->filter(fn($id) => !empty($id))
+                    ->unique()
+                    ->values()
+                    ->all();
             }
+
+            $groupClientIds = empty($groupIds)
+                ? []
+                : DB::table('detallegrupocliente')
+                    ->whereIn('grupoCliente_idgrupoCliente', $groupIds)
+                    ->pluck('cliente_idcliente')
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all();
+            $vehicleClientIds = array_values(array_unique(array_merge($clienteIds, $groupClientIds)));
+            $vehiculos = empty($vehicleClientIds)
+                ? collect([])
+                : DB::table('vehiculo')
+                    ->whereIn('cliente_idcliente', $vehicleClientIds)
+                    ->get();
+            $vehiculosExistentes = $vehiculos->values();
 
             if (!empty($tempData['vehiculos']) && is_array($tempData['vehiculos'])) {
                 $existingPlacas = collect($vehiculos)
                     ->pluck('placa')
-                    ->map(fn($placa) => trim((string) $placa))
+                    ->map(fn($placa) => mb_strtoupper(trim((string) $placa)))
                     ->filter()
                     ->unique()
                     ->values()
@@ -295,7 +363,12 @@ class TicketsService
 
                 foreach ($tempData['vehiculos'] as $vehiculoTemp) {
                     $placaTemp = trim((string) ($vehiculoTemp['placa'] ?? ''));
-                    if ($placaTemp === '' || in_array($placaTemp, $existingPlacas, true)) {
+                    $placaNormalizada = mb_strtoupper($placaTemp);
+                    if ($placaTemp === '' || in_array($placaNormalizada, $existingPlacas, true)) {
+                        continue;
+                    }
+
+                    if (DB::table('vehiculo')->whereRaw('UPPER(TRIM(placa)) = ?', [$placaNormalizada])->exists()) {
                         continue;
                     }
 
@@ -309,20 +382,12 @@ class TicketsService
                         'color' => $vehiculoTemp['color'] ?? null,
                         'tracto' => $vehiculoTemp['tracto'] ?? null,
                     ]);
-                    $existingPlacas[] = $placaTemp;
+                    $existingPlacas[] = $placaNormalizada;
                 }
             }
 
             $clientes = collect([]);
             if (!empty($clienteIds)) {
-                $groupIds = DB::table('detallegrupocliente')
-                    ->whereIn('cliente_idcliente', $clienteIds)
-                    ->pluck('grupoCliente_idgrupoCliente')
-                    ->filter(fn($id) => !empty($id))
-                    ->unique()
-                    ->values()
-                    ->all();
-
                 if (!empty($groupIds)) {
                     $clientes = DB::table('cliente as c')
                         ->join('detallegrupocliente as dgc', 'c.idcliente', '=', 'dgc.cliente_idcliente')
@@ -352,23 +417,25 @@ class TicketsService
                 ->orderBy('nombre')
                 ->get();
 
-            $servicios = DB::table('detallecotizacion as d')
-                ->join('almacen as a', 'd.almacen_idalmacen', '=', 'a.idalmacen')
-                ->join('tipoelemento as te', 'a.tipoElemento_idtipoElemento', '=', 'te.idtipoElemento')
-                ->whereIn('d.cotizacion_nroCotizacion', $nros)
-                ->where('te.nombre', 'not like', '%EQUIP%')
-                ->select('d.*', 'a.detalle as producto', 'te.nombre as tipo_nombre')
-                ->get();
-
             $numerosTelefonicos = DB::table('numerotelefonico as nt')
                 ->join('detallesimcard as ds', 'nt.numeroTelefonico', '=', 'ds.numeroTelefonico_numeroTelefonico')
                 ->where('ds.estado', 0)
+                ->where('nt.estado', '2')
                 ->whereNotExists(function ($query) {
                     $query->select(DB::raw(1))
                           ->from('detnumerosdispositivo as dnd')
                           ->join('dispositivocliente as dc', 'dnd.dispositivoCliente_iddispositivoCliente', '=', 'dc.iddispositivoCliente')
                           ->whereColumn('dnd.numeroTelefonico_numeroTelefonico', 'nt.numeroTelefonico')
                           ->where('dc.estado', 1);
+                })
+                ->whereNotExists(function ($query) {
+                    $query->select(DB::raw(1))
+                        ->from('detnumerosdispositivo as dnd')
+                        ->join('detalle_serviciodispositivo as dsd', 'dsd.dispositivoCliente_iddispositivoCliente', '=', 'dnd.dispositivoCliente_iddispositivoCliente')
+                        ->join('serviciocliente as sc', 'sc.idservicioCliente', '=', 'dsd.servicioCliente_idservicioCliente')
+                        ->whereColumn('dnd.numeroTelefonico_numeroTelefonico', 'nt.numeroTelefonico')
+                        ->where('dsd.estado', 1)
+                        ->where('sc.estado', 'activo');
                 })
                 ->select('nt.numeroTelefonico')
                 ->distinct()
@@ -380,6 +447,10 @@ class TicketsService
             $extraData['clienteId']      = !empty($clienteIds) ? $clienteIds[0] : null;
             $extraData['servicios']      = $servicios;
             $extraData['numerosTelefonicos'] = $numerosTelefonicos;
+            $extraData['vehiculosExistentes'] = $vehiculosExistentes;
+            $extraData['vehiculosTemporales'] = $tempData['vehiculos'] ?? [];
+
+            $extraData['componentAssignments'] = $componentAssignments;
         }
 
         return $extraData;
@@ -391,8 +462,8 @@ class TicketsService
 
     /**
      * Persiste toda la información temporal en BD cuando la acción es 'finish'.
-     * Crea el Pedido, DetallePedido, OrdenPedidoAlmacen y ServicioCliente,
-     * y actualiza el estado de las cotizaciones referenciadas.
+     * Crea el Pedido, DetallePedido, OrdenPedidoAlmacen, ServicioCliente y
+     * sus relaciones con dispositivos, y actualiza las cotizaciones referenciadas.
      *
      * @param  object   $ticket        Fila del ticket desde la BD
      * @param  int      $ticketId      ID del ticket
@@ -567,11 +638,6 @@ class TicketsService
                     'estado'                        => '0',
                 ]);
 
-                // Marcar IMEI como consumido/inactivo
-                DB::table('elementoalmacen')
-                    ->where('imei', $imei)
-                    ->update(['estado' => 0]);
-
                 // Descontar la cantidad de stock en almacén, tanto para equipo como para sensor.
                 DB::table('almacen')
                     ->where('idalmacen', $item->almacen_idalmacen)
@@ -579,6 +645,15 @@ class TicketsService
 
                 $placa  = $placasItem[$idx] ?? null;
                 $numeroTelef = $numerosItem[$idx] ?? null;
+                $imeiState = (int) DB::table('elementoalmacen')
+                    ->where('imei', $imei)
+                    ->value('estado');
+                $assignedImeiState = $placa
+                    ? ([1 => 6, 2 => 3, 4 => 5][$imeiState] ?? $imeiState)
+                    : 0;
+                DB::table('elementoalmacen')
+                    ->where('imei', $imei)
+                    ->update(['estado' => $assignedImeiState]);
                 
                 // --- 6. Asegurar que el vehículo existe antes de crear el Dispositivo Cliente ---
                 if ($placa) {
@@ -646,6 +721,22 @@ class TicketsService
                             'numeroTelefonico_numeroTelefonico' => $numeroTelef,
                             'fechaAsignacion' => now()->format('Y-m-d H:i:s')
                         ]);
+
+                        DB::table('numerotelefonico')
+                            ->where('numeroTelefonico', $numeroTelef)
+                            ->where('estado', '!=', '0')
+                            ->update(['estado' => '3']);
+
+                        $activeSimPair = DB::table('detallesimcard')
+                            ->where('numeroTelefonico_numeroTelefonico', $numeroTelef)
+                            ->where('estado', '0')
+                            ->first();
+                        if ($activeSimPair) {
+                            DB::table('simcard')
+                                ->where('idsimCard', $activeSimPair->simCard_idsimCard)
+                                ->where('estado', '!=', '0')
+                                ->update(['estado' => '3']);
+                        }
                     }
                 }
 
@@ -666,6 +757,7 @@ class TicketsService
                             'docReferencia'     => mb_substr($idPedido, 0, 15),
                         ];
                         $serviceId = DB::table('serviciocliente')->insertGetId($serviceData);
+                        $this->createServiceDeviceDetail($serviceId, (string) $placa, (string) $imei);
                         app(CxcService::class)->crearCobroDesdeServicio(array_merge($serviceData, [
                             'idservicioCliente' => $serviceId,
                         ]));
@@ -698,6 +790,7 @@ class TicketsService
                                 'docReferencia'     => mb_substr($idPedido, 0, 15),
                             ];
                             $serviceId = DB::table('serviciocliente')->insertGetId($serviceData);
+                            $this->createServiceDeviceDetail($serviceId, (string) $placa, (string) $imei);
                             app(CxcService::class)->crearCobroDesdeServicio(array_merge($serviceData, [
                                 'idservicioCliente' => $serviceId,
                             ]));
@@ -706,6 +799,16 @@ class TicketsService
                 }
             }
         }
+
+        $planAssignments = isset($tempData['planes']) && is_array($tempData['planes'])
+            ? $tempData['planes']
+            : $this->buildAutomaticPlanAssignments($equipamiento, $servicios);
+        $componentAssignments = $this->buildComponentAssignments(
+            $equipamiento,
+            $servicios,
+            $planAssignments
+        );
+        $this->persistComponentDevices($componentAssignments, $tempData);
 
         // --- 7. Actualizar estado de ticket y receptor ---
         if (!empty($ticket->idticket)) {
@@ -742,13 +845,151 @@ class TicketsService
         }
     }
 
+    private function buildAutomaticPlanAssignments(iterable $equipamiento, iterable $servicios): array
+    {
+        $equipoSlots = [];
+        foreach ($equipamiento as $item) {
+            for ($index = 0; $index < (int) $item->cantidad; $index++) {
+                $equipoSlots[] = [(string) $item->iddetalleCotizacion, $index];
+            }
+        }
+
+        $assignments = [];
+        if ($equipoSlots === []) {
+            return $assignments;
+        }
+
+        $planUnitIndex = 0;
+        foreach ($servicios as $servicio) {
+            for ($index = 1; $index <= (int) $servicio->cantidad; $index++) {
+                [$detailId, $equipmentIndex] = $equipoSlots[$planUnitIndex % count($equipoSlots)];
+                $assignments[$detailId][$equipmentIndex][] = $servicio->iddetalleCotizacion . '_' . $index;
+                $planUnitIndex++;
+            }
+        }
+
+        return $assignments;
+    }
+
+    private function buildComponentAssignments(iterable $equipamiento, iterable $servicios, array $assignments): array
+    {
+        $componentsByCategory = ['sensors' => [], 'accessories' => []];
+        $serviceItems = collect($servicios)->keyBy(fn($service) => (string) $service->iddetalleCotizacion);
+        $seen = [];
+        $positions = [];
+
+        foreach ($equipamiento as $equipment) {
+            $equipmentId = (string) $equipment->iddetalleCotizacion;
+            foreach ($assignments[$equipmentId] ?? [] as $equipmentIndex => $assignedItems) {
+                foreach (is_array($assignedItems) ? $assignedItems : [] as $assignedId) {
+                    [$serviceId, $unitIndex] = array_pad(explode('_', (string) $assignedId, 2), 2, '');
+                    $service = $serviceItems->get($serviceId);
+                    if (!$service || !is_numeric($unitIndex)) {
+                        continue;
+                    }
+
+                    $type = mb_strtolower(trim((string) ($service->tipo_nombre ?? '')), 'UTF-8');
+                    $category = str_contains($type, 'sensor')
+                        ? 'sensor'
+                        : (str_contains($type, 'accesorio') ? 'accessory' : null);
+                    if ($category === null) {
+                        continue;
+                    }
+
+                    $componentKey = $serviceId . '_' . (int) $unitIndex;
+                    if (isset($seen[$componentKey])) {
+                        continue;
+                    }
+                    $seen[$componentKey] = true;
+
+                    $bucket = $category === 'sensor' ? 'sensors' : 'accessories';
+                    $equipmentSlot = $equipmentId . '_' . (int) $equipmentIndex;
+                    $positions[$equipmentSlot][$category] = ($positions[$equipmentSlot][$category] ?? 0) + 1;
+                    $componentsByCategory[$bucket][] = [
+                        'key' => $componentKey,
+                        'detailId' => $serviceId,
+                        'unitIndex' => (int) $unitIndex,
+                        'equipmentDetailId' => $equipmentId,
+                        'equipmentIndex' => (int) $equipmentIndex,
+                        'position' => $positions[$equipmentSlot][$category],
+                        'producto' => (string) $service->producto,
+                        'tipo_nombre' => (string) $service->tipo_nombre,
+                        'almacen_idalmacen' => (int) $service->almacen_idalmacen,
+                        'category' => $category,
+                    ];
+                }
+            }
+        }
+
+        return $componentsByCategory;
+    }
+
+    private function persistComponentDevices(array $componentAssignments, array $tempData): void
+    {
+        foreach (array_merge(
+            $componentAssignments['sensors'],
+            $componentAssignments['accessories']
+        ) as $component) {
+            $detailId = (string) $component['detailId'];
+            $unitIndex = (string) $component['unitIndex'];
+            $equipmentDetailId = (string) $component['equipmentDetailId'];
+            $equipmentIndex = (string) $component['equipmentIndex'];
+            $imei = trim((string) ($tempData['component_imeis'][$detailId][$unitIndex] ?? ''));
+            $plate = trim((string) ($tempData['placas'][$equipmentDetailId][$equipmentIndex] ?? ''));
+            $warehouseId = (int) $component['almacen_idalmacen'];
+
+            if ($imei === '' || $plate === '') {
+                continue;
+            }
+
+            if (!DB::table('vehiculo')->where('placa', $plate)->exists()) {
+                throw new \RuntimeException(
+                    "No se encontró el vehículo {$plate} para vincular el dispositivo {$imei}."
+                );
+            }
+
+            $deviceModel = DB::table('almacen as a')
+                ->leftJoin('modelo as mo', 'mo.idmodelo', '=', 'a.modelo_idmodelo')
+                ->leftJoin('marca as ma', 'ma.idmarca', '=', 'mo.marca_idmarca')
+                ->where('a.idalmacen', $warehouseId)
+                ->select('mo.nombreModelo', 'ma.nombreMarca')
+                ->first();
+
+            $brand = trim((string) ($deviceModel->nombreMarca ?? ''));
+            $model = trim((string) ($deviceModel->nombreModelo ?? ''));
+
+            DB::table('dispositivocliente')->updateOrInsert(
+                ['iddispositivoCliente' => $imei],
+                [
+                    'vehiculo_placa' => $plate,
+                    'marcaDispositivo' => $brand !== '' ? mb_substr($brand, 0, 50) : null,
+                    'modeloDispositivo' => $model !== '' ? mb_substr($model, 0, 100) : null,
+                    'fechaInstalacion' => now()->format('Y-m-d H:i:s'),
+                    'estado' => '1',
+                ]
+            );
+        }
+    }
+
+    private function createServiceDeviceDetail(int $serviceId, string $placa, string $imei): void
+    {
+        DB::table('detalle_serviciodispositivo')->insert([
+            'servicioCliente_idservicioCliente' => $serviceId,
+            'vehiculo_placa' => $placa,
+            'dispositivoCliente_iddispositivoCliente' => $imei,
+            'fecha' => now()->format('Y-m-d H:i:s'),
+            'observacion' => null,
+            'estado' => 1,
+        ]);
+    }
+
     // =========================================================================
-    // ADVANCE — GUARDAR DATOS TEMPORALES EN SESIÓN POR VISTA
+    // ADVANCE — PERSISTIR DATOS TEMPORALES EN BD POR VISTA
     // =========================================================================
 
     /**
-     * Lee los inputs del request y persiste en sesión los datos relevantes
-     * según la vista que se está avanzando (1, 2 o 3).
+     * Lee los inputs del request y persiste en la BD los datos relevantes
+     * según la vista que se está avanzando.
      *
      * @param  \Illuminate\Http\Request $request
      * @param  int                      $vistaId
@@ -764,71 +1005,67 @@ class TicketsService
         int $ticketId,
         string $currentUser
     ): array {
-        // Leer temp_data directamente desde la BD y no depender de la sesión
-        $tempData = [];
-        $ticketTemp = DB::table('ticket')->where('idticket', $ticketId)->value('temp_data');
-        if ($ticketTemp) {
-            $decodedTempData = json_decode($ticketTemp, true);
-            if (is_array($decodedTempData)) {
-                $tempData = $decodedTempData;
+        return DB::transaction(function () use ($request, $vistaId, $ticketId, $currentUser): array {
+            $ticket = DB::table('ticket')
+                ->where('idticket', $ticketId)
+                ->lockForUpdate()
+                ->first(['temp_data']);
+            if (!$ticket) {
+                throw new \RuntimeException('No se encontró el ticket para guardar los datos temporales.');
             }
-        }
 
-        if ($request->has('imeis')) {
-            $tempData['imeis'] = $request->input('imeis');
-        }
+            $decodedTempData = json_decode((string) ($ticket->temp_data ?? ''), true);
+            $tempData = is_array($decodedTempData) ? $decodedTempData : [];
 
-        if ($request->has('imeis_completados')) {
-            $completados = $request->input('imeis_completados', []);
-            // Merge into existing imeis: each key override individually so other keys are preserved
-            $existingImeis = $tempData['imeis'] ?? [];
-            foreach ($completados as $detId => $imeiList) {
-                $existingImeis[$detId] = $imeiList;
+            if ($request->has('imeis')) {
+                $tempData['imeis'] = $request->input('imeis');
             }
-            $tempData['imeis'] = $existingImeis;
-        }
 
-        if ($request->has('comentario')) {
-            $tempData['comentario'] = $request->input('comentario');
-        }
-
-        if ($request->has('placas')) {
-            $tempData['placas'] = $request->input('placas');
-        }
-
-        if ($request->has('numeros')) {
-            $tempData['numeros'] = $request->input('numeros');
-        }
-
-        if ($request->has('planes')) {
-            $tempData['planes'] = $request->input('planes');
-        }
-
-        if ($request->has('personalReceptor')) {
-            $tempData['personalReceptor'] = $request->input('personalReceptor');
-        }
-
-        if ($request->has('personalEmisor')) {
-            $tempData['personalEmisor'] = $request->input('personalEmisor');
-        }
-
-        if ($vistaId === 1) {
-            $tempData['personalEmisor'] = $currentUser;
-        }
-
-        if ($vistaId === 2) {
-            $tempData['personalReceptor'] = $currentUser;
-            if (!isset($tempData['fechaHoraRecepcion'])) {
-                $tempData['fechaHoraRecepcion'] = now()->format('Y-m-d H:i:s');
+            if ($request->has('component_imeis')) {
+                $tempData['component_imeis'] = $request->input('component_imeis');
             }
-        }
 
-        // Persistir exclusivamente en la BD (fuente de verdad)
-        DB::table('ticket')
-            ->where('idticket', $ticketId)
-            ->update(['temp_data' => json_encode($tempData, JSON_UNESCAPED_UNICODE)]);
+            if ($request->has('comentario')) {
+                $tempData['comentario'] = $request->input('comentario');
+            }
 
-        return $tempData;
+            if ($request->has('placas')) {
+                $tempData['placas'] = $request->input('placas');
+            }
+
+            if ($request->has('numeros')) {
+                $tempData['numeros'] = $request->input('numeros');
+            }
+
+            if ($request->has('planes_present') || $request->has('planes')) {
+                $tempData['planes'] = $request->input('planes', []);
+            }
+
+            if ($request->has('personalReceptor')) {
+                $tempData['personalReceptor'] = $request->input('personalReceptor');
+            }
+
+            if ($request->has('personalEmisor')) {
+                $tempData['personalEmisor'] = $request->input('personalEmisor');
+            }
+
+            if ($vistaId === 1) {
+                $tempData['personalEmisor'] = $currentUser;
+            }
+
+            if ($vistaId === 2) {
+                $tempData['personalReceptor'] = $currentUser;
+                if (!isset($tempData['fechaHoraRecepcion'])) {
+                    $tempData['fechaHoraRecepcion'] = now()->format('Y-m-d H:i:s');
+                }
+            }
+
+            DB::table('ticket')
+                ->where('idticket', $ticketId)
+                ->update(['temp_data' => json_encode($tempData, JSON_UNESCAPED_UNICODE)]);
+
+            return $tempData;
+        });
     }
 
     /**
@@ -887,22 +1124,23 @@ class TicketsService
                     ->get();
 
                 if ($reglas->isNotEmpty()) {
-                    $historialObj = (object) [
-                        'flujoregla_idflujoregla' => $historialRow?->flujoregla_idflujoregla ?? $row->historial_flujoregla_id ?? null,
-                        'resultado'               => $historialRow?->resultado ?? $row->historial_resultado ?? null,
-                        'usuario_usuario'         => $historialRow?->usuario_usuario ?? $row->historial_usuario ?? null,
-                        'vista_idvista'           => $historialRow?->vista_idvista ?? $row->vista_actual_id ?? null,
-                    ];
+                    $latestRuleHistory = DB::table('historialflujo as current_progress')
+                        ->joinSub(
+                            DB::table('historialflujo')
+                                ->select('flujoregla_idflujoregla', DB::raw('MAX(idhistorialflujo) as latest_id'))
+                                ->where('ticket_idticket', $ticketId)
+                                ->groupBy('flujoregla_idflujoregla'),
+                            'latest_progress',
+                            'current_progress.idhistorialflujo',
+                            '=',
+                            'latest_progress.latest_id'
+                        )
+                        ->where('current_progress.ticket_idticket', $ticketId)
+                        ->whereIn('current_progress.flujoregla_idflujoregla', $reglas->pluck('idflujoregla'))
+                        ->whereIn('current_progress.resultado', ['completado', 'finalizado'])
+                        ->count();
 
-                    $currentRule = $this->resolveCurrentRuleFromCollection($historialObj, $reglas);
-                    if ($currentRule) {
-                        $phaseIndex = $reglas->search(
-                            fn($rule) => (int) $rule->idflujoregla === (int) $currentRule->idflujoregla
-                        );
-                        if ($phaseIndex !== false) {
-                            $faseTexto = 'Fase: ' . ($phaseIndex + 1) . ' de ' . $reglas->count();
-                        }
-                    }
+                    $faseTexto = 'Avance: ' . $latestRuleHistory . ' de ' . $reglas->count();
                 }
             }
         }
@@ -1049,10 +1287,11 @@ class TicketsService
         $estado = mb_strtolower(trim((string) $estado));
 
         return match ($estado) {
-            'activo', 'nuevo', 'asignado'    => 'Activo',
+            'pendiente', 'nuevo', 'asignado' => 'Pendiente',
+            'activo'                         => 'Activo',
             'en proceso', 'en progreso'      => 'En proceso',
             'resuelto', 'cancelado'          => 'Resuelto',
-            default                          => 'Activo',
+            default                          => 'Pendiente',
         };
     }
 }

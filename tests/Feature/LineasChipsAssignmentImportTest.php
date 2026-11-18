@@ -299,7 +299,7 @@ class LineasChipsAssignmentImportTest extends TestCase
                 Request::create('/modulos/lineas-chips/detallesimcard', 'GET', ['plan' => '18MB'])
             );
             $assignment = $assignmentView->getData()['items']->first();
-            $this->assertSame('18MB - 18MB - 100', $assignment->plan);
+            $this->assertSame('18MB', $assignment->plan);
             $this->assertSame('plan', $assignmentView->getData()['columns'][2]['key']);
             $this->assertSame(2, $assignmentView->getData()['items']->total());
 
@@ -349,7 +349,7 @@ class LineasChipsAssignmentImportTest extends TestCase
             $priceField = $fields->firstWhere('name', 'precio');
             $currencyField = $fields->firstWhere('name', 'moneda');
             $this->assertTrue($planField['tomSelect']);
-            $this->assertSame('18MB - 18MB - 100', $planField['options'][1]);
+            $this->assertSame('18MB', $planField['options'][1]);
             $this->assertSame('number', $priceField['type']);
             $this->assertSame(['S/' => 'S/', '$' => '$', '€' => '€'], $currencyField['options']);
             $this->assertSame(['price' => '30.00', 'currency' => 'S/'], $editView->getData()['planPriceMap']['1']);
@@ -360,7 +360,7 @@ class LineasChipsAssignmentImportTest extends TestCase
                 Request::create('/modulos/lineas-chips/numeros-telefonico', 'GET')
             );
             $listedNumber = $indexView->getData()['items']->first();
-            $this->assertSame('18MB - 18MB - 100', $listedNumber->plan);
+            $this->assertSame('18MB', $listedNumber->plan);
             $this->assertSame('$ 19.75', $listedNumber->precio_numero);
             $planSearchView = app(LineasChipsController::class)->numerosTelefonicoIndex(
                 Request::create('/modulos/lineas-chips/numeros-telefonico', 'GET', ['q' => '18MB'])
@@ -374,7 +374,7 @@ class LineasChipsAssignmentImportTest extends TestCase
             $this->assertTrue($simcardPlanField['tomSelect']);
             $this->assertTrue($simcardPlanField['quickCreateNumero']);
             $this->assertTrue($simcardPriceField['quickCreateNumero']);
-            $this->assertSame('18MB - 18MB - 100', $simcardPlanField['options'][1]);
+            $this->assertSame('18MB', $simcardPlanField['options'][1]);
 
             $simcardRequest = Request::create(
                 '/modulos/lineas-chips/simcard',

@@ -47,6 +47,56 @@ class CxcPaymentBreakdownTest extends TestCase
         );
     }
 
+    public function test_quotation_pending_withholding_success_message_matches_cxc_state(): void
+    {
+        $message = new \ReflectionMethod(
+            CuentasPorCobrarController::class,
+            'quotationPendingWithholdingSuccessMessage'
+        );
+
+        $this->assertSame(
+            'Pago registrado. La autodetracción quedó pendiente para registrar su depósito.',
+            $message->invoke(null, 'Pendiente Autodetracción')
+        );
+        $this->assertSame(
+            'Pago registrado. La detracción quedó pendiente para registrar su depósito.',
+            $message->invoke(null, 'Pendiente a Detracción')
+        );
+        $this->assertSame(
+            'Pago registrado. La retención quedó pendiente para registrar su depósito.',
+            $message->invoke(null, 'Pendiente a Retención')
+        );
+    }
+
+    public function test_payment_success_message_separates_pending_withholding_from_regular_balance(): void
+    {
+        $message = new \ReflectionMethod(
+            CuentasPorCobrarController::class,
+            'paymentBreakdownMessage'
+        );
+        $controller = new CuentasPorCobrarController(
+            new CxcService(),
+            new CuentasPorCobrarService(),
+            new CotizacionService()
+        );
+
+        $this->assertSame(
+            'Efectivo aplicado: S/ 50.00. Saldo pendiente: S/ 150.00.',
+            $message->invoke($controller, [
+                'cash_applied' => 50,
+                'remaining_debt' => 150,
+            ])
+        );
+        $this->assertSame(
+            'Efectivo aplicado: S/ 880.00. Detracción pendiente: S/ 120.00.',
+            $message->invoke($controller, [
+                'cash_applied' => 880,
+                'remaining_debt' => 120,
+                'withholding_pending' => 120,
+            ])
+        );
+    }
+
     #[DataProvider('deductionCases')]
     public function test_deduction_uses_gross_threshold_and_client_type(
         float $gross,
@@ -224,7 +274,9 @@ class CxcPaymentBreakdownTest extends TestCase
             ['idmoneda' => 1, 'detalle' => 'Sol (S)', 'simbolo' => 'S/'],
             ['idmoneda' => 2, 'detalle' => 'Dólar', 'simbolo' => '$'],
         ]);
-        DB::table('entidadbancaria')->insert(['identidadBancaria' => 1]);
+        DB::table('entidadbancaria')->insert([
+            'identidadBancaria' => 1,
+        ]);
         DB::table('formapago')->insert(['idformaPago' => 1, 'detalle' => 'Contado']);
         DB::table('tipoelemento')->insert(['idtipoElemento' => 1, 'nombre' => 'EQUIPAMIENTO']);
         $warehouseId = DB::table('almacen')->insertGetId([
@@ -2812,6 +2864,7 @@ class CxcPaymentBreakdownTest extends TestCase
         $this->assertSame(['2026-12-15', '2027-01-15'], $groupedSuccessors->pluck('fechaCancelacion')->all());
         $this->assertStringContainsString('14/11/2026 a 15/12/2026', $groupedSuccessors[0]->descripcion);
         $this->assertStringContainsString('26/12/2026 a 15/01/2027', $groupedSuccessors[1]->descripcion);
+
     }
 
     public function test_5760_detraccion_rounds_to_whole_sol_and_uses_the_net_amount_of_5069(): void
@@ -2993,6 +3046,235 @@ class CxcPaymentBreakdownTest extends TestCase
     {
         $this->assertTrue(CxcService::shouldRenewAfterFullPayment('2026-10-20'));
         $this->assertFalse(CxcService::shouldRenewAfterFullPayment(null));
+    }
+
+    public function test_pending_autodetraccion_renews_with_customer_payment_date(): void
+    {
+        Schema::create('cuentasporcobrar', function (Blueprint $table): void {
+            $table->increments('idcuentasPorCobrar');
+            $table->string('cliente_idcliente');
+            $table->integer('tipoCobro_idtipoCobros');
+            $table->integer('moneda_idmoneda');
+            $table->string('docReferencia')->nullable();
+            $table->string('descripcion', 100);
+            $table->decimal('montoOriginal', 20, 2);
+            $table->decimal('montoActual', 20, 2);
+            $table->integer('canCuotas')->nullable();
+            $table->dateTime('fechaRegistro')->nullable();
+            $table->dateTime('fechaCancelacion')->nullable();
+            $table->string('estado', 50);
+        });
+        Schema::create('serviciocliente', function (Blueprint $table): void {
+            $table->increments('idservicioCliente');
+            $table->string('cliente_idcliente');
+            $table->string('estado');
+            $table->date('fechaInicio');
+            $table->date('fecheVencimiento');
+            $table->integer('moneda_idmoneda');
+            $table->integer('tipoCobro_idtipoCobros');
+            $table->decimal('monto', 10, 2);
+            $table->integer('almacen_idalmacen')->nullable();
+            $table->string('vehiculo_placa')->nullable();
+            $table->string('docReferencia')->nullable();
+        });
+        Schema::create('almacen', function (Blueprint $table): void {
+            $table->increments('idalmacen');
+            $table->string('periodo')->nullable();
+            $table->string('detalle')->nullable();
+        });
+        Schema::create('cliente', function (Blueprint $table): void {
+            $table->string('idcliente')->primary();
+            $table->string('detraccion')->nullable();
+        });
+        Schema::create('tipocobro', function (Blueprint $table): void {
+            $table->increments('idtipoCobros');
+            $table->string('recurrencia');
+            $table->integer('tiempo');
+        });
+        Schema::create('moneda', function (Blueprint $table): void {
+            $table->increments('idmoneda');
+            $table->string('detalle')->nullable();
+            $table->string('simbolo')->nullable();
+        });
+        Schema::create('formapago', function (Blueprint $table): void {
+            $table->increments('idformaPago');
+            $table->string('detalle');
+            $table->integer('tiempo')->nullable();
+        });
+        Schema::create('entidadbancaria', function (Blueprint $table): void {
+            $table->increments('identidadBancaria');
+            $table->string('descripcion')->nullable();
+        });
+        Schema::create('bancos', function (Blueprint $table): void {
+            $table->increments('idbancos');
+            $table->integer('entidadBancaria_identidadBancaria');
+            $table->dateTime('fechaRegistro');
+            $table->string('informacion', 100);
+            $table->decimal('monto', 20, 2);
+            $table->string('tipoMov', 1);
+        });
+        Schema::create('detallecxc', function (Blueprint $table): void {
+            $table->increments('iddetalleCXC');
+            $table->integer('formaPago_idformaPago');
+            $table->integer('cuentasPorCobrar_idcuentasPorCobrar');
+            $table->integer('moneda_idmoneda');
+            $table->string('descripcion', 100)->nullable();
+            $table->dateTime('fechaPagoProgramada')->nullable();
+            $table->dateTime('fechaPago')->nullable();
+            $table->integer('nCuota')->nullable();
+            $table->integer('bancos_idbancos')->nullable();
+            $table->string('estado', 1)->nullable();
+        });
+
+        DB::table('cliente')->insert(['idcliente' => 'CLIENTE-1', 'detraccion' => '0']);
+        DB::table('tipocobro')->insert(['idtipoCobros' => 5, 'recurrencia' => 'M', 'tiempo' => 1]);
+        DB::table('moneda')->insert(['idmoneda' => 1, 'detalle' => 'Sol', 'simbolo' => 'S/']);
+        DB::table('formapago')->insert(['idformaPago' => 1, 'detalle' => 'Contado']);
+        DB::table('entidadbancaria')->insert([
+            'identidadBancaria' => 1,
+            'descripcion' => 'Banco de la Nación',
+        ]);
+        DB::table('serviciocliente')->insert([
+            'idservicioCliente' => 53,
+            'cliente_idcliente' => 'CLIENTE-1',
+            'estado' => 'activo',
+            'fechaInicio' => '2026-09-14',
+            'fecheVencimiento' => '2026-10-14',
+            'moneda_idmoneda' => 1,
+            'tipoCobro_idtipoCobros' => 5,
+            'monto' => 1000,
+            'vehiculo_placa' => 'PLACA-53',
+        ]);
+        $cxcId = DB::table('cuentasporcobrar')->insertGetId([
+            'cliente_idcliente' => 'CLIENTE-1',
+            'tipoCobro_idtipoCobros' => 5,
+            'moneda_idmoneda' => 1,
+            'descripcion' => 'CXC 14/09/2026 a 14/10/2026 SC-53',
+            'montoOriginal' => 1000,
+            'montoActual' => 1000,
+            'fechaCancelacion' => '2026-10-14',
+            'estado' => '1',
+        ]);
+
+        $result = (new CxcService())->procesarPagoCancelacion($cxcId, [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'moneda_idmoneda' => 1,
+            'montoPago' => 880,
+            'monto_deduccion_pendiente' => 120,
+            'withholding_decision' => 'full_pending',
+            'modo_pago' => 'total',
+            'fechaPago' => '2026-11-02',
+            'servicio_ids' => [53],
+            'renewal_cxc_id' => $cxcId,
+        ]);
+
+        $this->assertSame('Pendiente Autodetracción', $result['estado']);
+        $this->assertNotNull($result['siguienteCxcId']);
+        $this->assertSame(
+            '2026-11-02',
+            Carbon::parse(DB::table('cuentasporcobrar')
+                ->where('idcuentasPorCobrar', $result['siguienteCxcId'])
+                ->value('fechaRegistro'))->toDateString()
+        );
+        $existingSuccessorDescription = (string) DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $result['siguienteCxcId'])
+            ->value('descripcion');
+        DB::table('cuentasporcobrar')
+            ->where('idcuentasPorCobrar', $result['siguienteCxcId'])
+            ->update([
+                'descripcion' => preg_replace('/^REN-CXC-\d+/', 'REN-CXC-999', $existingSuccessorDescription),
+                'montoOriginal' => 1015,
+                'montoActual' => 1015,
+            ]);
+        $completionResult = (new CxcService())->registrarDetraccionPendiente(
+            $cxcId,
+            null,
+            [53],
+            'Confirmación posterior de autodetracción',
+            '2026-11-06',
+            true
+        );
+        $this->assertSame('Autodetracción', $completionResult['tipoDeduccion']);
+        $this->assertSame((int) $result['siguienteCxcId'], $completionResult['siguienteCxcId']);
+        $this->assertSame(
+            1015.0,
+            (float) DB::table('cuentasporcobrar')
+                ->where('idcuentasPorCobrar', $result['siguienteCxcId'])
+                ->value('montoOriginal')
+        );
+        $this->assertSame(
+            2,
+            DB::table('cuentasporcobrar')
+                ->where('cliente_idcliente', 'CLIENTE-1')
+                ->where('descripcion', 'like', '%SC-53%')
+                ->count()
+        );
+        $this->assertSame(
+            '2026-11-02',
+            Carbon::parse(DB::table('cuentasporcobrar')
+                ->where('idcuentasPorCobrar', $result['siguienteCxcId'])
+                ->value('fechaRegistro'))->toDateString()
+        );
+        $this->assertSame(
+            '2026-11-06',
+            Carbon::parse(DB::table('detallecxc')
+                ->where('cuentasPorCobrar_idcuentasPorCobrar', $cxcId)
+                ->where('descripcion', 'like', 'Detracción aplicada%')
+                ->value('fechaPago'))->toDateString()
+        );
+
+        DB::table('serviciocliente')->insert([
+            'idservicioCliente' => 54,
+            'cliente_idcliente' => 'CLIENTE-1',
+            'estado' => 'activo',
+            'fechaInicio' => '2026-09-14',
+            'fecheVencimiento' => '2026-10-14',
+            'moneda_idmoneda' => 1,
+            'tipoCobro_idtipoCobros' => 5,
+            'monto' => 1000,
+            'vehiculo_placa' => 'PLACA-54',
+        ]);
+        $otherWithholdingCxcId = DB::table('cuentasporcobrar')->insertGetId([
+            'cliente_idcliente' => 'CLIENTE-1',
+            'tipoCobro_idtipoCobros' => 5,
+            'moneda_idmoneda' => 1,
+            'descripcion' => 'CXC 14/09/2026 a 14/10/2026 SC-54',
+            'montoOriginal' => 1000,
+            'montoActual' => 1000,
+            'fechaCancelacion' => '2026-10-14',
+            'estado' => '1',
+        ]);
+        $existingSuccessorId = DB::table('cuentasporcobrar')->insertGetId([
+            'cliente_idcliente' => 'CLIENTE-1',
+            'tipoCobro_idtipoCobros' => 5,
+            'moneda_idmoneda' => 1,
+            'descripcion' => 'REN-CXC-' . $otherWithholdingCxcId . ' P 14/10/2026 a 14/11/2026 SC-54',
+            'montoOriginal' => 1000,
+            'montoActual' => 1000,
+            'fechaCancelacion' => '2026-11-14',
+            'estado' => '1',
+        ]);
+        $otherWithholdingResult = (new CxcService())->procesarPagoCancelacion($otherWithholdingCxcId, [
+            'entidadBancaria_identidadBancaria' => 1,
+            'formaPago_idformaPago' => 1,
+            'moneda_idmoneda' => 1,
+            'montoPago' => 880,
+            'monto_deduccion_pendiente' => 120,
+            'withholding_decision' => 'pending',
+            'modo_pago' => 'total',
+            'fechaPago' => '2026-11-02',
+            'servicio_ids' => [54],
+            'renewal_cxc_id' => $otherWithholdingCxcId,
+        ]);
+        $this->assertSame('Pendiente a Detracción', $otherWithholdingResult['estado']);
+        $this->assertSame($existingSuccessorId, $otherWithholdingResult['siguienteCxcId']);
+        $this->assertSame(
+            '2026-11-02',
+            Carbon::parse(DB::table('cuentasporcobrar')
+                ->where('idcuentasPorCobrar', $existingSuccessorId)
+                ->value('fechaRegistro'))->toDateString()
+        );
     }
 
     #[DataProvider('automaticRenewalCases')]

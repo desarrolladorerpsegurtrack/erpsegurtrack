@@ -17,7 +17,6 @@ use Illuminate\Support\Carbon; @endphp
     @endphp
     <title>{{ $fileTitleClient . $fileTitleIdentifier }}</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap');
 
         @page {
             margin-top: 50pt;
@@ -31,7 +30,7 @@ use Illuminate\Support\Carbon; @endphp
         }
 
         body {
-            font-family: 'Roboto', sans-serif;
+            font-family:  Arial, sans-serif;
             color: #000000;
             font-size: 11px;
             line-height: 1.4;
@@ -574,7 +573,7 @@ use Illuminate\Support\Carbon; @endphp
                         @if(trim((string) ($quoteItem->comentario ?? '')) !== '')
                             <tr>
                                 <td colspan="{{ $showDiscountColumn ? 6 : 5 }}"
-                                    style="border-left: 1px solid #c0c0c0; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #c0c0c0; padding: 3px 10px 4px; color: #6b7280; font-size: 8px; font-style: italic; text-align: left; word-wrap: break-word; overflow-wrap: break-word;">
+                                    style="border-left: 1px solid #c0c0c0; border-right: 1px solid #c0c0c0; border-bottom: 1px solid #c0c0c0; padding: 3px 10px 4px; color: #636363; font-size: 8px; font-style: italic; text-align: left; word-wrap: break-word; overflow-wrap: break-word;">
                                     Comentario: {{ $quoteItem->comentario }}
                                 </td>
                             </tr>

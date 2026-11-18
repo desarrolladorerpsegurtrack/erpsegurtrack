@@ -555,6 +555,30 @@ class BancosMovementStatsTest extends TestCase
         $this->assertSame('S/ 1,000.00', $grouped->first()->monto_display);
     }
 
+    public function test_group_summary_uses_first_active_income_information_not_balance_credit(): void
+    {
+        $controller = new \App\Http\Controllers\BancosController(new BancosService());
+        $groupBankMovements = new \ReflectionMethod($controller, 'groupBankMovements');
+        $rows = collect([
+            (object) ['idbancos' => 1, 'cliente_ruc' => '20555454672', 'cliente_nombre' => 'Cliente', 'moneda_simbolo' => 'S/', 'fechaRegistro' => '2026-11-18 12:51:00', 'informacion' => 'Pago SERVICIO NOVIEMBRE', 'monto' => 648.69, 'tipoMov' => 'I', 'entidad_bancaria_nombre' => 'Banco'],
+            (object) ['idbancos' => 2, 'cliente_ruc' => '20555454672', 'cliente_nombre' => 'Cliente', 'moneda_simbolo' => 'S/', 'fechaRegistro' => '2026-11-18 12:51:00', 'informacion' => 'Saldo a favor del cliente por sobrepago de noviembre 2026', 'monto' => 87.31, 'tipoMov' => 'A', 'entidad_bancaria_nombre' => 'Banco'],
+            (object) ['idbancos' => 3, 'cliente_ruc' => '20555454672', 'cliente_nombre' => 'Cliente', 'moneda_simbolo' => 'S/', 'fechaRegistro' => '2026-11-18 12:51:00', 'informacion' => 'Aplicación saldo a favor a CXC #55', 'monto' => 40.00, 'tipoMov' => 'C', 'entidad_bancaria_nombre' => 'Banco'],
+        ]);
+
+        $grouped = $groupBankMovements->invoke($controller, $rows);
+
+        $this->assertCount(1, $grouped);
+        $this->assertSame(1, $grouped->first()->idbancos);
+        $this->assertSame('Pago SERVICIO NOVIEMBRE', $grouped->first()->informacion);
+        $this->assertSame('S/ 648.69', $grouped->first()->monto_display);
+        $recordsById = collect($grouped->first()->relation_groups[0]['records'])->keyBy('idbancos');
+        $this->assertSame('Saldo a favor del cliente por sobrepago de noviembre 2026', $recordsById[2]['informacion']);
+        $this->assertSame('S/ 87.31', $recordsById[2]['monto_display']);
+        $this->assertSame('Saldo a favor generado', $recordsById[2]['tipoMov_display']);
+        $this->assertSame('S/ 40.00', $recordsById[3]['monto_display']);
+        $this->assertSame('Saldo a favor aplicado', $recordsById[3]['tipoMov_display']);
+    }
+
     public function test_autodetraccion_is_not_added_to_group_total(): void
     {
         $controller = new \App\Http\Controllers\BancosController(new BancosService());

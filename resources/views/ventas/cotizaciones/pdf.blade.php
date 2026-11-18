@@ -16,25 +16,13 @@
     @endphp
     <title>{{ $fileTitleClient.$fileTitleIdentifier }}</title>
     <style>
-        @php
-            $fontDir = str_replace('\\', '/', storage_path('fonts'));
-            $fontDir = str_replace(' ', '%20', $fontDir);
-        @endphp
-
-        @font-face {
-            font-family: 'Roboto';
-            font-style: normal;
-            font-weight: 400;
-            src: url("file:///{{ $fontDir }}/Roboto-Regular.ttf") format("truetype");
-        }
-
         @page {
             margin: 50px 30px 30px 30px;
             /* El tercer valor (60px) le da espacio al footer abajo */
         }
 
         body {
-            font-family: 'Roboto', sans-serif;
+            font-family: Arial, sans-serif;
             color: #000000;
             font-size: 11px;
             line-height: 1.4;
@@ -584,7 +572,7 @@
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td rowspan="{{ $showGlobalDiscountRow ? 4 : 3 }}" colspan="{{ $showDiscountColumn ? 4 : 3 }}" style="border: {{ trim((string) ($quote->comentario ?? '')) !== '' ? '1px solid #c0c0c0' : 'none' }}; background: transparent; padding: 3px 10px 4px; height: auto; color: #7d8491; font-size: 9px; font-style: italic; text-align: left; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word;">
+                            <td rowspan="{{ $showGlobalDiscountRow ? 4 : 3 }}" colspan="{{ $showDiscountColumn ? 4 : 3 }}" style="border: {{ trim((string) ($quote->comentario ?? '')) !== '' ? '1px solid #c0c0c0' : 'none' }}; background: transparent; padding: 3px 10px 4px; height: auto; color: #636363; font-size: 9px; font-style: italic; text-align: left; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word;">
                                 @if(trim((string) ($quote->comentario ?? '')) !== '')
                                     Comentario: {{ $quote->comentario }}
                                 @endif

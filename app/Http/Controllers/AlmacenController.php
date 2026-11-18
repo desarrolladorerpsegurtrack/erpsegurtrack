@@ -37,7 +37,7 @@ class AlmacenController extends Controller
             $row->cantidad_disponible_label = $this->formatDecimal($row->cantidadDisponible ?? null);
             $row->precio_label = $this->formatMoneyWithSymbol($row->precio ?? null, $row->moneda_simbolo ?? '');
             $row->renovacion_label = is_null($row->renovacion) ? '-' : (string) $row->renovacion;
-            $row->usa_red_movil_label = $this->formatYesNo($row->usaRedMovil ?? null);
+            $row->usa_red_movil_label = $this->formatAccesorio($row->usaRedMovil ?? null);
             return $row;
         });
 
@@ -65,6 +65,7 @@ class AlmacenController extends Controller
                 ['key' => 'modelo_label', 'label' => 'Modelo', 'type' => 'text', 'wrap' => true],
                 ['key' => 'marca_label', 'label' => 'Marca', 'type' => 'text', 'wrap' => true],
                 ['key' => 'tecnologia_label', 'label' => 'Tecnología', 'type' => 'text', 'wrap' => true],
+                ['key' => 'usa_red_movil_label', 'label' => 'Accesorio', 'type' => 'text'],
                 ['key' => 'unidad_medida_label', 'label' => 'Unidad medida', 'type' => 'text', 'wrap' => true],
                 ['key' => 'cantidad', 'label' => 'Cantidad', 'type' => 'text'],
                 ['key' => 'precio_label', 'label' => 'Precio', 'type' => 'text'],
@@ -145,30 +146,34 @@ class AlmacenController extends Controller
             ['key' => 'modelo_label', 'label' => 'Modelo'],
             ['key' => 'marca_label', 'label' => 'Marca'],
             ['key' => 'tecnologia_label', 'label' => 'Tecnología'],
+            ['key' => 'usa_red_movil_label', 'label' => 'Accesorio'],
             ['key' => 'unidad_medida_label', 'label' => 'Unidad medida'],
             ['key' => 'cantidad', 'label' => 'Cantidad'],
             ['key' => 'precio', 'label' => 'Precio'],
         ];
 
         $filename = 'almacen_export_' . now()->format('Ymd_His') . '.' . $format;
+        $hasSelectedIds = !empty($selectedIds) && is_array($selectedIds);
 
-        if (!empty($selectedIds) && is_array($selectedIds)) {
-            $rows = $this->baseQuery($request)->whereIn('a.idalmacen', array_values($selectedIds))->orderBy('a.idalmacen')->get();
-
-            if ($format === 'xlsx') {
-                return $this->exportXlsxResponse($rows, $columns, $filename);
-            }
-
-            return $this->exportPdfResponse($rows, $columns, 'Listado de Almacen', $filename);
+        $query = $this->baseQuery($request);
+        if ($hasSelectedIds) {
+            $query->whereIn('a.idalmacen', array_values($selectedIds))->orderBy('a.idalmacen');
+        } else {
+            $query->orderByDesc('a.idalmacen');
         }
 
-        $rows = $this->baseQuery($request)->orderByDesc('a.idalmacen')->get();
+        $rows = $query->get()->map(function ($row) {
+            $row->usa_red_movil_label = $this->formatYesNo($row->usaRedMovil ?? null);
+            return $row;
+        });
 
         if ($format === 'xlsx') {
             return $this->exportXlsxResponse($rows, $columns, $filename);
         }
 
-        return $this->exportPdfResponse($rows, $columns, 'Listado de Almacén', $filename);
+        $title = $hasSelectedIds ? 'Listado de Almacen' : 'Listado de Almacén';
+
+        return $this->exportPdfResponse($rows, $columns, $title, $filename);
     }
 
     public function create(): View
@@ -876,6 +881,15 @@ class AlmacenController extends Controller
         return match ($normalized) {
             's', '1', 'si', 'sí', 'y', 'yes' => 'Sí',
             'n', '0', 'no' => 'No',
+            default => '-',
+        };
+    }
+
+    private function formatAccesorio(mixed $usaRedMovil): string
+    {
+        return match ($this->formatYesNo($usaRedMovil)) {
+            'Sí' => 'No',
+            'No' => 'Sí',
             default => '-',
         };
     }

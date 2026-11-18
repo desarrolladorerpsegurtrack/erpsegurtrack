@@ -90,6 +90,50 @@ class BancosControllerCreditNoteStorageTest extends TestCase
         $this->assertSame(0, $view->getData()['items']->total());
     }
 
+    public function test_credit_note_statistics_follow_search_and_filters(): void
+    {
+        DB::table('moneda')->where('idmoneda', 1)->update(['simbolo' => 'S/']);
+        DB::table('moneda')->insert(['idmoneda' => 2, 'simbolo' => '$']);
+        $this->createCreditNote();
+        DB::table('nota_credito')->insert([
+            [
+                'cliente_idcliente' => 'CLIENT-1',
+                'moneda_idmoneda' => 1,
+                'docReferencia' => 'F00-222',
+                'monto' => 25,
+                'descripcion' => 'Otra nota en soles',
+                'fechaEmision' => now(),
+                'estado' => 'E',
+            ],
+            [
+                'cliente_idcliente' => 'CLIENT-1',
+                'moneda_idmoneda' => 2,
+                'docReferencia' => 'F00-333',
+                'monto' => 50,
+                'descripcion' => 'Nota en dólares',
+                'fechaEmision' => now(),
+                'estado' => 'E',
+            ],
+        ]);
+        $controller = new BancosController(new BancosService());
+
+        $searchView = $controller->notaCreditos(
+            Request::create('/modulos/finanzas/nota-creditos?q=F00-111')
+        );
+        $this->assertSame(1, $searchView->getData()['items']->total());
+        $this->assertSame('S/ 100.00', $searchView->getData()['stats'][0]['value']);
+        $this->assertSame('$ 0.00', $searchView->getData()['stats'][1]['value']);
+
+        $filterView = $controller->notaCreditos(Request::create(
+            '/modulos/finanzas/nota-creditos',
+            'GET',
+            ['moneda' => '$', 'montoDesde' => 50, 'montoHasta' => 50]
+        ));
+        $this->assertSame(1, $filterView->getData()['items']->total());
+        $this->assertSame('S/ 0.00', $filterView->getData()['stats'][0]['value']);
+        $this->assertSame('$ 50.00', $filterView->getData()['stats'][1]['value']);
+    }
+
     public function test_credit_note_can_be_edited_when_it_has_no_applications(): void
     {
         $id = $this->createCreditNote();

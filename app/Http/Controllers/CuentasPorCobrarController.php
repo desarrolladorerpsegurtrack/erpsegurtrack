@@ -10,6 +10,7 @@ use App\Services\CxcService;
 use App\Support\ResourceLock;
 use App\Support\ServicePeriod;
 use Illuminate\Database\QueryException;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -69,6 +70,7 @@ class CuentasPorCobrarController extends Controller
         $quoteService = trim((string) $request->query('quote_service', ''));
         $quoteDate = trim((string) $request->query('quote_date', ''));
         $quoteStatus = trim((string) $request->query('quote_status', 'all'));
+        $quotationDataLoaded = $activeTab !== 'cotizaciones' || $request->ajax();
         $quoteValidityOptions = DB::table('vigenciaoferta')
             ->select('idvigenciaOferta', 'detalle')
             ->orderBy('detalle')
@@ -92,16 +94,25 @@ class CuentasPorCobrarController extends Controller
             ['label' => 'Cotizaciones con pago', 'value' => 0],
         ];
 
-        if ($activeTab === 'cotizaciones') {
-            $this->syncApprovedSpReceivables();
+        if ($activeTab === 'cotizaciones' && $quotationDataLoaded) {
+            $filterByServiceType = in_array($quoteService, ['EQUIPAMIENTO', 'PLANES', 'SERVICIOS TÉCNICOS'], true);
             $cotizacionesQuery = DB::table('cotizacion as c')
                 ->leftJoin('cliente as cli', 'cli.idcliente', '=', 'c.cliente_idcliente')
                 ->leftJoin('vigenciaoferta as v', 'v.idvigenciaOferta', '=', 'c.vigenciaOferta_idvigenciaOferta')
                 ->leftJoin('formapago as fp', 'fp.idformaPago', '=', 'c.formaPago_idformaPago')
-                ->leftJoinSub($this->quotationServiceTypeQuery(), 'cotizacion_tipo', 'cotizacion_tipo.cotizacion_nroCotizacion', '=', 'c.nroCotizacion')
                 ->leftJoin('moneda as m', function ($join) {
                     $join->on('m.idmoneda', '=', 'c.moneda_idmoneda')->where('m.idmoneda', '!=', 4);
-                })
+                });
+            if ($filterByServiceType) {
+                $cotizacionesQuery->leftJoinSub(
+                    $this->quotationServiceTypeQuery(),
+                    'cotizacion_tipo',
+                    'cotizacion_tipo.cotizacion_nroCotizacion',
+                    '=',
+                    'c.nroCotizacion'
+                );
+            }
+            $cotizacionesQuery
                 ->select([
                     'c.nroCotizacion',
                     'c.batch_id',
@@ -119,15 +130,30 @@ class CuentasPorCobrarController extends Controller
                     'fp.detalle as forma_pago_detalle',
                     'fp.tiempo as forma_pago_tiempo',
                     'm.detalle as moneda_detalle',
-                    DB::raw("COALESCE(cotizacion_tipo.servicio, 'EQUIPAMIENTO') as servicio"),
                 ]);
+            if ($filterByServiceType) {
+                $cotizacionesQuery->addSelect(DB::raw("COALESCE(cotizacion_tipo.servicio, 'EQUIPAMIENTO') as servicio"));
+            } else {
+                $cotizacionesQuery->addSelect(DB::raw("'EQUIPAMIENTO' as servicio"));
+            }
 
-            $quoteStatsQuery = clone $cotizacionesQuery;
+            $quoteStatsQuery = DB::table('cotizacion as c');
+            if ($quoteClient !== '') {
+                $quoteStatsQuery->leftJoin('cliente as cli', 'cli.idcliente', '=', 'c.cliente_idcliente');
+            }
+            if (in_array($quoteService, ['EQUIPAMIENTO', 'PLANES', 'SERVICIOS TÉCNICOS'], true)) {
+                $quoteStatsQuery->leftJoinSub(
+                    $this->quotationServiceTypeQuery(),
+                    'cotizacion_tipo',
+                    'cotizacion_tipo.cotizacion_nroCotizacion',
+                    '=',
+                    'c.nroCotizacion'
+                );
+            }
             $this->applyQuotationFilters($quoteStatsQuery, $request, 'all');
             $this->applyQuotationFilters($cotizacionesQuery, $request, 'all');
 
-            $quoteStatsRow = (clone $quoteStatsQuery)
-                ->select([])
+            $quoteStatsRow = $quoteStatsQuery
                 ->selectRaw('COUNT(*) as total, SUM(CASE WHEN c.estado = ? THEN 1 ELSE 0 END) as pendientes, SUM(CASE WHEN c.estado = ? THEN 1 ELSE 0 END) as con_pago', ['1', '2'])
                 ->first();
             $groupCountsQuery = clone $cotizacionesQuery;
@@ -138,6 +164,29 @@ class CuentasPorCobrarController extends Controller
                 ->orderBy('c.nroCotizacion')
                 ->paginate($this->resolvePerPage($request), ['*'], 'quotes_page')
                 ->withQueryString();
+            $approvedSpQuoteIds = $cotizacionesPendientes->getCollection()
+                ->filter(fn($row): bool => (string) ($row->estado ?? '') === CotizacionService::STATE_APROBADO_SP)
+                ->pluck('nroCotizacion')
+                ->map(fn($quoteId): string => (string) $quoteId)
+                ->all();
+            $this->syncApprovedSpReceivables($approvedSpQuoteIds);
+
+            $pageQuoteIds = $cotizacionesPendientes->getCollection()
+                ->pluck('nroCotizacion')
+                ->map(fn($quoteId): string => (string) $quoteId)
+                ->all();
+            if (!$filterByServiceType && $pageQuoteIds !== []) {
+                $serviceTypesByQuote = $this->quotationServiceTypeQuery()
+                    ->whereIn('dc.cotizacion_nroCotizacion', $pageQuoteIds)
+                    ->get()
+                    ->keyBy('cotizacion_nroCotizacion');
+                $cotizacionesPendientes->getCollection()->transform(function ($row) use ($serviceTypesByQuote): mixed {
+                    $row->servicio = $serviceTypesByQuote->get((string) $row->nroCotizacion)->servicio
+                        ?? 'EQUIPAMIENTO';
+
+                    return $row;
+                });
+            }
 
             $pageBatchIds = $cotizacionesPendientes->getCollection()
                 ->pluck('batch_id')
@@ -497,6 +546,7 @@ class CuentasPorCobrarController extends Controller
             'title' => 'Módulo Cuentas por Cobrar',
             'singularTitle' => 'Cuenta por Cobrar',
             'activeTab' => $activeTab,
+            'quotationDataLoaded' => $quotationDataLoaded,
             'items' => new LengthAwarePaginator(
                 [],
                 0,
@@ -541,28 +591,23 @@ class CuentasPorCobrarController extends Controller
         ]);
     }
 
-    private function syncApprovedSpReceivables(): void
+    private function syncApprovedSpReceivables(array $quoteIds): void
     {
-        DB::table('cotizacion')
-            ->where('estado', '1')
-            ->orderBy('nroCotizacion')
-            ->select(['nroCotizacion'])
-            ->chunk(250, function ($quotes): void {
-                $quoteIds = $quotes->pluck('nroCotizacion')
-                    ->map(fn($quoteId): string => (string) $quoteId)
-                    ->all();
-                $markers = array_map(static fn(string $quoteId): string => 'COTIZACION:' . $quoteId, $quoteIds);
-                $existingMarkers = DB::table('cuentasporcobrar')
-                    ->whereIn('descripcion', $markers)
-                    ->pluck('descripcion')
-                    ->flip();
+        if ($quoteIds === []) {
+            return;
+        }
 
-                foreach ($quoteIds as $quoteId) {
-                    if (!$existingMarkers->has('COTIZACION:' . $quoteId)) {
-                        $this->cxcService->ensureQuotationReceivable($quoteId);
-                    }
-                }
-            });
+        $markers = array_map(static fn(string $quoteId): string => 'COTIZACION:' . $quoteId, $quoteIds);
+        $existingMarkers = DB::table('cuentasporcobrar')
+            ->whereIn('descripcion', $markers)
+            ->pluck('descripcion')
+            ->flip();
+
+        foreach ($quoteIds as $quoteId) {
+            if (!$existingMarkers->has('COTIZACION:' . $quoteId)) {
+                $this->cxcService->ensureQuotationReceivable($quoteId);
+            }
+        }
     }
 
     protected function serviceGroupPriority(array $group): int
@@ -1869,7 +1914,7 @@ class CuentasPorCobrarController extends Controller
                     'cxc_id' => $cxcId,
                     'paid' => $isPaid,
                     'withholding_pending' => $isWithholdingPending,
-                    'withholding_type' => $quotationUsesRetention ? 'retención' : 'detracción',
+                    'withholding_state' => (string) ($updatedCxc->estado ?? ''),
                     'installment_number' => $installmentNumber,
                     'is_credit_continuation' => $isCreditContinuation,
                 ];
@@ -1889,12 +1934,21 @@ class CuentasPorCobrarController extends Controller
         );
 
         return $respond(true, $result['withholding_pending']
-            ? 'Pago registrado. La ' . $result['withholding_type'] . ' quedó pendiente para registrar su depósito.'
+            ? self::quotationPendingWithholdingSuccessMessage($result['withholding_state'])
             : (!empty($result['is_credit_continuation']) && !empty($result['installment_number'])
                 ? 'Pago registrado correctamente. Se pagó la cuota ' . $result['installment_number'] . ' de la cotización ' . $id . '.'
                 : ($result['paid']
                     ? 'Cotización aprobada correctamente.'
                     : 'Pago registrado.')));
+    }
+
+    private static function quotationPendingWithholdingSuccessMessage(string $cxcState): string
+    {
+        $withholdingType = $cxcState === 'Pendiente Autodetracción'
+            ? 'autodetracción'
+            : ($cxcState === 'Pendiente a Retención' ? 'retención' : 'detracción');
+
+        return 'Pago registrado. La ' . $withholdingType . ' quedó pendiente para registrar su depósito.';
     }
 
     private static function quotationWithholdingBreakdown(
@@ -2453,8 +2507,7 @@ class CuentasPorCobrarController extends Controller
             ? 'No se encontraron servicios activos para dar de baja.'
             : ($modo === 'ahora'
                 ? "{$processed} {$serviceLabel} " . ($processed === 1 ? 'dado' : 'dados') . ' de baja correctamente.'
-                : "Baja programada para {$processed} {$serviceLabel} al finalizar el periodo.");
-
+                : "Baja programada para {$processed} {$serviceLabel} al finalizar el mes.");
         if ($request->wantsJson() || $request->ajax()) {
             return response()->json(['success' => true, 'message' => $msg]);
         }
@@ -2569,6 +2622,28 @@ class CuentasPorCobrarController extends Controller
             $cxc->monto_cancelado_simbolo = $this->currencySymbol($cxc->payment_currency_symbol);
             $cxc->mostrar_monto_cancelado = $cxc->monto_cancelado > 0;
         }
+        $paymentDate = $cxc->fechaPago
+            ? Carbon::parse($cxc->fechaPago)->toDateString()
+            : null;
+        $cxc->monto_nota_credito_aplicado = 0.0;
+        if ($cxc->fechaPago && Schema::hasTable('nota_credito_aplicacion')) {
+            $cxc->monto_nota_credito_aplicado = round((float) DB::table('nota_credito_aplicacion')
+                ->whereIn('cuentasPorCobrar_idcuentasPorCobrar', $requestedCxcIds)
+                ->whereDate('fechaAplicacion', $paymentDate)
+                ->where('estado', '1')
+                ->sum('monto'), 2);
+        }
+        $cxc->monto_saldo_favor_aplicado = 0.0;
+        if ($cxc->fechaPago) {
+            $cxc->monto_saldo_favor_aplicado = round((float) DB::table('detallecxc as credit_detail')
+                ->join('bancos as credit_bank', 'credit_bank.idbancos', '=', 'credit_detail.bancos_idbancos')
+                ->whereIn('credit_detail.cuentasPorCobrar_idcuentasPorCobrar', $requestedCxcIds)
+                ->whereDate('credit_detail.fechaPago', $paymentDate)
+                ->where('credit_detail.estado', '1')
+                ->where('credit_detail.descripcion', 'Aplicación saldo a favor')
+                ->where('credit_bank.tipoMov', 'C')
+                ->sum('credit_bank.monto'), 2);
+        }
         if (
             empty($cxc->comprobante_archivo)
             && str_starts_with((string) $cxc->cxc_descripcion, 'COTIZACION:')
@@ -2667,8 +2742,10 @@ class CuentasPorCobrarController extends Controller
         }
         $cxc->detalle_descripcion = $paymentDescription;
         $cxc->fechaFin = $cxc->fechaCancelacion;
+        /** @var FilesystemAdapter $publicDisk */
+        $publicDisk = Storage::disk('public');
         $cxc->comprobante_url = $cxc->comprobante_archivo
-            ? Storage::disk('public')->url($cxc->comprobante_archivo)
+            ? $publicDisk->url($cxc->comprobante_archivo)
             : null;
         $withholdingInformation = mb_strtolower((string) ($withholding->informacion ?? ''), 'UTF-8');
         $cxc->withholding_applies = $withholding !== null;
@@ -2691,7 +2768,7 @@ class CuentasPorCobrarController extends Controller
             : '';
         $cxc->withholding_comment = $withholdingComment;
         $cxc->withholding_comprobante_url = $withholdingEvidence
-            ? Storage::disk('public')->url($withholdingEvidence)
+            ? $publicDisk->url($withholdingEvidence)
             : null;
 
         return response()->json(['success' => true, 'data' => $cxc]);
@@ -3138,7 +3215,10 @@ class CuentasPorCobrarController extends Controller
                         $validated['fechaPago'] ?? null,
                         true
                     );
-                $message = 'Comprobante registrado. La ' . $result['tipoDeduccion'] . ' quedó pagada y la cuenta fue cancelada.';
+                $deductionLabel = $result['tipoDeduccion'] === 'Autodetracción'
+                    ? 'AutoDetracción'
+                    : $result['tipoDeduccion'];
+                $message = 'Comprobante registrado. La ' . $deductionLabel . ' quedó pagada y la cuenta fue cancelada.';
 
                 if ($request->wantsJson() || $request->ajax()) {
                     return response()->json(['success' => true, 'message' => $message, 'result' => $result]);
@@ -3595,7 +3675,7 @@ class CuentasPorCobrarController extends Controller
     {
         $validated = $request->validate([
             'motivo' => ['required', 'string', 'max:255'],
-            'cxc_ids' => ['sometimes', 'array', 'min:1', 'max:50'],
+            'cxc_ids' => ['sometimes', 'array', 'min:1', 'max:500'],
             'cxc_ids.*' => ['integer', 'distinct', 'exists:cuentasporcobrar,idcuentasPorCobrar'],
             'servicio_id' => ['sometimes', 'integer', 'exists:serviciocliente,idservicioCliente'],
         ]);
@@ -4568,6 +4648,7 @@ class CuentasPorCobrarController extends Controller
         $format = fn(mixed $amount): string => $symbol . ' ' . number_format((float) $amount, 2, '.', ',');
         $parts = [];
         $cashHeldForWithholding = round(max(0, (float) ($breakdown['cash_held_for_withholding'] ?? 0)), 2);
+        $withholdingPending = round(max(0, (float) ($breakdown['withholding_pending'] ?? 0)), 2);
 
         if ((float) ($breakdown['deduction'] ?? 0) > 0) {
             $label = !empty($breakdown['retencion']) ? 'Retención (3%) aplicada' : 'Detracción (12%) aplicada';
@@ -4592,6 +4673,10 @@ class CuentasPorCobrarController extends Controller
             $label = !empty($breakdown['retencion']) ? 'Autoretención pendiente' : 'Autodetracción pendiente';
             $parts[] = $label . ': ' . $format($cashHeldForWithholding);
             $remainingDebt = round(max(0, $remainingDebt - $cashHeldForWithholding), 2);
+        } elseif ($withholdingPending > 0) {
+            $label = !empty($breakdown['retencion']) ? 'Retención pendiente' : 'Detracción pendiente';
+            $parts[] = $label . ': ' . $format($withholdingPending);
+            $remainingDebt = round(max(0, $remainingDebt - $withholdingPending), 2);
         }
         if ($remainingDebt > 0) {
             $parts[] = 'Saldo pendiente: ' . $format($remainingDebt);
